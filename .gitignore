@@ -1,0 +1,54 @@
+# --- Entorno y secretos (nunca se versionan) ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Documentos que nunca se versionan: manuales, planos, exportes SAP ---
+*.pdf
+*.dwg
+*.dxf
+*.tif
+*.tiff
+*.xls
+*.xlsx
+*.mdb
+
+# --- Pesos de modelos ---
+*.gguf
+*.safetensors
+*.pt
+*.pth
+*.onnx
+*.ckpt
+
+# --- Datasets y dumps de base de datos ---
+data/
+datasets/
+*.parquet
+*.csv
+*.jsonl
+*.dump
+*.bak
+*.sql.gz
+*.sqlite
+*.sqlite3
+*.db
+
+# --- Editores y sistema operativo ---
+.idea/
+.vscode/
+.DS_Store
