@@ -6,9 +6,17 @@ Barbosa de PAPELSA. Este repositorio contiene el backend (Python + FastAPI).
 El contrato del proyecto —reglas arquitectónicas, stack y decisiones cerradas—
 vive en [`CLAUDE.md`](CLAUDE.md). La documentación técnica está en [`docs/`](docs/).
 
-> Estado actual: fundación técnica (Bloque 0). Existen la API de health check,
-> la configuración validada, los puertos con adaptadores *fake* y la cadena de
-> calidad/CI. Todavía no hay RAG, LLM, base de datos ni interfaz.
+> Estado actual: identidad y permisos (Bloque 1). Sobre la fundación técnica
+> del Bloque 0 existen ya la verificación real del JWT de Materiales, el modelo
+> de autorización propio de ELSA con migraciones versionadas, la API
+> administrativa mínima y el control de abuso. Todavía no hay RAG, LLM,
+> documentos, Centro de Control ni interfaz.
+
+**Materiales = identidad. ELSA = autorización.** El Asistente de Materiales
+sigue siendo la única fuente de identidad (los usuarios inician sesión una sola
+vez, allí); ELSA verifica ese JWT y decide, con su propio modelo, qué puede
+consultar cada persona. Ver [ADR 0005](docs/adr/0005-verificacion-real-del-jwt-de-materiales.md)
+y [ADR 0006](docs/adr/0006-modelo-minimo-de-autorizacion.md).
 
 ## Requisitos
 
@@ -40,10 +48,40 @@ curl http://127.0.0.1:8000/api/v1/health/live
 # {"status":"ok"}
 
 curl http://127.0.0.1:8000/api/v1/health/ready
-# estado por dependencia; hoy todas reportan "not_configured"
+# estado por dependencia
+```
+
+Con la configuración por defecto (`ELSA_AUTH_PROVIDER=fake`,
+`ELSA_PERMISSIONS_BACKEND=memory`) el servidor arranca sin ningún servicio
+externo, con identidades y permisos en memoria. Ambos adaptadores *fake* solo
+se permiten en DEV: en TEST la aplicación se niega a arrancar con ellos.
+
+```bash
+# Tokens de prueba del adaptador fake: fake-token-engineer, fake-token-admin
+ELSA_DEV_TOKEN=fake-token-engineer
+
+curl -H "Authorization: Bearer $ELSA_DEV_TOKEN" \
+     http://127.0.0.1:8000/api/v1/me
+# 403: la identidad es válida, pero ELSA todavía no la conoce (default deny)
 ```
 
 En DEV la documentación interactiva queda en `http://127.0.0.1:8000/docs`.
+
+## Endpoints
+
+| Endpoint | Requiere |
+|---|---|
+| `GET /api/v1/health/live` · `/ready` | — |
+| `GET /api/v1/me` | Identidad válida y cuenta activa en ELSA |
+| `GET /api/v1/access/{dominio}` | Permiso sobre el dominio |
+| `GET /api/v1/access/{dominio}/{equipo}` | Permiso sobre ese equipo |
+| `POST /api/v1/admin/bootstrap` | JWT válido + `X-Bootstrap-Token` |
+| `/api/v1/admin/users/...` · `/api/v1/admin/audit` | Ser administrador de ELSA |
+
+Las rutas `/access/...` son sondas de autorización: no recuperan conocimiento,
+existen para poder verificar la cadena de confianza y desaparecerán cuando
+lleguen los endpoints reales. La API administrativa es el mínimo para probar
+el modelo; **no** es el Centro de Control.
 
 Si falta una variable obligatoria, el arranque falla con un mensaje que nombra
 la variable afectada: es el comportamiento esperado, no un bug.
@@ -56,6 +94,10 @@ uv run ruff check .        # lint
 uv run ruff format --check .
 uv run mypy                # tipos
 ```
+
+Los tests de migraciones y del repositorio de permisos necesitan una base
+PostgreSQL y se omiten si no la hay; ver
+[`docs/development.md`](docs/development.md).
 
 Hooks de pre-commit (formato, lint y escaneo de secretos con gitleaks):
 
@@ -81,10 +123,11 @@ src/elsa/
   main.py          # factory de la aplicación FastAPI
   config.py        # configuración tipada por variables de entorno
   logging.py       # logging JSON + request-id
-  api/             # capa HTTP: rutas v1 y formato de error estándar
-  core/            # lógica de dominio (hoy: modelo de salud)
+  api/             # capa HTTP: cadena de confianza, rutas v1 y errores
+  core/            # lógica de dominio (salud y decisión de autorización)
+  container.py     # composición: qué adaptador implementa cada puerto
   ports/           # interfaces (Protocol) de dependencias externas
-  adapters/        # implementaciones; hoy solo fakes deterministas
+  adapters/        # implementaciones reales y fakes deterministas
 supabase/migrations/  # migraciones SQL (autoridad única del esquema)
 tests/                # pytest
 docs/                 # documentación y ADRs
