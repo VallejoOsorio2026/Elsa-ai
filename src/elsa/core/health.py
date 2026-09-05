@@ -5,8 +5,9 @@ cuando el LLM está fuera de servicio"): cada dependencia reporta su estado
 por separado y el estado global distingue *degradado* (dependencias no
 críticas ausentes o caídas) de *caído* (una dependencia crítica caída).
 
-En este bloque ningún adaptador real existe, así que todas las dependencias
-se declaran ``not_configured`` y el sistema se reporta como degradado.
+Quién reporta qué lo decide el *composition root*
+(:meth:`elsa.container.Container.health_reports`); aquí solo viven los tipos
+y la regla de agregación.
 """
 
 from dataclasses import dataclass
@@ -52,30 +53,3 @@ def aggregate(reports: tuple[DependencyReport, ...]) -> SystemStatus:
     if any(report.status is not DependencyStatus.OK for report in reports):
         return SystemStatus.DEGRADED
     return SystemStatus.OK
-
-
-def current_dependency_reports() -> tuple[DependencyReport, ...]:
-    """Estado actual de las dependencias declaradas de ELSA.
-
-    Cuando existan adaptadores reales, este módulo consultará cada puerto
-    configurado en lugar de esta declaración estática.
-    """
-    detail = "no adapter configured yet (planned for a later block)"
-    critical_by_dependency = {
-        "database": True,
-        "auth": True,
-        "llm": False,
-        "embeddings": False,
-        "ocr": False,
-        "reranker": False,
-        "materials": False,
-    }
-    return tuple(
-        DependencyReport(
-            name=name,
-            status=DependencyStatus.NOT_CONFIGURED,
-            critical=critical,
-            detail=detail,
-        )
-        for name, critical in critical_by_dependency.items()
-    )
