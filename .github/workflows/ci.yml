@@ -8,6 +8,24 @@ jobs:
   quality:
     name: Lint, types and tests
     runs-on: ubuntu-latest
+
+    # PostgreSQL efímero para los tests de migraciones y del repositorio de
+    # permisos. Nunca se usa el Supabase real en CI.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: elsa
+          POSTGRES_PASSWORD: elsa
+          POSTGRES_DB: elsa_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U elsa"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - uses: actions/checkout@v4
 
@@ -29,6 +47,8 @@ jobs:
         run: uv run mypy
 
       - name: Tests
+        env:
+          ELSA_TEST_DATABASE_URL: postgresql://elsa:elsa@127.0.0.1:5432/elsa_test
         run: uv run pytest
 
   secret-scan:
