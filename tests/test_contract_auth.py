@@ -2,8 +2,13 @@
 
 import pytest
 
-from elsa.adapters.fake_auth import FakeAuthAdapter
-from elsa.ports.auth import AuthenticatedUser, AuthPort, InvalidTokenError
+from elsa.adapters.fake_auth import ENGINEER_ID, FakeAuthAdapter
+from elsa.ports.auth import (
+    AuthenticatedUser,
+    AuthPort,
+    IdentityProviderUnavailableError,
+    InvalidTokenError,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -21,7 +26,7 @@ async def test_valid_token_yields_identity(port: AuthPort) -> None:
     user = await port.verify_token("fake-token-engineer")
 
     assert isinstance(user, AuthenticatedUser)
-    assert user.id == "fake-user-0001"
+    assert user.id == ENGINEER_ID
     assert user.claims["role"] == "engineer"
 
 
@@ -35,3 +40,11 @@ async def test_verification_is_deterministic(port: AuthPort) -> None:
 async def test_unknown_token_raises_invalid_token(port: AuthPort) -> None:
     with pytest.raises(InvalidTokenError):
         await port.verify_token("forged-token")
+
+
+async def test_provider_failure_is_not_an_invalid_token() -> None:
+    """Un fallo técnico nunca se confunde con credenciales inválidas."""
+    port: AuthPort = FakeAuthAdapter(unavailable=True)
+
+    with pytest.raises(IdentityProviderUnavailableError):
+        await port.verify_token("fake-token-engineer")
