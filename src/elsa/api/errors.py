@@ -62,6 +62,30 @@ class ErrorResponse(BaseModel):
     error: ErrorBody
 
 
+class ApiError(Exception):
+    """Error de la API con código estable y cabeceras propias.
+
+    Existe para que las capas de autenticación y autorización puedan
+    distinguir causas (``invalid_token``, ``account_disabled``,
+    ``insufficient_permissions``, ``identity_provider_unavailable``) sin
+    salirse del formato de error estándar.
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        message: str,
+        *,
+        code: str | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.message = message
+        self.code = code
+        self.headers = headers
+
+
 def error_response(
     request: Request,
     status_code: int,
@@ -69,6 +93,7 @@ def error_response(
     *,
     code: str | None = None,
     details: list[ErrorDetail] | None = None,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     """Construye una respuesta de error en el formato estándar."""
     request_id = get_request_id(request)
@@ -80,16 +105,28 @@ def error_response(
             details=details,
         )
     )
-    headers = {REQUEST_ID_HEADER: request_id} if request_id else None
+    response_headers = dict(headers or {})
+    if request_id:
+        response_headers[REQUEST_ID_HEADER] = request_id
     return JSONResponse(
         status_code=status_code,
         content=body.model_dump(exclude_none=True),
-        headers=headers,
+        headers=response_headers or None,
     )
 
 
 def register_error_handlers(app: FastAPI) -> None:
     """Registra los manejadores que imponen el formato estándar."""
+
+    @app.exception_handler(ApiError)
+    async def handle_api_error(request: Request, exc: ApiError) -> JSONResponse:
+        return error_response(
+            request,
+            exc.status_code,
+            exc.message,
+            code=exc.code,
+            headers=exc.headers,
+        )
 
     @app.exception_handler(StarletteHTTPException)
     async def handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
