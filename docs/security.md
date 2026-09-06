@@ -72,6 +72,11 @@ base: no hay nada que ejecutar en el camino.
   almacenamiento se deriva del SHA-256 del contenido, así que un nombre
   hostil no llega al sistema de archivos.
 
+El diagnóstico estructural del parser SAP son **solo números por etapa**
+(fragmentos vistos, renglones construidos, candidatos, registros importados).
+Nunca incluye texto original, códigos, descripciones ni ubicaciones, de modo
+que puede pegarse en un informe sin revelar información de planta.
+
 Los avisos del parser se persisten en `imports.stats` como **códigos y
 conteos** (`{"formula_not_evaluated": 3}`), nunca como mensajes con contenido
 del archivo. Un revisor ve que hubo fórmulas sin evaluar sin que se revele

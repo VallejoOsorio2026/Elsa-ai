@@ -86,6 +86,9 @@ Conteos, hashes y metadatos estructurales:
 - número de materiales y de equipos hijos;
 - resumen de la reconciliación por clasificación;
 - avisos, por origen y código, con su número de ocurrencias;
+- diagnóstico estructural del parser SAP (conteos por etapa), tanto si el
+  archivo se procesó como si no: es lo que permite saber **dónde** se detuvo
+  sin ver su contenido;
 - errores y ambigüedades;
 - el veredicto (`passed` / `failed`).
 

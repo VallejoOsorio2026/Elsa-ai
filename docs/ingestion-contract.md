@@ -81,13 +81,21 @@ número inventado. La coherencia se impone además como restricción de la base
 Se extraen como **dato versionado**, no como lógica compilada: si Ingeniería
 cambia la escala, cambia el archivo, no el backend.
 
-Se admiten las dos disposiciones que la plantilla puede tener, porque elegir
-solo una hacía que la otra se perdiera **en silencio**:
+**Cada dimensión se lee por separado.** Primero se delimita su bloque —qué
+filas y qué columnas le pertenecen— y después se recorre solo ese bloque, con
+su propia columna de escala. Leer la hoja como un único recorrido lineal era
+el origen de las pérdidas: el rótulo de una tabla cambiaba el estado con el
+que se leían las demás.
 
-- **Apiladas**: cada tabla precedida de su rótulo, recorriendo de arriba
-  abajo.
+Se admiten las dos disposiciones que la plantilla puede tener:
+
+- **Apiladas**: cada tabla precedida de su rótulo; su bloque llega hasta que
+  se anuncie la siguiente dimensión.
 - **Una al lado de otra**: una misma fila anuncia varias dimensiones en
-  columnas distintas y cada una gobierna su franja.
+  columnas distintas y cada una gobierna su franja de columnas.
+
+Las tres **no necesitan la misma geometría**: una puede tener una columna
+auxiliar y otra no.
 
 Las dimensiones se reconocen por un vocabulario amplio —«Severidad»,
 «Gravedad», «Ocurrencia», «Frecuencia», «Probabilidad», «Detección», sus
@@ -100,6 +108,15 @@ primer entero entre 1 y 10 de la fila. La diferencia importa: las tablas de
 ocurrencia suelen anteponer una tasa o un porcentaje, y ese primer número no
 es la escala.
 
+Esa columna se busca **solo entre las filas que no traen ningún valor de
+escala**, es decir entre las de rótulos. Buscarla en cualquier fila hacía que
+una descripción como «Rango muy bajo» o «Nivel medio» se tomara por un rótulo
+de columna y se llevara por delante la fila de datos entera.
+
+El parser importa **todas las filas válidas que encuentre**. El número de
+niveles no es una regla suya: un archivo con tres tablas de diez niveles da
+treinta criterios porque los tiene, no porque el parser espere treinta.
+
 Avisos propios de la hoja:
 
 | Código | Significado |
@@ -107,6 +124,7 @@ Avisos propios de la hoja:
 | `sod_dimension_unknown` | Filas anteriores a cualquier rótulo de dimensión |
 | `sod_dimension_without_criteria` | La dimensión se anuncia pero no se pudo leer ningún valor |
 | `sod_dimension_missing` | La hoja no produjo criterios para las tres dimensiones |
+| `sod_rows_not_imported` | Filas del bloque con números que no dieron criterio |
 
 Una dimensión anunciada que no produce criterios **avisa**. Quedarse callado
 ahí era el defecto: la dimensión desaparecía sin que nadie lo notara.
@@ -152,6 +170,30 @@ documento se interpreta como líneas. Un parser que exigiera `<table>` no vería
 absolutamente nada en la segunda forma, que es la que producen las
 exportaciones de lista.
 
+Un renglón **no es un fragmento HTML**. SAP reparte un solo registro en
+varios `<nobr>` con iconos intercalados:
+
+```html
+<nobr>&nbsp;&nbsp;</nobr><img title="Material"><nobr>MAT-0001</nobr>
+<nobr>&nbsp;&nbsp;Descripción</nobr><nobr>&nbsp;&nbsp;2</nobr><nobr>&nbsp;&nbsp;UN</nobr><br>
+```
+
+El parser modela primero **fragmentos** (texto o icono) y después los reúne
+en un renglón lógico hasta la frontera. Tratar `</nobr>` como fin de renglón
+parte cada registro en tantos trozos como columnas tenga, y ninguno se
+reconoce.
+
+- La frontera de renglón es **`<br>`**. Un export que no use `<br>` en
+  absoluto se agrupa por `</nobr>`, que en ese caso sí delimita el renglón.
+  La decisión se toma al final, con el documento ya leído.
+- `&nbsp;` se convierte en espacio normal, porque cumple exactamente su
+  función en estos exports.
+- La **indentación se mide sobre el texto crudo**, antes de colapsar nada: es
+  la única evidencia de nivel jerárquico cuando no hay columna de nivel.
+- Los campos salen de los fragmentos: cada fragmento aporta uno, o varios si
+  trae separación de columnas. Así se leen igual un renglón monolítico y uno
+  repartido.
+
 En la ruta de líneas:
 
 - La fila de rótulos se distingue de una línea de metadatos por **cuántos de
@@ -175,9 +217,33 @@ En la ruta de líneas:
   evidencia estructural: en una lista de BOM solo los materiales llevan
   cantidad y unidad.
 - La **jerarquía** sale de una columna de nivel si existe, y si no del
-  sangrado. Cada renglón guarda de qué objeto cuelga.
+  sangrado. Cada renglón guarda de qué objeto cuelga. Si el padre no puede
+  identificarse, el renglón **se conserva igual** y se avisa: no se descarta
+  un material válido por no poder probar su relación, ni se le inventa una.
 - Lo que no se reconoce **se cuenta y se avisa** (`unrecognised_lines`,
-  `incomplete_material_lines`); no se rellena por conjetura.
+  `incomplete_material_lines`, `contradictory_type_icons`,
+  `unresolved_hierarchy`); no se rellena por conjetura.
+
+### Diagnóstico estructural
+
+El parser devuelve conteos por etapa, y la excepción los lleva también cuando
+falla:
+
+| Contador | Etapa |
+|---|---|
+| `nobr_fragments_seen` | Fragmentos leídos |
+| `br_boundaries_seen` | Fronteras de renglón |
+| `logical_lines_built` | Renglones reunidos |
+| `html_tables_seen` | Tablas HTML, si las hubiera |
+| `metadata_labels_detected` | Rótulos de cabecera reconocidos |
+| `icon_material_signals` / `icon_equipment_signals` | Tipos declarados por iconos |
+| `candidate_records` | Renglones con algo interpretable |
+| `parsed_material_records` / `parsed_equipment_records` | Registros importados |
+| `unresolved_records` | Renglones que no se pudieron interpretar |
+
+Son **solo números**. Existen para poder diagnosticar en qué etapa se detuvo
+el parseo de un archivo que no puede compartirse, sin ver una sola línea de
+su contenido.
 
 El archivo se trata como **dato, nunca como página**. No se renderiza en un
 navegador, no se ejecuta JavaScript, no se interpreta CSS y no se descarga
