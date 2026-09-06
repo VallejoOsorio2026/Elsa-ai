@@ -25,7 +25,40 @@ htmlcov/
 *.tiff
 *.xls
 *.xlsx
+*.xlsm
 *.mdb
+
+# Exportes HTML de SAP (IH06, IW13, listas de materiales). Son información
+# interna de planta: se importan desde una ruta local privada y jamás entran
+# aquí. Los fixtures de la suite son cadenas dentro del código, no archivos.
+*.htm
+*.mht
+*.mhtml
+
+# Los patrones de .gitignore distinguen mayúsculas y los exportes de SAP
+# llegan a menudo con la extensión en mayúscula (`TAMPELLA_BOM.HTM`). Cada
+# variante hay que declararla; omitirlas dejaría pasar el archivo real.
+*.HTM
+*.MHT
+*.XLS
+*.XLSX
+*.XLSM
+*.PDF
+*.DWG
+*.DXF
+
+# --- Almacenamiento privado de artefactos (Bloque 2) ---
+# Originales importados y derivados (imágenes de plano). La ruta es
+# configurable (ELSA_ARTIFACT_STORAGE_ROOT) y debería vivir FUERA del
+# repositorio; estas entradas cubren el caso de que alguien la apunte dentro.
+.artifacts/
+artifacts/
+private/
+
+# Reportes de la prueba de aceptación privada: contienen conteos y hashes de
+# datos reales y nunca se versionan.
+acceptance/
+reports/
 
 # --- Pesos de modelos ---
 *.gguf

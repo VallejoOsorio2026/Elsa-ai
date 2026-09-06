@@ -30,10 +30,49 @@ que no puedan añadirse al repositorio:
 - pesos de modelos (`*.gguf`, `*.safetensors`, `*.pt`, `*.pth`, `*.onnx`, `*.ckpt`)
 - datasets (`data/`, `datasets/`, `*.parquet`, `*.csv`, `*.jsonl`)
 - dumps de base de datos (`*.dump`, `*.bak`, `*.sql.gz`, `*.sqlite`, `*.db`)
+- exportes HTML de SAP (`*.htm`, `*.mht`, `*.mhtml`) y libros con macros (`*.xlsm`)
+- el almacenamiento privado de artefactos (`.artifacts/`, `artifacts/`, `private/`)
+- los reportes de la prueba de aceptación privada (`acceptance/`, `reports/`)
+
+Los patrones de `.gitignore` **distinguen mayúsculas** y los exportes de SAP
+llegan a menudo con la extensión en mayúscula (`TAMPELLA_BOM.HTM`), así que
+cada variante se declara explícitamente. Omitirlas dejaría pasar el archivo
+real, que es justo el caso que importa.
+
+Los fixtures de la suite se **generan por código** (`tests/fixtures_xlsx.py`,
+`tests/fixtures_sources.py`) en vez de versionarse como binarios: un archivo
+generado no puede contener por accidente un dato técnico real de planta.
 
 `check-added-large-files` (pre-commit) añade una barrera adicional de 500 KB
 por archivo. Si un archivo legítimo cae en estos patrones, la excepción se
 discute y se documenta; no se elimina el patrón.
+
+## Fuentes técnicas de entrada
+
+Un archivo subido es **contenido no confiable**. Los parsers viven en
+`src/elsa/ingestion/`, separados de FastAPI, y no abren sockets ni tocan la
+base: no hay nada que ejecutar en el camino.
+
+- **No se ejecutan fórmulas.** El libro se abre con `data_only=False`, así
+  que una fórmula llega como texto y se trata como valor no interpretable.
+  El NPR del AMEF se recalcula siempre en el backend como `S × O × D`.
+- **No se siguen enlaces ni se descarga ningún recurso** que el archivo
+  mencione. El libro se abre con `keep_links=False`; el HTM se analiza con
+  `html.parser` de la biblioteca estándar, que no tiene motor de scripts ni
+  cliente HTTP.
+- **El HTM nunca se renderiza en un navegador.** `<script>` y `<style>` se
+  descartan al leerlos y su presencia se reporta como aviso.
+- **No se cree la extensión.** Un `.xlsm` renombrado se rechaza por contener
+  `xl/vbaProject.bin`; un archivo que no es OpenXML se rechaza por su firma.
+- **Se acotan tamaño, expansión y número de entradas** antes de leer una sola
+  celda, para que una bomba de descompresión no llegue al parser.
+- **Rutas internas peligrosas se rechazan**: absolutas, con `..` o con
+  separadores del sistema.
+- **El nombre del archivo nunca es un identificador.** La clave de
+  almacenamiento se deriva del SHA-256 del contenido, así que un nombre
+  hostil no llega al sistema de archivos.
+
+Detalle completo en `docs/ingestion-contract.md`.
 
 ## Logs
 
@@ -126,6 +165,21 @@ vacía (`ELSA_BOOTSTRAP_ADMIN_TOKEN=`, la línea que trae `.env.example`) o con
 solo espacios significa siempre *deshabilitado*: nunca un token válido vacío
 que una cabecera ausente pudiera igualar. El endpoint rechaza además toda
 cabecera `X-Bootstrap-Token` vacía, con independencia de la configuración.
+
+## Validaciones y auditoría de conocimiento
+
+`elsa.reviews` es *append-only*: un trigger prohíbe `UPDATE` y `DELETE`
+incluso para la credencial de servicio. Revertir una validación **añade** un
+registro que apunta a la anterior; nada se borra. Rechazar y revertir exigen
+motivo, y la regla vive también como restricción de la base
+(`ck_review_reason_required`): la capa HTTP puede equivocarse, la base no.
+
+Deshabilitar a un Revisor Técnico retira su capacidad en la petición
+siguiente y **conserva todo su historial**: borrarlo dejaría aprobaciones sin
+responsable.
+
+Los `details` de la auditoría llevan identificadores y conteos, **nunca**
+contenido técnico ni el comentario del revisor, que puede describir la pieza.
 
 ## Auditoría
 

@@ -32,6 +32,19 @@ FORBIDDEN_PATHS = [
     # Estado local efímero del CLI de Supabase.
     "supabase/.temp/cli-latest",
     "supabase/.temp/project-ref",
+    # Bloque 2: fuentes técnicas reales y todo lo que se deriva de ellas.
+    "BOM Tampella.xlsx",
+    "libro-con-macros.xlsm",
+    "TAMPELLA_BOM.HTM",
+    "BOM TAMPELLA.XLSX",
+    "PLANO.DWG",
+    "export-sap.htm",
+    "export-sap.mhtml",
+    ".artifacts/engineering_bom_xlsx/ab/abcdef",
+    "artifacts/drawing_image/cd/cdef01",
+    "private/original.bin",
+    "acceptance/reporte-real.json",
+    "reports/reconciliacion.json",
 ]
 
 ALLOWED_PATHS = [
@@ -40,6 +53,11 @@ ALLOWED_PATHS = [
     # Las migraciones son la única autoridad del esquema (ADR 0001): ignorar
     # `supabase/.temp/` no puede arrastrar consigo `supabase/migrations/`.
     "supabase/migrations/20260905020000_create_elsa_authorization_model.sql",
+    "supabase/migrations/20260906010000_create_technical_knowledge_model.sql",
+    # Los fixtures de la suite son código, no archivos binarios: tienen que
+    # poder versionarse.
+    "tests/fixtures_xlsx.py",
+    "tests/fixtures_sources.py",
 ]
 
 

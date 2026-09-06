@@ -56,6 +56,8 @@ Reglas de dependencia entre capas:
 |---|---|---|
 | `auth` | `AuthPort.verify_token` | Verificación del JWT emitido por el Supabase de Materiales |
 | `materials_identity` | `MaterialsIdentityPort.get_own_profile` | Perfil vigente del usuario en Materiales (tabla `perfiles`) |
+| `knowledge` | `KnowledgeRepositoryPort` |
+| `artifact_storage` | `ArtifactStoragePort` |
 | `permissions` | `PermissionsRepositoryPort` | Modelo de autorización de ELSA (Supabase ELSA) |
 | `abuse` | `AbuseGuardPort.acquire` / `release` | Control de abuso por usuario |
 | `llm` | `LLMPort.complete` | Modelo de lenguaje local / autohospedado |
@@ -208,6 +210,79 @@ y/o una base local, y TEST es el que usa el proyecto remoto. La configuración
 impone esa separación: los adaptadores `fake` y el almacén de permisos en
 memoria solo son válidos en DEV. La documentación interactiva (`/docs`) solo se expone
 en DEV. CORS se declara explícitamente por ambiente, sin comodines.
+
+## Conocimiento técnico (Bloque 2)
+
+ELSA guarda conocimiento técnico de **Activos Técnicos**. El modelo es
+genérico: Tampella es la primera fila, no una clase. El alcance de
+autorización de un activo es `(domain, code)`, exactamente el par
+`(dominio, equipo)` del Bloque 1, así que autorizar un activo no necesita un
+segundo modelo de permisos.
+
+### Dos fuentes que no se mezclan
+
+```text
+XLSX aprobado por Ingeniería          HTM exportado de SAP
+  «cómo DEBÍA quedar el BOM»            «cómo SE VE SAP hoy»
+            │                                   │
+            ▼                                   ▼
+   versión de Ingeniería  ────────►  snapshot histórico
+      (publicable)          compara      (nunca publicable)
+            │                                   │
+            └───────────────┬───────────────────┘
+                            ▼
+                     RECONCILIACIÓN
+              conserva AMBOS valores, no corrige
+                            ▼
+                     REVISIÓN HUMANA
+```
+
+Una diferencia entre las dos fuentes es evidencia de una **desviación**, no
+prueba de cuál valor es correcto. Ninguna se corrige automáticamente.
+**ELSA no escribe en SAP**: no inicia sesión, no ejecuta transacciones y no
+envía cambios. Solo importa archivos exportados.
+
+### Identidad del componente
+
+`elsa.components` contiene un UUID interno permanente, el activo y el
+subsistema. Nada más. Código SAP, nombre, plano y referencia son **atributos
+o alias**, no identidad: todos cambian y ninguno puede partir la historia de
+una pieza al cambiar. Un componente **sin código SAP es válido**.
+
+El UUID interno no se muestra al usuario normal. Ver ADR 0007.
+
+### Ciclo de vida de una versión
+
+```text
+RECEIVED → PROCESSING → PENDING_VALIDATION → APPROVED → PUBLISHED
+                              │                            │
+                              ▼                            ▼
+                          REJECTED                    SUPERSEDED
+```
+
+`received` y `processing` pertenecen a la importación; una versión solo
+existe si el parser terminó. Publicar es **atómico** y un índice parcial
+hace imposible que un activo tenga dos versiones vigentes. La versión
+anterior no se borra: queda `superseded` y sigue consultable.
+
+### Capas nuevas
+
+| Capa | Ubicación | Responsabilidad |
+|---|---|---|
+| Ingesta | `src/elsa/ingestion/` | Parsers puros, sin FastAPI ni base de datos |
+| Dominio | `src/elsa/core/` | Emparejamiento, versionado, reconciliación, reglas de revisión |
+| Servicios | `src/elsa/services/` | Orquestan puertos: en qué orden ocurre todo y qué pasa si falla un paso |
+| Puertos | `src/elsa/ports/` | `knowledge`, `artifact_storage` |
+
+Los bytes de los archivos originales viven detrás del puerto
+`artifact_storage`, **nunca en PostgreSQL ni en Git**
+(ver `docs/private-storage.md`).
+
+### Revisor Técnico
+
+Capacidad separada de la de administrador, con el mismo alcance
+(dominio + equipo opcional) que los permisos de lectura. Revisar exige poder
+leer; poder leer **no** habilita a revisar. Ver ADR 0009.
 
 ## Qué no existe todavía (a propósito)
 
