@@ -11,10 +11,19 @@
  */
 
 import { getToken, setToken } from './api.js';
-import { loadAsset, loadContext, loadIdentity, signOut, state, subscribe } from './state.js';
+import {
+  loadAsset,
+  loadCapability,
+  loadContext,
+  loadIdentity,
+  signOut,
+  state,
+  subscribe,
+} from './state.js';
 import { announce, brandLogo, clear, el, initials, notice } from './ui.js';
 import { renderLogin } from './screens/login.js';
 import { renderChat } from './screens/chat.js';
+import { disposeContribute, renderContribute } from './screens/contribute.js';
 
 const root = document.getElementById('root');
 
@@ -28,6 +37,17 @@ const ROUTES = [
     subtitle: 'Pregunta sobre el conocimiento publicado y revisa la evidencia de cada respuesta.',
     render: renderChat,
     visible: () => true,
+  },
+  {
+    path: '/aportar',
+    label: 'Agregar conocimiento',
+    icon: '🎙',
+    title: 'Agregar conocimiento',
+    subtitle:
+      'Cuéntalo con tu voz. Revisas lo que ELSA entendió y lo envías a revisión: nada se ' +
+      'publica solo.',
+    render: renderContribute,
+    visible: (current) => Boolean(current.capability?.can_contribute),
   },
 ];
 
@@ -252,7 +272,10 @@ async function boot() {
       valid = false;
     }
     if (!valid) setToken(null);
-    else await loadAsset();
+    else {
+      await loadAsset();
+      await loadCapability();
+    }
   }
 
   render();
@@ -261,6 +284,9 @@ async function boot() {
 
 window.addEventListener('hashchange', () => {
   sidebarOpen = false;
+  // El micrófono se libera al salir de la pantalla: dejarlo abierto
+  // mantendría encendido el indicador de grabación del sistema.
+  disposeContribute();
   render();
 });
 subscribe(() => render());

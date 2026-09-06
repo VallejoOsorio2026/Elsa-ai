@@ -14,7 +14,7 @@ export const state = {
   me: null,
   scope: null,
   asset: null,
-  reviewCount: 0,
+  capability: null,
 };
 
 const listeners = new Set();
@@ -85,10 +85,31 @@ export async function loadAsset() {
   return state.asset;
 }
 
+/**
+ * Capacidades de esta persona en el alcance: consultar, aportar, revisar.
+ *
+ * Se usa para no ofrecer lo que va a fallar. **No autoriza nada**: cada
+ * endpoint vuelve a comprobarlo en el servidor.
+ */
+export async function loadCapability() {
+  if (!state.scope) {
+    state.capability = null;
+    return null;
+  }
+  try {
+    state.capability = await api.request(
+      `/contributions/${state.scope.domain}/${state.scope.asset}/capability`,
+    );
+  } catch {
+    state.capability = null;
+  }
+  return state.capability;
+}
+
 export function signOut() {
   setToken(null);
   state.me = null;
   state.scope = null;
   state.asset = null;
-  state.reviewCount = 0;
+  state.capability = null;
 }

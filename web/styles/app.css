@@ -455,3 +455,104 @@
   min-width: 24px;
   min-height: 24px;
 }
+
+/* --- Grabadora -------------------------------------------------------- */
+
+.recorder { display: grid; gap: var(--elsa-espacio-4); }
+
+.recorder-dial {
+  display: grid;
+  justify-items: center;
+  gap: var(--elsa-espacio-1);
+  padding: var(--elsa-espacio-6) var(--elsa-espacio-4);
+  background: var(--elsa-superficie);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-lg);
+}
+
+/* El punto de grabación pulsa, pero el estado también está escrito: el
+ * color y el movimiento nunca son el único portador del significado. */
+.recorder-dial.is-live { border-color: var(--elsa-error); }
+
+.recorder-dial.is-live::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border-radius: var(--elsa-radio-completo);
+  background: var(--elsa-error);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse { 50% { opacity: 0.25; } }
+
+.recorder-time {
+  font-family: var(--elsa-fuente-dato);
+  font-size: var(--elsa-texto-2xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.recorder-remaining { font-size: var(--elsa-texto-sm); color: var(--elsa-texto-secundario); }
+.recorder-remaining.is-warning { color: var(--elsa-advertencia); font-weight: 700; }
+
+.recorder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--elsa-espacio-2);
+}
+
+.recorder-actions .btn { flex: 1 1 140px; }
+
+.btn-record { min-height: 56px; font-size: var(--elsa-texto-md); }
+
+.recorder-audio { width: 100%; }
+
+/* --- Aporte ----------------------------------------------------------- */
+
+.contribute { max-width: 720px; }
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--elsa-espacio-2);
+}
+
+.actions .btn { flex: 1 1 180px; }
+
+@media (min-width: 768px) {
+  .actions { justify-content: flex-end; }
+  .actions .btn { flex: 0 0 auto; }
+}
+
+.transcript summary {
+  cursor: pointer;
+  font-family: var(--elsa-fuente-titulo);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  min-height: 44px;
+}
+
+.transcript > *:not(summary) { margin-top: var(--elsa-espacio-3); }
+
+.norm-field, .check-field {
+  padding: var(--elsa-espacio-3);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-md);
+  background: var(--elsa-superficie);
+}
+
+.norm-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  margin-bottom: var(--elsa-espacio-1);
+}
+
+.norm-head label { margin: 0; }
+
+.check-field.is-pending { border-left: 4px solid var(--elsa-advertencia); }
+.check-field p { margin-bottom: var(--elsa-espacio-2); }
+.required { color: var(--elsa-advertencia); font-weight: 700; }
