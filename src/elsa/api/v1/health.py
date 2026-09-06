@@ -4,16 +4,18 @@
 - ``GET /api/v1/health/ready``: estado por dependencia y estado agregado.
   Devuelve 200 con estado ``ok`` o ``degraded`` (el sistema sirve tráfico,
   quizá parcialmente) y 503 solo cuando una dependencia crítica está caída.
+
+La autenticación es dependencia **crítica**: con el proveedor de identidad
+real configurado e inaccesible, ELSA no puede autorizar a nadie y readiness
+lo refleja con 503. ``/health/live`` no depende de nada y sigue respondiendo.
 """
 
-from fastapi import APIRouter, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel
 
-from elsa.core.health import (
-    SystemStatus,
-    aggregate,
-    current_dependency_reports,
-)
+from elsa.api.deps import get_container
+from elsa.container import Container
+from elsa.core.health import SystemStatus, aggregate
 
 router = APIRouter(prefix="/health", tags=["health"])
 
@@ -44,8 +46,12 @@ async def liveness() -> LivenessResponse:
     response_model=ReadinessResponse,
     responses={status.HTTP_503_SERVICE_UNAVAILABLE: {"model": ReadinessResponse}},
 )
-async def readiness(request: Request, response: Response) -> ReadinessResponse:
-    reports = current_dependency_reports()
+async def readiness(
+    request: Request,
+    response: Response,
+    container: Container = Depends(get_container),
+) -> ReadinessResponse:
+    reports = await container.health_reports()
     system_status = aggregate(reports)
     if system_status is SystemStatus.DOWN:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE

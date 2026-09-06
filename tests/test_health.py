@@ -20,16 +20,19 @@ def test_liveness_responds_ok(client: TestClient) -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_readiness_reports_degraded_with_unconfigured_dependencies(client: TestClient) -> None:
+def test_readiness_reports_degraded_with_fake_adapters(client: TestClient) -> None:
     response = client.get("/api/v1/health/ready")
 
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "degraded"
-    assert body["environment"] == "TEST"
+    assert body["environment"] == "DEV"
     assert set(body["dependencies"]) == EXPECTED_DEPENDENCIES
-    for dependency in body["dependencies"].values():
-        assert dependency["status"] == "not_configured"
+    # Con adaptadores fake, auth y database son "degraded"; el resto sigue
+    # sin adaptador real.
+    assert body["dependencies"]["auth"]["status"] == "degraded"
+    assert body["dependencies"]["database"]["status"] == "degraded"
+    assert body["dependencies"]["llm"]["status"] == "not_configured"
 
 
 def test_readiness_declares_criticality_per_dependency(client: TestClient) -> None:
