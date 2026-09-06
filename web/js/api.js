@@ -82,6 +82,36 @@ async function request(path, { method = 'GET', body, headers = {}, auth = true }
   return data;
 }
 
+/**
+ * Descarga un recurso protegido como Blob.
+ *
+ * Un `<audio src="/api/...">` no sirve: el navegador pide esa URL sin la
+ * cabecera Authorization y el backend la rechaza, con razón. La nota de voz
+ * puede contener información interna de planta, así que se pide con el token
+ * y se reproduce desde memoria.
+ */
+export async function fetchBlob(path) {
+  const headers = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let response;
+  try {
+    response = await fetch(`${BASE}${path}`, { headers });
+  } catch {
+    throw new ApiError(0, 'network_error', 'No se pudo contactar con el servidor.', null);
+  }
+  if (!response.ok) {
+    throw new ApiError(
+      response.status,
+      'download_failed',
+      'No se pudo descargar el audio.',
+      null,
+    );
+  }
+  return response.blob();
+}
+
 export const api = {
   sessionContext: () => request('/session/context', { auth: false }),
   me: () => request('/me'),

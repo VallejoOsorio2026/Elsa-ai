@@ -24,6 +24,8 @@ import { announce, brandLogo, clear, el, initials, notice } from './ui.js';
 import { renderLogin } from './screens/login.js';
 import { renderChat } from './screens/chat.js';
 import { disposeContribute, renderContribute } from './screens/contribute.js';
+import { renderMine } from './screens/mine.js';
+import { renderReview } from './screens/review.js';
 
 const root = document.getElementById('root');
 
@@ -48,6 +50,27 @@ const ROUTES = [
       'publica solo.',
     render: renderContribute,
     visible: (current) => Boolean(current.capability?.can_contribute),
+  },
+  {
+    path: '/mis-aportes',
+    label: 'Mis aportes',
+    icon: '📋',
+    title: 'Mis aportes',
+    subtitle: 'Lo que has enviado sobre este equipo y en qué quedó cada aporte.',
+    render: renderMine,
+    visible: (current) => Boolean(current.capability?.can_contribute),
+  },
+  {
+    path: '/revision',
+    label: 'Centro de Revisión',
+    icon: '✅',
+    title: 'Centro de Revisión',
+    subtitle:
+      'Aportes esperando validación. Lo que apruebes queda marcado como válido; publicar ' +
+      'sigue siendo otra decisión.',
+    render: renderReview,
+    visible: (current) => Boolean(current.capability?.can_review),
+    badge: (current) => current.capability?.pending_count || 0,
   },
 ];
 

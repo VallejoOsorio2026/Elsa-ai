@@ -556,3 +556,79 @@
 .check-field.is-pending { border-left: 4px solid var(--elsa-advertencia); }
 .check-field p { margin-bottom: var(--elsa-espacio-2); }
 .required { color: var(--elsa-advertencia); font-weight: 700; }
+
+/* --- Listados de aportes ---------------------------------------------- */
+
+.card-list { display: grid; gap: var(--elsa-espacio-3); }
+
+.contribution-card {
+  display: grid;
+  gap: var(--elsa-espacio-1);
+  padding: var(--elsa-espacio-4);
+  background: var(--elsa-superficie-alta);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-lg);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+}
+
+.contribution-card.is-clickable { cursor: pointer; }
+.contribution-card.is-clickable:hover { border-color: var(--elsa-acento); }
+.contribution-card p { margin: 0; }
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--elsa-espacio-2);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-head h2 { margin: 0; }
+
+.detail-list { margin: 0; display: grid; gap: var(--elsa-espacio-2); }
+
+.detail-list dt {
+  font-size: var(--elsa-texto-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--elsa-texto-secundario);
+  font-weight: 700;
+  display: flex;
+  gap: var(--elsa-espacio-2);
+  align-items: center;
+}
+
+.detail-list dd { margin: 0 0 var(--elsa-espacio-2); overflow-wrap: anywhere; }
+
+.transcript-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* --- Pestañas --------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: var(--elsa-espacio-2);
+  border-bottom: 1px solid var(--elsa-borde-suave);
+  overflow-x: auto;
+}
+
+.tab {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  font-size: var(--elsa-texto-sm);
+  padding: var(--elsa-espacio-3) var(--elsa-espacio-2);
+  min-height: 44px;
+  cursor: pointer;
+  color: var(--elsa-texto-secundario);
+  border-bottom: 3px solid transparent;
+  white-space: nowrap;
+}
+
+.tab[aria-selected="true"] {
+  color: var(--elsa-acento);
+  border-bottom-color: var(--elsa-acento);
+}
