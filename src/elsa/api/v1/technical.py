@@ -280,7 +280,7 @@ async def _read_upload(upload: UploadFile, limit: int) -> bytes:
         total += len(chunk)
         if total > limit:
             raise ApiError(
-                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                status.HTTP_413_CONTENT_TOO_LARGE,
                 "The uploaded file is too large.",
                 code="file_too_large",
             )

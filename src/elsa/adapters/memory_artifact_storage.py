@@ -61,3 +61,7 @@ class InMemoryArtifactStorage:
 
     async def check_health(self) -> None:
         self._check_available()
+
+    def stored_keys(self) -> tuple[str, ...]:
+        """Claves guardadas. Existe para que los tests no miren el interior."""
+        return tuple(sorted(self._items))
