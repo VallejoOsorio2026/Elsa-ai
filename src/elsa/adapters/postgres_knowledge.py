@@ -932,6 +932,8 @@ class PostgresKnowledgeRepository:
                     "materials": len(snapshot.materials),
                     "equipments": len(snapshot.equipments),
                     "warnings": _warning_counts(snapshot.warnings),
+                    # Conteos por etapa del parseo. Nunca contenido.
+                    "parser_diagnostics": dict(snapshot.diagnostics),
                 }
                 await connection.execute(
                     "update elsa.imports set status = 'completed', finished_at = now(), "

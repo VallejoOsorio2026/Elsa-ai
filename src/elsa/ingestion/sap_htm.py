@@ -185,53 +185,103 @@ class _TableReader(HTMLParser):
 
 
 @dataclass(frozen=True, slots=True)
-class _SapLine:
-    """Una línea lógica del export, con lo que se sabe de ella.
+class _Fragment:
+    """Un trozo del documento: texto o icono.
 
-    ``text`` conserva los espacios interiores **sin colapsar**: en un export
-    monoespaciado la alineación es la única señal de dónde empieza y termina
-    cada columna, así que normalizar espacios aquí destruiría la estructura.
+    SAP no dibuja un renglón como una cadena: lo reparte en varios ``<nobr>``
+    con iconos intercalados. Modelar el fragmento antes que la línea es lo que
+    permite después reunirlos sin perder ni el orden ni la separación.
     """
 
-    number: int
-    indent: int
-    text: str
-    markers: tuple[str, ...]
+    kind: str
+    text: str = ""
+    icon_title: str | None = None
+    icon_alt: str | None = None
+    icon_source: str | None = None
 
     @property
     def fields(self) -> list[str]:
-        """Campos separados por dos o más espacios.
+        """Campos que aporta este fragmento.
 
-        Una descripción lleva espacios simples; una separación de columnas
-        lleva dos o más. Es la convención de toda lista de ancho fijo.
+        Un fragmento puede traer una columna entera (``"MAT-1  Pieza  2  UN"``)
+        o un solo valor (``"2"``). Se parte por dos o más espacios, que es la
+        separación de columnas; los espacios simples pertenecen al texto.
         """
         stripped = self.text.strip()
         return [] if not stripped else re.split(r"\s{2,}", stripped)
 
 
-# Etiquetas que cierran una línea lógica. `br` es la habitual; los cierres de
-# bloque se incluyen porque un export mal formado puede omitir el `br`.
-_LINE_BREAK_TAGS = frozenset({"br", "nobr", "tr", "p", "div", "li", "pre", "h1", "h2", "h3"})
+@dataclass(frozen=True, slots=True)
+class _LogicalLine:
+    """Un renglón visual completo, reunido a partir de sus fragmentos."""
+
+    number: int
+    fragments: tuple[_Fragment, ...]
+
+    @property
+    def text(self) -> str:
+        """Texto concatenado, con la separación original intacta."""
+        return "".join(fragment.text for fragment in self.fragments)
+
+    @property
+    def indent(self) -> int:
+        """Espacios iniciales del renglón, **antes** de colapsar nada.
+
+        Se mide sobre el texto crudo porque es la única evidencia de nivel
+        jerárquico que trae un export sin columna de nivel. Normalizar
+        espacios antes de medirla la destruiría.
+        """
+        text = self.text
+        return len(text) - len(text.lstrip(" "))
+
+    @property
+    def fields(self) -> list[str]:
+        """Campos del renglón, vengan de uno o de varios fragmentos."""
+        values: list[str] = []
+        for fragment in self.fragments:
+            if fragment.kind == "text":
+                values.extend(fragment.fields)
+        return values
+
+    @property
+    def icons(self) -> tuple[_Fragment, ...]:
+        return tuple(f for f in self.fragments if f.kind == "icon")
+
+    @property
+    def is_blank(self) -> bool:
+        return not self.fields and not self.icons
+
+
+# Etiquetas que cierran una línea lógica. `nobr` **no** está: cierra un
+# fragmento, no un renglón. Tratarlo como frontera parte cada registro en
+# tantos trozos como columnas tenga y ninguno se reconoce.
+_LINE_BREAK_TAGS = frozenset({"br", "tr", "p", "div", "li", "pre", "h1", "h2", "h3"})
 
 
 class _LineReader(HTMLParser):
-    """Extrae el documento como líneas de texto, sin ejecutar ni seguir nada.
+    """Reúne el documento en líneas lógicas, sin ejecutar ni seguir nada.
 
-    Es el mismo analizador léxico pasivo que usa la ruta de tablas: no hay
-    motor de scripts ni cliente HTTP que deshabilitar. Los iconos se anotan
-    como *marcadores* (su ``title``, su ``alt`` o el nombre del archivo) para
-    poder distinguir un material de un equipo, pero **no se descarga
-    ninguno**.
+    Analizador léxico pasivo: no hay motor de scripts ni cliente HTTP que
+    deshabilitar. Los iconos se anotan con lo que declaran (``title``,
+    ``alt``) y con el nombre del recurso, pero **ninguno se descarga**.
+
+    La frontera de renglón es ``<br>``. Un export que no use ``<br>`` en
+    absoluto —los hay— se agrupa entonces por ``</nobr>``, que en ese caso sí
+    delimita el renglón. La decisión se toma al final, cuando ya se sabe qué
+    contiene el documento, en vez de suponerlo por adelantado.
     """
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
-        self.lines: list[_SapLine] = []
+        self.lines: list[_LogicalLine] = []
         self.saw_script = False
         self.remote_references: set[str] = set()
+        self.nobr_fragments = 0
+        self.br_boundaries = 0
 
+        self._fragments: list[_Fragment] = []
+        self._boundaries: list[tuple[int, str]] = []
         self._buffer: list[str] = []
-        self._markers: list[str] = []
         self._ignore_depth = 0
 
     # -- Estructura ---------------------------------------------------
@@ -243,71 +293,89 @@ class _LineReader(HTMLParser):
             return
         self._record_references(attrs)
         if tag == "img":
-            self._record_marker(attrs)
-        if tag in _LINE_BREAK_TAGS:
-            self._flush()
+            self._append_icon(attrs)
+        elif tag == "nobr":
+            self.nobr_fragments += 1
+            self._close_text()
+        elif tag in _LINE_BREAK_TAGS:
+            self._boundary("br" if tag == "br" else "block")
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         self._record_references(attrs)
         if tag == "img":
-            self._record_marker(attrs)
+            self._append_icon(attrs)
         elif tag == "br":
-            self._flush()
+            self._boundary("br")
 
     def handle_endtag(self, tag: str) -> None:
         if tag in _IGNORED_CONTENT_TAGS:
             self._ignore_depth = max(0, self._ignore_depth - 1)
             return
-        if tag in _LINE_BREAK_TAGS:
-            self._flush()
+        if tag == "nobr":
+            self._boundary("nobr")
+        elif tag in _LINE_BREAK_TAGS:
+            self._boundary("block")
 
     def handle_data(self, data: str) -> None:
         if self._ignore_depth:
-            # Contenido de `<script>` o `<style>`: se descarta.
+            # Contenido de `<script>` o `<style>`: se descarta entero.
             return
-        # Los espacios interiores se conservan; solo se unifica el espacio
-        # duro, que en el export cumple exactamente la función del normal.
-        self._buffer.append(data.replace("\xa0", " "))
+        # El espacio duro cumple exactamente la función del normal en estos
+        # exports; se unifica aquí para que la indentación se pueda medir.
+        # Los espacios NO se colapsan: eso ocurre al extraer campos.
+        self._buffer.append(data.replace("\xa0", " ").replace("\r", "").replace("\n", " "))
 
     def close(self) -> None:
         super().close()
-        self._flush()
+        self._close_text()
+        self._build_lines()
 
     # -- Apoyo --------------------------------------------------------
 
-    def _flush(self) -> None:
-        text = "".join(self._buffer).replace("\r", "").replace("\n", " ")
-        markers = tuple(self._markers)
+    def _close_text(self) -> None:
+        text = "".join(self._buffer)
         self._buffer = []
-        self._markers = []
-        if not text.strip() and not markers:
-            return
-        self.lines.append(
-            _SapLine(
-                number=len(self.lines) + 1,
-                indent=len(text) - len(text.lstrip(" ")),
-                text=text.rstrip(),
-                markers=markers,
+        if text:
+            self._fragments.append(_Fragment(kind="text", text=text))
+
+    def _boundary(self, kind: str) -> None:
+        self._close_text()
+        if kind == "br":
+            self.br_boundaries += 1
+        self._boundaries.append((len(self._fragments), kind))
+
+    def _append_icon(self, attrs: list[tuple[str, str | None]]) -> None:
+        """Anota lo que el icono declara. No pide el recurso a ninguna parte."""
+        self._close_text()
+        values = dict(attrs)
+        self._fragments.append(
+            _Fragment(
+                kind="icon",
+                icon_title=(values.get("title") or "").strip() or None,
+                icon_alt=(values.get("alt") or "").strip() or None,
+                icon_source=(values.get("src") or "").strip() or None,
             )
         )
 
-    def _record_marker(self, attrs: list[tuple[str, str | None]]) -> None:
-        """Anota qué dice el icono, sin pedirlo a ninguna parte.
+    def _build_lines(self) -> None:
+        """Agrupa los fragmentos en renglones según la frontera que aplique."""
+        kinds = {"br", "block"} if self.br_boundaries else {"nobr", "block"}
+        cuts = sorted({index for index, kind in self._boundaries if kind in kinds})
+        cuts = [cut for cut in cuts if 0 < cut < len(self._fragments)]
 
-        Se prefiere el texto declarado (``title``, ``alt``) al nombre del
-        archivo: atarse solo a un nombre concreto como ``s_b_matl.gif`` haría
-        que el parser dejara de distinguir tipos en cuanto SAP renombrara sus
-        iconos.
-        """
-        values = dict(attrs)
-        for attribute in ("title", "alt"):
-            value = values.get(attribute)
-            if value and value.strip():
-                self._markers.append(value.strip().lower())
-                return
-        source = values.get("src")
-        if source:
-            self._markers.append(source.rsplit("/", 1)[-1].rsplit(".", 1)[0].lower())
+        groups: list[tuple[_Fragment, ...]] = []
+        previous = 0
+        for cut in [*cuts, len(self._fragments)]:
+            group = tuple(self._fragments[previous:cut])
+            if group:
+                groups.append(group)
+            previous = cut
+
+        for group in groups:
+            line = _LogicalLine(number=len(self.lines) + 1, fragments=group)
+            # Un renglón en blanco separa bloques; no aporta nada que leer.
+            if not line.is_blank:
+                self.lines.append(line)
 
     def _record_references(self, attrs: list[tuple[str, str | None]]) -> None:
         for name, value in attrs:
@@ -315,8 +383,8 @@ class _LineReader(HTMLParser):
                 self.remote_references.add(value.split("?", 1)[0][:120])
 
 
-# Vocabulario de los marcadores. Se comparan por subcadena porque el texto
-# real varía («Material», «Componente material», «s_b_matl»).
+# Vocabulario de los iconos. Se compara por subcadena porque el texto real
+# varía («Material», «Componente material», «s_b_matl»).
 _MATERIAL_MARKERS = ("material", "matl", "componente", "component")
 _EQUIPMENT_MARKERS = ("equipo", "equipment", "equi", "objeto tecnico", "technical object")
 # Una ubicación técnica es un objeto técnico, no un material: en el modelo de
@@ -324,17 +392,56 @@ _EQUIPMENT_MARKERS = ("equipo", "equipment", "equi", "objeto tecnico", "technica
 _LOCATION_MARKERS = ("ubicacion", "ubic", "floc", "funcloc", "func")
 
 
-def _type_from_markers(markers: Sequence[str]) -> str | None:
-    """Tipo declarado por los iconos de la línea, si lo declaran."""
-    for marker in markers:
-        key = normalize_key(marker) or ""
-        if any(token in key for token in _MATERIAL_MARKERS):
-            return "material"
-        if any(token in key for token in _EQUIPMENT_MARKERS):
-            return "equipment"
-        if any(token in key for token in _LOCATION_MARKERS):
-            return "equipment"
+def _kind_of_marker(value: str | None) -> str | None:
+    """Tipo que designa un texto de icono, o ``None`` si no designa ninguno."""
+    key = normalize_key(value) or ""
+    if not key:
+        return None
+    if any(token in key for token in _MATERIAL_MARKERS):
+        return "material"
+    if any(token in key for token in _EQUIPMENT_MARKERS):
+        return "equipment"
+    if any(token in key for token in _LOCATION_MARKERS):
+        return "equipment"
     return None
+
+
+def _type_from_icons(icons: Sequence[_Fragment]) -> tuple[str | None, bool]:
+    """Tipo declarado por los iconos del renglón y si la evidencia es fuerte.
+
+    Prioridad explícita:
+
+    1. **Fuerte**: lo que el icono declara en ``title`` o ``alt``. Es texto
+       puesto por SAP para describir el objeto, no un detalle de presentación.
+    2. **Secundaria**: el nombre del archivo del icono. Sirve cuando no hay
+       texto declarado, pero nunca decide por sí solo frente a un ``title``:
+       atarse a ``s_b_matl.gif`` dejaría de funcionar en cuanto SAP renombrara
+       sus recursos.
+
+    Señales fuertes contradictorias (un icono dice Material y otro Equipo) no
+    se resuelven: se devuelve ``None`` y el renglón queda sin tipo.
+    """
+    strong: set[str] = set()
+    weak: set[str] = set()
+    for icon in icons:
+        for declared in (icon.icon_title, icon.icon_alt):
+            kind = _kind_of_marker(declared)
+            if kind is not None:
+                strong.add(kind)
+        if icon.icon_source:
+            name = icon.icon_source.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+            kind = _kind_of_marker(name)
+            if kind is not None:
+                weak.add(kind)
+
+    if len(strong) == 1:
+        return strong.pop(), True
+    if strong:
+        # Contradicción entre señales fuertes: no se elige ninguna.
+        return None, True
+    if len(weak) == 1:
+        return weak.pop(), False
+    return None, False
 
 
 # --- Reconocimiento semántico ----------------------------------------
@@ -586,15 +693,39 @@ _LINE_LABELS: dict[str, tuple[str, ...]] = {
 }
 
 
-def _line_metadata(lines: Sequence[_SapLine]) -> dict[str, str]:
-    """Busca los campos de cabecera entre las líneas del export.
+# Campos que solo separan una etiqueta de su valor y no son el valor.
+_SEPARATOR_FIELDS = frozenset({":", "-", "=", "|", "."})
 
-    Una misma línea puede llevar varios pares rótulo/valor separados por
-    columnas (``Ubic.técn.  MB-01   Denominación  Molino``), así que se
-    recorren los campos por parejas. También se acepta ``Rótulo: valor``
-    dentro de un solo campo.
+
+def _is_metadata_line(line: _LogicalLine) -> bool:
+    """Indica si el renglón lleva un rótulo de cabecera.
+
+    Sirve para no contar una línea de metadatos como un registro que no se
+    supo interpretar: no es un renglón de BOM fallido, es otra cosa.
+    """
+    for field in line.fields:
+        label = _label_key(field.partition(":")[0])
+        if label is None:
+            continue
+        for synonyms in _LINE_LABELS.values():
+            if any(label == _label_key(synonym) for synonym in synonyms):
+                return True
+    return False
+
+
+def _line_metadata(lines: Sequence[_LogicalLine]) -> tuple[dict[str, str], int]:
+    """Busca los campos de cabecera entre los renglones del export.
+
+    Etiqueta y valor pueden estar en el mismo fragmento
+    (``Ubic.técn.  LOC-1``), en fragmentos distintos
+    (``<nobr>Ubic.técn.</nobr><nobr>LOC-1</nobr>``) o separados por un
+    fragmento de puntuación (``<nobr>:</nobr>``). Al trabajar sobre los campos
+    del renglón ya reunido, las tres formas se leen igual.
+
+    Devuelve también cuántas etiquetas se reconocieron, para el diagnóstico.
     """
     found: dict[str, str] = {}
+    detected = 0
     for line in lines:
         fields = line.fields
         for position, field in enumerate(fields):
@@ -603,19 +734,27 @@ def _line_metadata(lines: Sequence[_SapLine]) -> dict[str, str]:
             if label is None:
                 continue
             for name, synonyms in _LINE_LABELS.items():
-                if name in found:
-                    continue
                 if not any(label == _label_key(synonym) for synonym in synonyms):
                     continue
+                detected += 1
+                if name in found:
+                    continue
                 value = normalize_text(inline_value)
-                if value is None and position + 1 < len(fields):
-                    value = normalize_text(fields[position + 1])
+                if value is None:
+                    # El valor puede estar uno o más fragmentos más allá, con
+                    # un separador suelto en medio.
+                    for candidate in fields[position + 1 :]:
+                        text = normalize_text(candidate)
+                        if text is None or text in _SEPARATOR_FIELDS:
+                            continue
+                        value = text
+                        break
                 if value is not None:
                     found[name] = value
-    return found
+    return found, detected
 
 
-def _header_meaning(line: _SapLine) -> list[str | None] | None:
+def _header_meaning(line: _LogicalLine) -> list[str | None] | None:
     """Significado de cada campo de una fila de rótulos, o ``None``.
 
     Devuelve una lista paralela a ``line.fields``: en cada posición, el campo
@@ -722,13 +861,13 @@ def _record_from_fields(fields: Sequence[str]) -> dict[str, str | None]:
 
 
 def _items_from_lines(
-    lines: Sequence[_SapLine], metadata: dict[str, str]
+    lines: Sequence[_LogicalLine], metadata: dict[str, str], diagnostics: dict[str, int]
 ) -> tuple[list[ParsedSapItem], list[IngestionWarning]]:
     """Interpreta un export sin tablas como renglones de BOM.
 
-    Se busca primero una fila de rótulos; si existe, manda ella y los
-    renglones se cortan por sus tramos de columna. Si no existe, cada renglón
-    se interpreta por su forma y por el icono que declara su tipo.
+    Se busca primero una fila de rótulos; si existe, manda ella y los campos
+    del renglón se leen por su posición. Si no existe, cada renglón se
+    interpreta por su forma. El tipo lo decide el icono cuando lo declara.
     """
     meaning: list[str | None] | None = None
     header_number = 0
@@ -742,12 +881,14 @@ def _items_from_lines(
     items: list[ParsedSapItem] = []
     unrecognised = 0
     incomplete = 0
+    contradictory = 0
+    unresolved_parent = 0
     # Cadena de padres por nivel, para poder decir de qué cuelga cada renglón.
     parents: dict[int, str] = {}
     indents: list[int] = []
 
     for line in lines:
-        if line.number <= header_number or not line.text.strip():
+        if line.number <= header_number or line.is_blank:
             continue
         fields = line.fields
         # La cabecera manda cuando el renglón tiene exactamente sus mismos
@@ -764,20 +905,34 @@ def _items_from_lines(
         quantity_text = normalize_text(record.get("quantity"))
         unit = normalize_text(record.get("unit"))
 
-        entry_kind = _type_from_markers(line.markers)
-        if entry_kind is None and code is not None:
-            # Sin icono, la evidencia estructural decide: en una lista de BOM
-            # solo los materiales llevan cantidad y unidad de medida; un
+        entry_kind, strong = _type_from_icons(line.icons)
+        if entry_kind == "material":
+            diagnostics["icon_material_signals"] += 1
+        elif entry_kind == "equipment":
+            diagnostics["icon_equipment_signals"] += 1
+        elif strong:
+            # Iconos fuertes que se contradicen: no se elige ninguno.
+            contradictory += 1
+
+        if entry_kind is None and not strong and code is not None:
+            # Sin icono utilizable decide la evidencia estructural: en una
+            # lista de BOM solo los materiales llevan cantidad y unidad; un
             # objeto técnico aparece sin ellas.
             if quantity_text is not None and unit is not None:
                 entry_kind = "material"
             elif description is not None:
                 entry_kind = "equipment"
 
+        if code is not None or description is not None:
+            diagnostics["candidate_records"] += 1
+
         if entry_kind is None or code is None:
             # Puede ser un título, una línea de separación o un renglón cuya
-            # estructura no se reconoce. No se inventa nada; se cuenta.
-            if code is not None or (description is not None and len(line.fields) > 2):
+            # estructura no se reconoce. No se inventa nada; se cuenta. Una
+            # línea de cabecera no cuenta: no es un renglón de BOM fallido.
+            if not _is_metadata_line(line) and (
+                code is not None or (description is not None and len(fields) > 2)
+            ):
                 unrecognised += 1
             continue
 
@@ -797,6 +952,10 @@ def _items_from_lines(
         parent = parents.get(depth - 1)
         if parent:
             extra["parent_code"] = parent
+        elif depth > 0:
+            # El renglón es válido aunque su padre no pueda probarse. No se
+            # descarta y tampoco se le inventa una relación.
+            unresolved_parent += 1
         parents[depth] = code
         for deeper in [key for key in parents if key > depth]:
             del parents[deeper]
@@ -823,6 +982,14 @@ def _items_from_lines(
             )
         )
 
+    diagnostics["parsed_material_records"] = sum(
+        1 for item in items if item.entry_kind == "material"
+    )
+    diagnostics["parsed_equipment_records"] = sum(
+        1 for item in items if item.entry_kind == "equipment"
+    )
+    diagnostics["unresolved_records"] = unrecognised + contradictory
+
     warnings: list[IngestionWarning] = []
     if unrecognised:
         warnings.append(
@@ -833,6 +1000,17 @@ def _items_from_lines(
                     "were not imported. They are reported rather than guessed."
                 ),
                 location=f"{unrecognised} line(s)",
+            )
+        )
+    if contradictory:
+        warnings.append(
+            IngestionWarning(
+                code="contradictory_type_icons",
+                message=(
+                    "Some lines carry icons that declare conflicting types. The type is "
+                    "left undecided rather than chosen."
+                ),
+                location=f"{contradictory} line(s)",
             )
         )
     if incomplete:
@@ -846,6 +1024,17 @@ def _items_from_lines(
                 location=f"{incomplete} line(s)",
             )
         )
+    if unresolved_parent:
+        warnings.append(
+            IngestionWarning(
+                code="unresolved_hierarchy",
+                message=(
+                    "Some records are indented below a parent that could not be identified. "
+                    "The record is kept; the relation is not invented."
+                ),
+                location=f"{unresolved_parent} record(s)",
+            )
+        )
     return items, warnings
 
 
@@ -853,9 +1042,10 @@ def parse_sap_snapshot(data: bytes) -> ParsedSapSnapshot:
     """Interpreta el HTM exportado de SAP.
 
     Intenta primero leerlo como tabla y, si no produce ningún renglón, lo
-    interpreta como lista monoespaciada. Lanza
+    interpreta como líneas lógicas. Lanza
     :class:`~elsa.ingestion.errors.UnrecognizedFormatError` si ninguna de las
-    dos rutas reconoce nada.
+    dos rutas reconoce nada; la excepción lleva el diagnóstico estructural,
+    para poder saber **en qué etapa** falló sin ver el contenido.
     """
     text = _decode(data)
 
@@ -868,6 +1058,27 @@ def parse_sap_snapshot(data: bytes) -> ParsedSapSnapshot:
     reader = _LineReader()
     reader.feed(text)
     reader.close()
+
+    metadata, labels_detected = _line_metadata(reader.lines)
+    # Lo que diga una tabla de cabecera manda, por ser la forma más
+    # estructurada de las dos.
+    metadata = {**metadata, **_extract_metadata(tables.tables)}
+
+    # Conteos, nunca contenido: ninguno de estos números revela un código, una
+    # descripción ni una ubicación.
+    diagnostics: dict[str, int] = {
+        "nobr_fragments_seen": reader.nobr_fragments,
+        "br_boundaries_seen": reader.br_boundaries,
+        "logical_lines_built": len(reader.lines),
+        "html_tables_seen": len(tables.tables),
+        "metadata_labels_detected": labels_detected,
+        "icon_material_signals": 0,
+        "icon_equipment_signals": 0,
+        "candidate_records": 0,
+        "parsed_material_records": 0,
+        "parsed_equipment_records": 0,
+        "unresolved_records": 0,
+    }
 
     warnings: list[IngestionWarning] = []
     if tables.saw_script or reader.saw_script:
@@ -893,19 +1104,24 @@ def parse_sap_snapshot(data: bytes) -> ParsedSapSnapshot:
             )
         )
 
-    # Los metadatos pueden venir en una tabla de cabecera o sueltos entre las
-    # líneas. Lo que diga la tabla manda, por ser la forma más estructurada.
-    metadata = {**_line_metadata(reader.lines), **_extract_metadata(tables.tables)}
-
     items = _items_from_tables(tables.tables, metadata)
-    if not items:
-        items, line_warnings = _items_from_lines(reader.lines, metadata)
+    if items:
+        diagnostics["parsed_material_records"] = sum(
+            1 for item in items if item.entry_kind == "material"
+        )
+        diagnostics["parsed_equipment_records"] = sum(
+            1 for item in items if item.entry_kind == "equipment"
+        )
+        diagnostics["candidate_records"] = len(items)
+    else:
+        items, line_warnings = _items_from_lines(reader.lines, metadata, diagnostics)
         warnings.extend(line_warnings)
 
     if not items:
         raise UnrecognizedFormatError(
             "no recognisable SAP BOM records were found, neither as a table nor as a "
-            "monospaced list; the export format is not understood"
+            "monospaced list; the export format is not understood",
+            diagnostics=diagnostics,
         )
 
     if "valid_from" not in metadata:
@@ -923,20 +1139,14 @@ def parse_sap_snapshot(data: bytes) -> ParsedSapSnapshot:
             )
         )
 
-    _logger.info(
-        "sap snapshot parsed",
-        extra={
-            "items": len(items),
-            "materials": sum(1 for item in items if item.entry_kind == "material"),
-            "equipments": sum(1 for item in items if item.entry_kind == "equipment"),
-        },
-    )
+    _logger.info("sap snapshot parsed", extra=dict(diagnostics))
     return ParsedSapSnapshot(
         functional_location=metadata.get("functional_location"),
         description=metadata.get("description"),
         valid_from=_parse_date(metadata.get("valid_from")),
         items=tuple(items),
         warnings=tuple(warnings),
+        diagnostics=diagnostics,
     )
 
 

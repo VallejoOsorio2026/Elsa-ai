@@ -11,6 +11,8 @@ muestran a quien subió el archivo y acaban en logs. Dicen qué está mal, no
 qué decía la celda.
 """
 
+from collections.abc import Mapping
+
 __all__ = [
     "AmbiguousDataError",
     "ArchiveTooLargeError",
@@ -29,9 +31,18 @@ class IngestionError(Exception):
     """Fallo durante la ingesta de una fuente.
 
     ``kind`` coincide con ``elsa.imports.failure_kind``.
+
+    ``diagnostics`` lleva conteos estructurales de la etapa en la que se
+    falló —cuántos fragmentos se vieron, cuántos renglones se construyeron,
+    cuántos candidatos hubo—. Sirve para diagnosticar un archivo que no se
+    puede compartir: son números, nunca contenido.
     """
 
     kind = "parse"
+
+    def __init__(self, *args: object, diagnostics: Mapping[str, int] | None = None) -> None:
+        super().__init__(*args)
+        self.diagnostics: Mapping[str, int] = dict(diagnostics or {})
 
 
 class FileRejectedError(IngestionError):

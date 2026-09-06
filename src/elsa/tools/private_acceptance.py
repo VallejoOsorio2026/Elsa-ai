@@ -221,6 +221,10 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             snapshot = await service.ingest_sap_snapshot(asset=asset, data=sap_bytes, actor=_ACTOR)
         except IngestionError as exc:
             report["errors"].append({"stage": "sap", "kind": exc.kind, "message": str(exc)})
+            # Conteos por etapa: permiten saber DÓNDE falló el parseo de un
+            # archivo que no puede compartirse, sin ver nada de su contenido.
+            if exc.diagnostics:
+                report["sap_parser_diagnostics"] = dict(exc.diagnostics)
             return report
         except (ArtifactStorageUnavailableError, KnowledgeUnavailableError) as exc:
             report["errors"].append({"stage": "sap", "kind": "infrastructure", "message": str(exc)})
@@ -244,6 +248,12 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         sap_record = await repository.get_import(snapshot.import_id)
         if sap_record is not None:
             report["warnings"].extend(_collect_warnings("sap", sap_record.stats))
+        if sap_record is not None:
+            # También en el caso correcto: sirve de trazabilidad de qué vio el
+            # parser, y sigue siendo solo conteos.
+            diagnostics = sap_record.stats.get("parser_diagnostics")
+            if isinstance(diagnostics, Mapping):
+                report["sap_parser_diagnostics"] = dict(diagnostics)
 
         # Reconciliar exige una versión publicada. Se aprueba y publica aquí
         # porque es una prueba local aislada; en el flujo real lo hace una
@@ -301,6 +311,14 @@ def _summary(report: Mapping[str, Any]) -> str:
     if reconciliation:
         lines.append("  Reconciliación")
         for name, count in sorted(reconciliation.items()):
+            lines.append(f"    {name:32} {count}")
+
+    diagnostics = report.get("sap_parser_diagnostics")
+    if diagnostics:
+        # Solo conteos por etapa: dicen dónde se detuvo el parseo sin revelar
+        # una sola línea del archivo.
+        lines.append("  Diagnóstico del parser SAP")
+        for name, count in diagnostics.items():
             lines.append(f"    {name:32} {count}")
 
     lines.append(f"  warnings: {len(report.get('warnings', []))}")

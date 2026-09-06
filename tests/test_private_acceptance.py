@@ -19,6 +19,7 @@ from elsa.tools.private_acceptance import (
     EXIT_OK,
     main,
 )
+from tests.fixtures_sap_export import FRAGMENTED_EXPORT
 from tests.fixtures_sources import engineering_workbook, sap_export
 
 
@@ -159,3 +160,66 @@ def test_the_real_sources_are_never_copied_into_the_repository(
     produced = {path for path in tmp_path.rglob("*") if path.is_file()}
     assert produced
     assert all(str(path).startswith(str(tmp_path)) for path in produced)
+
+
+# ---------------------------------------------------------------------
+# Diagnóstico estructural del parser SAP
+# ---------------------------------------------------------------------
+
+
+def test_a_failed_sap_parse_reports_where_it_stopped(
+    sources: dict[str, Path], tmp_path: Path
+) -> None:
+    """Sin esto no hay forma de diagnosticar un archivo que no puede compartirse."""
+    broken = tmp_path / "roto.HTM"
+    broken.write_bytes(b"<html><body><nobr>Informe sin estructura</nobr><br></body></html>")
+
+    _run(sources, sap=broken)
+
+    diagnostics = _report(sources)["sap_parser_diagnostics"]
+    assert diagnostics["logical_lines_built"] >= 1
+    assert diagnostics["parsed_material_records"] == 0
+
+
+def test_a_successful_run_also_reports_the_diagnostics(
+    sources: dict[str, Path], tmp_path: Path
+) -> None:
+    fragmented = tmp_path / "fragmentado.HTM"
+    fragmented.write_bytes(FRAGMENTED_EXPORT)
+
+    assert _run(sources, sap=fragmented) == EXIT_OK
+
+    diagnostics = _report(sources)["sap_parser_diagnostics"]
+    assert diagnostics["parsed_material_records"] == 2
+    assert diagnostics["parsed_equipment_records"] == 1
+
+
+def test_the_diagnostics_never_carry_technical_content(
+    sources: dict[str, Path], tmp_path: Path
+) -> None:
+    fragmented = tmp_path / "fragmentado.HTM"
+    fragmented.write_bytes(FRAGMENTED_EXPORT)
+    _run(sources, sap=fragmented)
+
+    diagnostics = _report(sources)["sap_parser_diagnostics"]
+
+    assert all(isinstance(value, int) for value in diagnostics.values())
+    serialised = json.dumps(diagnostics)
+    assert "LOC-FAKE" not in serialised
+    assert "MAT-FAKE" not in serialised
+
+
+def test_the_fragmented_export_reaches_reconciliation(
+    sources: dict[str, Path], tmp_path: Path
+) -> None:
+    """El formato real llega hasta el final del flujo, no solo al parser."""
+    fragmented = tmp_path / "fragmentado.HTM"
+    fragmented.write_bytes(FRAGMENTED_EXPORT)
+
+    assert _run(sources, sap=fragmented) == EXIT_OK
+
+    report = _report(sources)
+    assert report["sap"]["materials"] == 2
+    assert report["sap"]["equipments"] == 1
+    assert report["sap"]["functional_location_present"] is True
+    assert sum(report["reconciliation"].values()) > 0

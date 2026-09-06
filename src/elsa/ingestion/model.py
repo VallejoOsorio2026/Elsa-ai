@@ -9,6 +9,7 @@ compara, y la original, con la que se le demuestra a un ingeniero qué decía
 exactamente su archivo.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
@@ -193,6 +194,12 @@ class ParsedSapSnapshot:
     valid_from: date | None = None
     items: tuple[ParsedSapItem, ...] = ()
     warnings: tuple[IngestionWarning, ...] = ()
+    diagnostics: Mapping[str, int] = field(default_factory=dict)
+    """Conteos estructurales de cada etapa del parseo.
+
+    Existen para poder diagnosticar un archivo que no puede compartirse: dicen
+    cuántos fragmentos, renglones y candidatos hubo, y nunca qué decían.
+    """
 
     @property
     def materials(self) -> tuple[ParsedSapItem, ...]:
