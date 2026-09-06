@@ -79,9 +79,37 @@ número inventado. La coherencia se impone además como restricción de la base
 ### Criterios S/O/D
 
 Se extraen como **dato versionado**, no como lógica compilada: si Ingeniería
-cambia la escala, cambia el archivo, no el backend. Las filas que aparecen
-antes de que se anuncie una dimensión no se importan y se avisa; la
-dimensión no se adivina.
+cambia la escala, cambia el archivo, no el backend.
+
+Se admiten las dos disposiciones que la plantilla puede tener, porque elegir
+solo una hacía que la otra se perdiera **en silencio**:
+
+- **Apiladas**: cada tabla precedida de su rótulo, recorriendo de arriba
+  abajo.
+- **Una al lado de otra**: una misma fila anuncia varias dimensiones en
+  columnas distintas y cada una gobierna su franja.
+
+Las dimensiones se reconocen por un vocabulario amplio —«Severidad»,
+«Gravedad», «Ocurrencia», «Frecuencia», «Probabilidad», «Detección», sus
+equivalentes en inglés— y también por su inicial entre paréntesis, como
+`Calificación (S)`.
+
+El valor de la escala se lee de **la columna que la tabla declare** («Valor»,
+«Nivel», «Calificación», «Índice»…). Solo si no declara ninguna se recurre al
+primer entero entre 1 y 10 de la fila. La diferencia importa: las tablas de
+ocurrencia suelen anteponer una tasa o un porcentaje, y ese primer número no
+es la escala.
+
+Avisos propios de la hoja:
+
+| Código | Significado |
+|---|---|
+| `sod_dimension_unknown` | Filas anteriores a cualquier rótulo de dimensión |
+| `sod_dimension_without_criteria` | La dimensión se anuncia pero no se pudo leer ningún valor |
+| `sod_dimension_missing` | La hoja no produjo criterios para las tres dimensiones |
+
+Una dimensión anunciada que no produce criterios **avisa**. Quedarse callado
+ahí era el defecto: la dimensión desaparecía sin que nadie lo notara.
 
 ### Planos
 
@@ -95,15 +123,61 @@ que se conserva, no información que se interpreta.
 
 La asociación a un número de plano sigue una regla única y conservadora: si
 la hoja donde está anclada la imagen menciona **exactamente un** número de
-plano de los declarados en el BOM, esa es la asociación. Con cero o con
-varios, **no se elige**: la imagen se conserva y queda pendiente de revisión
-(`drawing_association_pending`).
+plano de los declarados en el BOM, esa es la asociación, y se registra la
+regla que la produjo. Con cero o con varios, **no se elige**: la imagen se
+conserva y queda pendiente de revisión.
+
+Toda imagen sin asociación cierta genera `drawing_association_pending`, con
+el número de imágenes afectadas. El aviso llega hasta el reporte de
+aceptación, porque un plano que se extrae y del que nadie avisa es un plano
+que nadie asocia.
 
 ---
 
 ## 2. Snapshot de SAP (`.htm`)
 
 `POST /api/v1/technical/{domain}/{asset}/sap-snapshots`
+
+### El export puede no tener tablas HTML
+
+SAP produce estas listas de dos formas y ELSA admite las dos:
+
+- **Como tabla HTML**, donde cada renglón es un `<tr>`.
+- **Como lista monoespaciada**, sin un solo `<table>`: una sucesión de
+  `<nobr>…</nobr><br>` en fuente de ancho fijo, donde las columnas se dibujan
+  alineando espacios y el tipo de cada renglón lo indica un icono.
+
+Se intenta primero la lectura como tabla; si no produce ningún renglón, el
+documento se interpreta como líneas. Un parser que exigiera `<table>` no vería
+absolutamente nada en la segunda forma, que es la que producen las
+exportaciones de lista.
+
+En la ruta de líneas:
+
+- La fila de rótulos se distingue de una línea de metadatos por **cuántos de
+  sus campos son nombres de columna**. Una cabecera es casi toda rótulos; una
+  línea de metadatos alterna rótulo y valor. Sin esa distinción,
+  `Ubic.técn. | MB-01 | Denominación | Molino` pasa por cabecera —porque
+  «Denominación» es rótulo de campo y de columna a la vez— y desplaza la
+  cabecera real a la zona de datos.
+- Los renglones se cortan por campos separados por **dos o más espacios**, no
+  por la posición de carácter de cada rótulo. El corte por posición parece
+  más fiel a una lista de ancho fijo y se rompe entero, en silencio, en
+  cuanto la cabecera y los datos no arrancan en la misma columna.
+- El **identificador se extrae antes que la cantidad**. Un código de material
+  es un número: buscar primero «el último campo numérico» se lo lleva por
+  delante en cuanto la cantidad no es legible, y el renglón se pierde por no
+  tener identificador. Un identificador debe contener al menos un dígito,
+  para que una línea de totales no pase por renglón.
+- El **tipo** se toma del `title` o el `alt` que declare el icono, y solo
+  después del nombre del archivo de imagen: atarse a `s_b_matl.gif` dejaría de
+  distinguir tipos en cuanto SAP renombrara sus iconos. Sin icono, decide la
+  evidencia estructural: en una lista de BOM solo los materiales llevan
+  cantidad y unidad.
+- La **jerarquía** sale de una columna de nivel si existe, y si no del
+  sangrado. Cada renglón guarda de qué objeto cuelga.
+- Lo que no se reconoce **se cuenta y se avisa** (`unrecognised_lines`,
+  `incomplete_material_lines`); no se rellena por conjetura.
 
 El archivo se trata como **dato, nunca como página**. No se renderiza en un
 navegador, no se ejecuta JavaScript, no se interpreta CSS y no se descarga
@@ -166,3 +240,11 @@ Ningún error devuelve trazas internas ni contenido del archivo. Todos llevan
 
 Los logs registran **conteos y motivos**, nunca códigos SAP, nombres de
 componente ni números de plano.
+
+## 5. Avisos persistidos
+
+Los avisos del parser se guardan en `imports.stats` como **códigos estables y
+conteos** (`{"formula_not_evaluated": 3}`). Un revisor puede así ver, sin
+volver a procesar el archivo, que hubo fórmulas sin evaluar o planos sin
+asociar. Un código y un número no dicen nada de ninguna pieza, de modo que la
+regla de no almacenar contenido técnico se mantiene intacta.

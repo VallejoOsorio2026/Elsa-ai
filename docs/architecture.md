@@ -239,6 +239,11 @@ XLSX aprobado por Ingeniería          HTM exportado de SAP
 
 Una diferencia entre las dos fuentes es evidencia de una **desviación**, no
 prueba de cuál valor es correcto. Ninguna se corrige automáticamente.
+
+El export de SAP puede no contener ninguna tabla HTML: la exportación de
+lista produce líneas monoespaciadas con las columnas dibujadas con espacios.
+El parser modela primero **líneas** y después interpreta su semántica; ver
+`docs/ingestion-contract.md`.
 **ELSA no escribe en SAP**: no inicia sesión, no ejecuta transacciones y no
 envía cambios. Solo importa archivos exportados.
 

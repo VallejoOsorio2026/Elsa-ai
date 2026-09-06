@@ -72,6 +72,11 @@ base: no hay nada que ejecutar en el camino.
   almacenamiento se deriva del SHA-256 del contenido, así que un nombre
   hostil no llega al sistema de archivos.
 
+Los avisos del parser se persisten en `imports.stats` como **códigos y
+conteos** (`{"formula_not_evaluated": 3}`), nunca como mensajes con contenido
+del archivo. Un revisor ve que hubo fórmulas sin evaluar sin que se revele
+ninguna celda.
+
 Detalle completo en `docs/ingestion-contract.md`.
 
 ## Logs

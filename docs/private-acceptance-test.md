@@ -33,19 +33,44 @@ $env:ELSA_ARTIFACT_STORAGE_ROOT    = "C:\ProgramData\elsa\artifacts"
 ## Ejecución
 
 ```bash
-git status                      # debe estar limpio ANTES
+git status --short              # debe estar vacío ANTES
 
 uv run python -m elsa.tools.private_acceptance \
     --engineering "<RUTA LOCAL DEL XLSX>" \
     --sap         "<RUTA LOCAL DEL HTM>" \
-    --out         "<RUTA FUERA DEL REPOSITORIO>/reporte.json"
+    --artifact-root "<RUTA FUERA DEL REPOSITORIO>/artifacts" \
+    --out           "<RUTA FUERA DEL REPOSITORIO>/reporte.json"
 
-git status                      # debe seguir limpio DESPUÉS
+echo $?                         # 0 = aceptación correcta
+git status --short              # debe seguir vacío DESPUÉS
 ```
 
 Las rutas se pasan como argumentos. **No se copia nada al repositorio** y el
 reporte se escribe donde indique `--out`; si se omite, va a `acceptance/`,
 que está en `.gitignore`.
+
+**Las dos fuentes son obligatorias.** Omitir `--sap` no ejecuta media prueba:
+la rechaza.
+
+## Cómo se sabe si pasó
+
+El comando lo dice explícitamente y lo confirma con su código de salida:
+
+| Código | Significado |
+|---|---|
+| `0` | Las dos fuentes se procesaron y `errors` está vacío. Puede haber `warnings`. |
+| `1` | **Aceptación fallida**: una fuente obligatoria no se pudo procesar, o quedó alguna entrada en `errors`. |
+| `2` | No se pudo ni intentar: falta un archivo de entrada o el reporte no se puede escribir. |
+
+No existe el éxito parcial. Un reporte con `errors` **nunca** termina en `0`,
+para que no pueda confundirse con una aceptación aprobada.
+
+Los `warnings` no hacen fallar la prueba: un plano sin asociar o una fórmula
+sin evaluar son cosas que una persona debe mirar, no fallos del proceso. Pero
+sí aparecen siempre en el reporte y en el resumen de consola.
+
+Cuando la aceptación falla, **el reporte se escribe igualmente**: es
+justamente el material con el que se diagnostica el fallo.
 
 ## Qué contiene el reporte
 
@@ -60,7 +85,9 @@ Conteos, hashes y metadatos estructurales:
 - metadatos del HTM (ubicación técnica, denominación, fecha);
 - número de materiales y de equipos hijos;
 - resumen de la reconciliación por clasificación;
-- errores y ambigüedades.
+- avisos, por origen y código, con su número de ocurrencias;
+- errores y ambigüedades;
+- el veredicto (`passed` / `failed`).
 
 El reporte incluye **conteos, no contenido**: no lleva códigos de material,
 descripciones ni números de plano reales. Aun así se escribe en una ruta
