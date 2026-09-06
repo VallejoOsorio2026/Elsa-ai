@@ -48,6 +48,9 @@ datasets/
 *.sqlite3
 *.db
 
+# --- Supabase CLI: estado local efímero (las migraciones SÍ se versionan) ---
+supabase/.temp/
+
 # --- Editores y sistema operativo ---
 .idea/
 .vscode/

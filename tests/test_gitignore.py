@@ -29,11 +29,17 @@ FORBIDDEN_PATHS = [
     "backup.dump",
     "elsa.sql.gz",
     "database.bak",
+    # Estado local efímero del CLI de Supabase.
+    "supabase/.temp/cli-latest",
+    "supabase/.temp/project-ref",
 ]
 
 ALLOWED_PATHS = [
     ".env.example",
     "supabase/migrations/20260101000000_example.sql",
+    # Las migraciones son la única autoridad del esquema (ADR 0001): ignorar
+    # `supabase/.temp/` no puede arrastrar consigo `supabase/migrations/`.
+    "supabase/migrations/20260905020000_create_elsa_authorization_model.sql",
 ]
 
 
