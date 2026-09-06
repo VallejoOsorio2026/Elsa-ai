@@ -19,7 +19,7 @@ from elsa.tools.private_acceptance import (
     EXIT_OK,
     main,
 )
-from tests.fixtures_sap_export import FRAGMENTED_EXPORT
+from tests.fixtures_sap_export import FRAGMENTED_EXPORT, STRUCTURE_TREE_EXPORT
 from tests.fixtures_sources import engineering_workbook, sap_export
 
 
@@ -223,3 +223,36 @@ def test_the_fragmented_export_reaches_reconciliation(
     assert report["sap"]["equipments"] == 1
     assert report["sap"]["functional_location_present"] is True
     assert sum(report["reconciliation"].values()) > 0
+
+
+def test_the_structure_tree_export_reaches_reconciliation(
+    sources: dict[str, Path], tmp_path: Path
+) -> None:
+    """La forma completa del árbol llega hasta el final del flujo."""
+    tree = tmp_path / "arbol.HTM"
+    tree.write_bytes(STRUCTURE_TREE_EXPORT)
+
+    assert _run(sources, sap=tree) == EXIT_OK
+
+    report = _report(sources)
+    assert report["sap"]["materials"] == 3
+    assert report["sap"]["equipments"] == 2
+    assert report["sap"]["functional_location_present"] is True
+    assert report["sap"]["valid_from"] is not None
+    assert sum(report["reconciliation"].values()) > 0
+    assert report["errors"] == []
+
+
+def test_the_diagnostics_separate_line_classes(sources: dict[str, Path], tmp_path: Path) -> None:
+    """Metadata, raíz y conectores no son candidatos técnicos."""
+    tree = tmp_path / "arbol.HTM"
+    tree.write_bytes(STRUCTURE_TREE_EXPORT)
+    _run(sources, sap=tree)
+
+    diagnostics = _report(sources)["sap_parser_diagnostics"]
+
+    assert diagnostics["metadata_lines"] >= 1
+    assert diagnostics["root_lines"] == 1
+    assert diagnostics["connector_lines"] >= 1
+    assert diagnostics["candidate_records"] == 5
+    assert diagnostics["unresolved_records"] == 0

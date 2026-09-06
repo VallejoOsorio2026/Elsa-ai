@@ -41,6 +41,7 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
+from enum import StrEnum
 from html.parser import HTMLParser
 
 from elsa.core.normalization import (
@@ -198,6 +199,13 @@ class _Fragment:
     icon_title: str | None = None
     icon_alt: str | None = None
     icon_source: str | None = None
+    is_structural: bool = False
+    """El fragmento dibuja el árbol, no aporta datos.
+
+    SAP usa la tipografía ``SAPDings`` para los símbolos del árbol: sus
+    caracteres son glifos, no texto. Un ``0`` en SAPDings es un icono, y
+    tomarlo por un código o una cantidad inventa un dato.
+    """
 
     @property
     def fields(self) -> list[str]:
@@ -236,11 +244,32 @@ class _LogicalLine:
 
     @property
     def fields(self) -> list[str]:
-        """Campos del renglón, vengan de uno o de varios fragmentos."""
+        """Campos con datos del renglón, vengan de uno o de varios fragmentos.
+
+        Se excluye lo que solo dibuja el árbol: los fragmentos en SAPDings y
+        los campos hechos únicamente de trazos (``|``, ``|---``, ``+--``).
+        Dejarlos dentro los coloca delante del identificador, y como no lo
+        parecen, la extracción del código falla y el renglón entero se
+        descarta.
+        """
         values: list[str] = []
         for fragment in self.fragments:
-            if fragment.kind == "text":
+            if fragment.kind != "text" or fragment.is_structural:
+                continue
+            values.extend(field for field in fragment.fields if not _is_tree_marker(field))
+        return values
+
+    @property
+    def structural_fields(self) -> list[str]:
+        """Lo que sí dibuja el árbol. Sirve para reconocer un conector."""
+        values: list[str] = []
+        for fragment in self.fragments:
+            if fragment.kind != "text":
+                continue
+            if fragment.is_structural:
                 values.extend(fragment.fields)
+            else:
+                values.extend(field for field in fragment.fields if _is_tree_marker(field))
         return values
 
     @property
@@ -249,7 +278,15 @@ class _LogicalLine:
 
     @property
     def is_blank(self) -> bool:
-        return not self.fields and not self.icons
+        return not self.fields and not self.structural_fields and not self.icons
+
+
+# Un campo hecho solo de trazos dibuja la rama del árbol; no es un dato.
+_TREE_MARKER = re.compile(r"^[|\-+\\/_.·:\s]+$")
+
+
+def _is_tree_marker(field: str) -> bool:
+    return bool(_TREE_MARKER.match(field))
 
 
 # Etiquetas que cierran una línea lógica. `nobr` **no** está: cierra un
@@ -283,6 +320,8 @@ class _LineReader(HTMLParser):
         self._boundaries: list[tuple[int, str]] = []
         self._buffer: list[str] = []
         self._ignore_depth = 0
+        # Pila de tipografías: SAP marca los símbolos del árbol con SAPDings.
+        self._font_stack: list[bool] = []
 
     # -- Estructura ---------------------------------------------------
 
@@ -294,6 +333,11 @@ class _LineReader(HTMLParser):
         self._record_references(attrs)
         if tag == "img":
             self._append_icon(attrs)
+        elif tag == "input":
+            self._append_input(attrs)
+        elif tag == "font":
+            self._close_text()
+            self._font_stack.append(_is_sapdings(attrs))
         elif tag == "nobr":
             self.nobr_fragments += 1
             self._close_text()
@@ -304,6 +348,8 @@ class _LineReader(HTMLParser):
         self._record_references(attrs)
         if tag == "img":
             self._append_icon(attrs)
+        elif tag == "input":
+            self._append_input(attrs)
         elif tag == "br":
             self._boundary("br")
 
@@ -311,7 +357,11 @@ class _LineReader(HTMLParser):
         if tag in _IGNORED_CONTENT_TAGS:
             self._ignore_depth = max(0, self._ignore_depth - 1)
             return
-        if tag == "nobr":
+        if tag == "font":
+            self._close_text()
+            if self._font_stack:
+                self._font_stack.pop()
+        elif tag == "nobr":
             self._boundary("nobr")
         elif tag in _LINE_BREAK_TAGS:
             self._boundary("block")
@@ -336,7 +386,24 @@ class _LineReader(HTMLParser):
         text = "".join(self._buffer)
         self._buffer = []
         if text:
-            self._fragments.append(_Fragment(kind="text", text=text))
+            structural = bool(self._font_stack and self._font_stack[-1])
+            self._fragments.append(_Fragment(kind="text", text=text, is_structural=structural))
+
+    def _append_input(self, attrs: list[tuple[str, str | None]]) -> None:
+        """Toma el texto que un control lleva en su atributo ``value``.
+
+        SAP escribe algunos valores dentro de campos de formulario en vez de
+        como texto suelto. Sin leerlos, la etiqueta se reconoce y su valor no
+        aparece por ninguna parte. Solo se lee el atributo: nada se envía ni
+        se activa.
+        """
+        values = dict(attrs)
+        if (values.get("type") or "").strip().lower() in {"checkbox", "radio", "hidden"}:
+            return
+        value = (values.get("value") or "").strip()
+        if value:
+            self._close_text()
+            self._fragments.append(_Fragment(kind="text", text=f" {value} "))
 
     def _boundary(self, kind: str) -> None:
         self._close_text()
@@ -381,6 +448,12 @@ class _LineReader(HTMLParser):
         for name, value in attrs:
             if name.lower() in _REFERENCE_ATTRIBUTES and value and _REMOTE_REFERENCE.match(value):
                 self.remote_references.add(value.split("?", 1)[0][:120])
+
+
+def _is_sapdings(attrs: list[tuple[str, str | None]]) -> bool:
+    """Indica si una tipografía es la de los símbolos del árbol de SAP."""
+    face = normalize_key(dict(attrs).get("face")) or ""
+    return "sapdings" in face.replace(" ", "")
 
 
 # Vocabulario de los iconos. Se compara por subcadena porque el texto real
@@ -713,20 +786,29 @@ def _is_metadata_line(line: _LogicalLine) -> bool:
     return False
 
 
-def _line_metadata(lines: Sequence[_LogicalLine]) -> tuple[dict[str, str], int]:
+def _line_metadata(lines: Sequence[_LogicalLine]) -> tuple[dict[str, str], int, int]:
     """Busca los campos de cabecera entre los renglones del export.
 
     Etiqueta y valor pueden estar en el mismo fragmento
     (``Ubic.técn.  LOC-1``), en fragmentos distintos
     (``<nobr>Ubic.técn.</nobr><nobr>LOC-1</nobr>``) o separados por un
-    fragmento de puntuación (``<nobr>:</nobr>``). Al trabajar sobre los campos
-    del renglón ya reunido, las tres formas se leen igual.
+    fragmento de puntuación (``<nobr>:</nobr>``). Un mismo renglón puede
+    llevar **varias** parejas etiqueta/valor.
 
-    Devuelve también cuántas etiquetas se reconocieron, para el diagnóstico.
+    Si la etiqueta agota su renglón, el valor puede estar en el siguiente:
+    algunos exports colocan cada rótulo y su valor en líneas consecutivas.
+    Ese respaldo se aplica solo cuando el renglón siguiente trae **un único
+    campo** y no es a su vez un rótulo, para no arrastrar un valor de
+    cualquier sitio.
+
+    Devuelve los valores, cuántos rótulos se reconocieron y cuántos de ellos
+    quedaron con valor; la diferencia entre ambos conteos es lo que permite
+    ver que un rótulo se encontró y su valor no.
     """
     found: dict[str, str] = {}
     detected = 0
-    for line in lines:
+
+    for index, line in enumerate(lines):
         fields = line.fields
         for position, field in enumerate(fields):
             label_part, _, inline_value = field.partition(":")
@@ -741,17 +823,41 @@ def _line_metadata(lines: Sequence[_LogicalLine]) -> tuple[dict[str, str], int]:
                     continue
                 value = normalize_text(inline_value)
                 if value is None:
-                    # El valor puede estar uno o más fragmentos más allá, con
-                    # un separador suelto en medio.
-                    for candidate in fields[position + 1 :]:
-                        text = normalize_text(candidate)
-                        if text is None or text in _SEPARATOR_FIELDS:
-                            continue
-                        value = text
-                        break
+                    value = _value_after(fields[position + 1 :])
+                if value is None:
+                    value = _value_on_next_line(lines, index)
                 if value is not None:
                     found[name] = value
-    return found, detected
+    return found, detected, len(found)
+
+
+def _value_after(fields: Sequence[str]) -> str | None:
+    """Primer campo con contenido tras un rótulo, saltando separadores."""
+    for candidate in fields:
+        text = normalize_text(candidate)
+        if text is None or text in _SEPARATOR_FIELDS:
+            continue
+        # Otro rótulo no es el valor del anterior.
+        key = _label_key(text.partition(":")[0])
+        if key is not None and any(
+            key == _label_key(synonym) for synonyms in _LINE_LABELS.values() for synonym in synonyms
+        ):
+            return None
+        return text
+    return None
+
+
+def _value_on_next_line(lines: Sequence[_LogicalLine], index: int) -> str | None:
+    """Valor tomado del renglón siguiente, cuando este solo contiene uno."""
+    if index + 1 >= len(lines):
+        return None
+    following = lines[index + 1]
+    if _is_metadata_line(following):
+        return None
+    fields = following.fields
+    if len(fields) != 1:
+        return None
+    return normalize_text(fields[0])
 
 
 def _header_meaning(line: _LogicalLine) -> list[str | None] | None:
@@ -860,14 +966,182 @@ def _record_from_fields(fields: Sequence[str]) -> dict[str, str | None]:
     }
 
 
+class _LineKind(StrEnum):
+    """Qué es un renglón del export, decidido antes de leerle los campos.
+
+    Clasificar primero evita el error que tenía el diagnóstico: contar una
+    cabecera, la raíz del activo o una rama del árbol como registros técnicos
+    que «no se pudieron resolver». No lo son; no son registros.
+    """
+
+    EMPTY = "empty"
+    METADATA = "metadata"
+    ROOT = "root"
+    CONNECTOR = "connector"
+    MATERIAL = "material"
+    EQUIPMENT = "equipment"
+    UNRESOLVED = "unresolved"
+
+
+# Una unidad de medida es un token corto; se admite un dígito para las que lo
+# llevan (``M2``, ``M3``).
+_UNIT_TOKEN = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,3}$")
+# Cantidad y unidad pegadas al final de un texto («… ESTADO 8 UN»).
+_TRAILING_QUANTITY = re.compile(r"(?P<quantity>\d[\d.,]*)\s+(?P<unit>[A-Za-z][A-Za-z0-9]{0,3})$")
+
+
+@dataclass(frozen=True, slots=True)
+class _LineRecord:
+    """Lo que se ha podido leer de un renglón, y de qué clase es."""
+
+    kind: _LineKind
+    code: str | None = None
+    description: str | None = None
+    quantity_text: str | None = None
+    unit: str | None = None
+    level: int | None = None
+
+
+def _split_payload(fields: Sequence[str]) -> tuple[str | None, str | None, str | None]:
+    """Descripción, cantidad y unidad de lo que queda tras el identificador.
+
+    Se lee **por el extremo derecho**, que es donde SAP alinea la cantidad y
+    la unidad, y solo después de haber apartado el identificador. Buscar «el
+    último número del renglón» sin haber apartado antes el código se lleva el
+    código cuando la cantidad no es legible, y deja el renglón sin identidad.
+    """
+    remaining = list(fields)
+    unit: str | None = None
+    quantity: str | None = None
+
+    if remaining and _UNIT_TOKEN.match(remaining[-1]):
+        unit = remaining.pop()
+        if remaining and normalize_quantity(remaining[-1]) is not None:
+            quantity = remaining.pop()
+
+    if quantity is None and remaining:
+        # Descripción, cantidad y unidad pueden compartir un solo campo.
+        match = _TRAILING_QUANTITY.search(remaining[-1])
+        if match:
+            quantity = match.group("quantity")
+            unit = match.group("unit")
+            head = remaining[-1][: match.start()].strip()
+            remaining[-1] = head
+            if not head:
+                remaining.pop()
+
+    description = " ".join(part for part in remaining if part) or None
+    return description, quantity, unit
+
+
+def _fields_from_header(
+    fields: Sequence[str], meaning: Sequence[str | None]
+) -> tuple[str | None, str | None, str | None, str | None, int | None]:
+    """Lee un renglón cuya cabecera de columnas se conoce."""
+    record = _record_from_header(fields, meaning)
+    code = normalize_text(record.get("sap_code")) or normalize_text(record.get("equipment"))
+    level_text = normalize_text(record.get("level"))
+    level = int(level_text) if level_text is not None and level_text.isdigit() else None
+    return (
+        code,
+        normalize_text(record.get("description")),
+        normalize_text(record.get("quantity")),
+        normalize_text(record.get("unit")),
+        level,
+    )
+
+
+def _classify_line(
+    line: _LogicalLine,
+    functional_location: str | None,
+    meaning: Sequence[str | None] | None = None,
+) -> tuple[_LineRecord, bool]:
+    """Decide qué es el renglón y extrae lo que corresponda.
+
+    Devuelve además si el renglón declaró su tipo con un icono, para poder
+    contarlo en el diagnóstico.
+    """
+    if line.is_blank:
+        return _LineRecord(kind=_LineKind.EMPTY), False
+    if _is_metadata_line(line):
+        return _LineRecord(kind=_LineKind.METADATA), False
+
+    fields = line.fields
+    if not fields:
+        # Solo trazos del árbol o símbolos: dibuja la rama, no describe nada.
+        return _LineRecord(kind=_LineKind.CONNECTOR), False
+
+    icon_kind, strong = _type_from_icons(line.icons)
+    material_icon = any(
+        _kind_of_marker(icon.icon_title) == "material"
+        or _kind_of_marker(icon.icon_alt) == "material"
+        for icon in line.icons
+    )
+    equipment_icon = any(
+        _kind_of_marker(icon.icon_title) == "equipment"
+        or _kind_of_marker(icon.icon_alt) == "equipment"
+        for icon in line.icons
+    )
+
+    level: int | None = None
+    if meaning is not None and len(fields) == len(meaning):
+        # La cabecera de columnas manda cuando el renglón encaja con ella.
+        code, description, quantity, unit, level = _fields_from_header(fields, meaning)
+    else:
+        remaining = list(fields)
+        # Un nivel jerárquico es un entero pequeño al principio; un código no
+        # lo es. Apartarlo antes evita confundirlo con el identificador.
+        if remaining and remaining[0].isdigit() and int(remaining[0]) <= _MAX_LEVEL:
+            level = int(remaining.pop(0))
+        code = remaining.pop(0) if remaining and _looks_like_code(remaining[0]) else None
+        description, quantity, unit = _split_payload(remaining)
+
+    def record(
+        kind: _LineKind, *, quantity_text: str | None = None, unit: str | None = None
+    ) -> _LineRecord:
+        return _LineRecord(
+            kind=kind,
+            code=code,
+            description=description,
+            level=level,
+            quantity_text=quantity_text,
+            unit=unit,
+        )
+
+    # La raíz del activo lleva las dos señales a la vez —es material y objeto
+    # técnico— o es el propio emplazamiento. No es un renglón del BOM.
+    if material_icon and equipment_icon:
+        return record(_LineKind.ROOT), True
+    if code is not None and functional_location is not None and code == functional_location:
+        return record(_LineKind.ROOT), strong
+
+    if code is None:
+        return _LineRecord(kind=_LineKind.UNRESOLVED, description=description), strong
+
+    if equipment_icon:
+        return record(_LineKind.EQUIPMENT, unit=unit), True
+    if quantity is not None and unit is not None:
+        # Evidencia estructural de material: identificador, contenido técnico,
+        # y cantidad con unidad al extremo derecho. No hace falta icono.
+        return record(_LineKind.MATERIAL, quantity_text=quantity, unit=unit), strong
+    if icon_kind == "material":
+        return record(_LineKind.MATERIAL, quantity_text=quantity, unit=unit), True
+    if description is not None:
+        # Identificador con contenido pero sin cantidad ni unidad: en una
+        # lista de estructura eso describe un objeto técnico, no un material.
+        return record(_LineKind.EQUIPMENT), strong
+    return record(_LineKind.UNRESOLVED), strong
+
+
 def _items_from_lines(
     lines: Sequence[_LogicalLine], metadata: dict[str, str], diagnostics: dict[str, int]
 ) -> tuple[list[ParsedSapItem], list[IngestionWarning]]:
     """Interpreta un export sin tablas como renglones de BOM.
 
-    Se busca primero una fila de rótulos; si existe, manda ella y los campos
-    del renglón se leen por su posición. Si no existe, cada renglón se
-    interpreta por su forma. El tipo lo decide el icono cuando lo declara.
+    Cada renglón se **clasifica antes** de leerle los campos. Una cabecera, la
+    raíz del activo o una rama del árbol no son registros técnicos fallidos:
+    no son registros, y contarlas como tales oculta cuántos renglones reales
+    quedaron sin resolver.
     """
     meaning: list[str | None] | None = None
     header_number = 0
@@ -879,66 +1153,29 @@ def _items_from_lines(
             break
 
     items: list[ParsedSapItem] = []
-    unrecognised = 0
+    counts = dict.fromkeys(_LineKind, 0)
     incomplete = 0
-    contradictory = 0
     unresolved_parent = 0
-    # Cadena de padres por nivel, para poder decir de qué cuelga cada renglón.
     parents: dict[int, str] = {}
     indents: list[int] = []
 
     for line in lines:
-        if line.number <= header_number or line.is_blank:
+        if line.number == header_number:
             continue
-        fields = line.fields
-        # La cabecera manda cuando el renglón tiene exactamente sus mismos
-        # campos; si no coincide, el renglón se interpreta por su forma. Que
-        # el número de campos difiera es normal —una columna vacía no deja
-        # separador— y no es motivo para descartar el renglón.
-        record = (
-            _record_from_header(fields, meaning)
-            if meaning is not None and len(fields) == len(meaning)
-            else _record_from_fields(fields)
-        )
-        code = normalize_text(record.get("sap_code")) or normalize_text(record.get("equipment"))
-        description = normalize_text(record.get("description"))
-        quantity_text = normalize_text(record.get("quantity"))
-        unit = normalize_text(record.get("unit"))
+        record, from_icon = _classify_line(line, metadata.get("functional_location"), meaning)
+        counts[record.kind] += 1
 
-        entry_kind, strong = _type_from_icons(line.icons)
-        if entry_kind == "material":
+        if record.kind is _LineKind.MATERIAL and from_icon:
             diagnostics["icon_material_signals"] += 1
-        elif entry_kind == "equipment":
+        elif record.kind is _LineKind.EQUIPMENT and from_icon:
             diagnostics["icon_equipment_signals"] += 1
-        elif strong:
-            # Iconos fuertes que se contradicen: no se elige ninguno.
-            contradictory += 1
 
-        if entry_kind is None and not strong and code is not None:
-            # Sin icono utilizable decide la evidencia estructural: en una
-            # lista de BOM solo los materiales llevan cantidad y unidad; un
-            # objeto técnico aparece sin ellas.
-            if quantity_text is not None and unit is not None:
-                entry_kind = "material"
-            elif description is not None:
-                entry_kind = "equipment"
-
-        if code is not None or description is not None:
-            diagnostics["candidate_records"] += 1
-
-        if entry_kind is None or code is None:
-            # Puede ser un título, una línea de separación o un renglón cuya
-            # estructura no se reconoce. No se inventa nada; se cuenta. Una
-            # línea de cabecera no cuenta: no es un renglón de BOM fallido.
-            if not _is_metadata_line(line) and (
-                code is not None or (description is not None and len(fields) > 2)
-            ):
-                unrecognised += 1
+        if record.kind not in (_LineKind.MATERIAL, _LineKind.EQUIPMENT):
             continue
+        assert record.code is not None  # noqa: S101 - garantizado por la clasificación
 
-        level_text = normalize_text(record.get("level"))
-        if level_text is not None and level_text.isdigit():
-            depth = int(level_text)
+        if record.level is not None:
+            depth = record.level
         else:
             if line.indent not in indents:
                 indents.append(line.indent)
@@ -946,71 +1183,59 @@ def _items_from_lines(
             depth = indents.index(line.indent)
 
         extra: dict[str, str] = {}
-        category = normalize_text(record.get("item_category"))
-        if category:
-            extra["item_category"] = category
         parent = parents.get(depth - 1)
         if parent:
             extra["parent_code"] = parent
         elif depth > 0:
-            # El renglón es válido aunque su padre no pueda probarse. No se
+            # El renglón vale aunque su padre no pueda probarse. No se
             # descarta y tampoco se le inventa una relación.
             unresolved_parent += 1
-        parents[depth] = code
+        parents[depth] = record.code
         for deeper in [key for key in parents if key > depth]:
             del parents[deeper]
 
-        quantity = normalize_quantity(quantity_text)
-        if entry_kind == "material" and (quantity is None or unit is None):
-            # Un material sin cantidad legible sigue siendo evidencia válida,
-            # pero no puede compararse contra Ingeniería sin intervención.
+        quantity = normalize_quantity(record.quantity_text)
+        if record.kind is _LineKind.MATERIAL and (quantity is None or record.unit is None):
             incomplete += 1
 
         items.append(
             ParsedSapItem(
                 source_row=len(items) + 1,
-                entry_kind=entry_kind,
-                position=normalize_text(record.get("position")),
-                sap_code=normalize_sap_code(code),
-                description=description,
+                entry_kind=record.kind.value,
+                sap_code=normalize_sap_code(record.code),
+                description=record.description,
                 quantity=quantity,
-                quantity_original=quantity_text,
-                unit=unit,
+                quantity_original=record.quantity_text,
+                unit=record.unit,
                 parent_path=metadata.get("functional_location"),
                 depth=depth,
                 extra=extra,
             )
         )
 
-    diagnostics["parsed_material_records"] = sum(
-        1 for item in items if item.entry_kind == "material"
+    diagnostics["metadata_lines"] = counts[_LineKind.METADATA]
+    diagnostics["root_lines"] = counts[_LineKind.ROOT]
+    diagnostics["connector_lines"] = counts[_LineKind.CONNECTOR]
+    diagnostics["empty_lines"] = counts[_LineKind.EMPTY]
+    diagnostics["parsed_material_records"] = counts[_LineKind.MATERIAL]
+    diagnostics["parsed_equipment_records"] = counts[_LineKind.EQUIPMENT]
+    diagnostics["unresolved_records"] = counts[_LineKind.UNRESOLVED]
+    # Solo renglones que de verdad parecen registros técnicos: ni cabeceras,
+    # ni la raíz, ni ramas del árbol, ni líneas vacías.
+    diagnostics["candidate_records"] = (
+        counts[_LineKind.MATERIAL] + counts[_LineKind.EQUIPMENT] + counts[_LineKind.UNRESOLVED]
     )
-    diagnostics["parsed_equipment_records"] = sum(
-        1 for item in items if item.entry_kind == "equipment"
-    )
-    diagnostics["unresolved_records"] = unrecognised + contradictory
 
     warnings: list[IngestionWarning] = []
-    if unrecognised:
+    if counts[_LineKind.UNRESOLVED]:
         warnings.append(
             IngestionWarning(
                 code="unrecognised_lines",
                 message=(
-                    "Some lines of the export could not be interpreted as BOM records and "
-                    "were not imported. They are reported rather than guessed."
+                    "Some lines look like technical records but could not be interpreted "
+                    "and were not imported. They are reported rather than guessed."
                 ),
-                location=f"{unrecognised} line(s)",
-            )
-        )
-    if contradictory:
-        warnings.append(
-            IngestionWarning(
-                code="contradictory_type_icons",
-                message=(
-                    "Some lines carry icons that declare conflicting types. The type is "
-                    "left undecided rather than chosen."
-                ),
-                location=f"{contradictory} line(s)",
+                location=f"{counts[_LineKind.UNRESOLVED]} line(s)",
             )
         )
     if incomplete:
@@ -1059,7 +1284,7 @@ def parse_sap_snapshot(data: bytes) -> ParsedSapSnapshot:
     reader.feed(text)
     reader.close()
 
-    metadata, labels_detected = _line_metadata(reader.lines)
+    metadata, labels_detected, values_resolved = _line_metadata(reader.lines)
     # Lo que diga una tabla de cabecera manda, por ser la forma más
     # estructurada de las dos.
     metadata = {**metadata, **_extract_metadata(tables.tables)}
@@ -1072,6 +1297,11 @@ def parse_sap_snapshot(data: bytes) -> ParsedSapSnapshot:
         "logical_lines_built": len(reader.lines),
         "html_tables_seen": len(tables.tables),
         "metadata_labels_detected": labels_detected,
+        "metadata_values_resolved": values_resolved,
+        "metadata_lines": 0,
+        "root_lines": 0,
+        "connector_lines": 0,
+        "empty_lines": 0,
         "icon_material_signals": 0,
         "icon_equipment_signals": 0,
         "candidate_records": 0,

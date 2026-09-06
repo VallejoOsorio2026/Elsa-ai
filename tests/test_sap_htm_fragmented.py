@@ -181,8 +181,15 @@ def test_the_image_filename_alone_never_overrides_a_declared_title() -> None:
     assert len(snapshot.materials) == 0
 
 
-def test_contradictory_icons_leave_the_type_undecided() -> None:
-    """Dos señales fuertes opuestas no se resuelven: se avisa."""
+def test_a_line_declaring_both_types_is_the_asset_root_and_is_not_imported() -> None:
+    """Llevar las dos señales a la vez identifica la raíz del activo.
+
+    La raíz es material y objeto técnico al mismo tiempo, así que no es un
+    renglón del BOM y no se importa como tal. Antes se trataba como una
+    contradicción entre iconos; el efecto práctico era el mismo —no se
+    importaba— pero el diagnóstico la contaba como un registro técnico que no
+    se supo resolver, que es justamente lo que no es.
+    """
     body = metadata_lines() + (
         '<nobr>&nbsp;&nbsp;</nobr><img title="Material"><img title="Equipo">'
         "<nobr>MAT-FAKE-013</nobr><nobr>&nbsp;&nbsp;Pieza ficticia</nobr>"
@@ -192,8 +199,9 @@ def test_contradictory_icons_leave_the_type_undecided() -> None:
 
     snapshot = parse_sap_snapshot(build_export(body))
 
-    assert "contradictory_type_icons" in {w.code for w in snapshot.warnings}
     assert all(item.sap_code != "MAT-FAKE-013" for item in snapshot.items)
+    assert snapshot.diagnostics["root_lines"] == 1
+    assert snapshot.diagnostics["unresolved_records"] == 0
 
 
 # ---------------------------------------------------------------------
