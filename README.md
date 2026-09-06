@@ -6,11 +6,12 @@ Barbosa de PAPELSA. Este repositorio contiene el backend (Python + FastAPI).
 El contrato del proyecto —reglas arquitectónicas, stack y decisiones cerradas—
 vive en [`CLAUDE.md`](CLAUDE.md). La documentación técnica está en [`docs/`](docs/).
 
-> Estado actual: identidad y permisos (Bloque 1). Sobre la fundación técnica
-> del Bloque 0 existen ya la verificación real del JWT de Materiales, el modelo
-> de autorización propio de ELSA con migraciones versionadas, la API
-> administrativa mínima y el control de abuso. Todavía no hay RAG, LLM,
-> documentos, Centro de Control ni interfaz.
+> Estado actual: piloto de interfaz (Bloque 3). Sobre la fundación de los
+> bloques anteriores —verificación real del JWT de Materiales, autorización
+> propia de ELSA con migraciones versionadas, conocimiento técnico versionado y
+> revisado— hay ya una interfaz web utilizable: consulta, aportes de
+> conocimiento por voz y Centro de Revisión. Todavía **no** hay RAG, LLM,
+> transcripción real, documentos ni Centro de Control.
 
 **Materiales = identidad. ELSA = autorización.** El Asistente de Materiales
 sigue siendo la única fuente de identidad (los usuarios inician sesión una sola
@@ -66,6 +67,32 @@ curl -H "Authorization: Bearer $ELSA_DEV_TOKEN" \
 ```
 
 En DEV la documentación interactiva queda en `http://127.0.0.1:8000/docs`.
+
+## Interfaz web
+
+El backend sirve la interfaz del piloto en `http://127.0.0.1:8000/` (redirige
+a `/app/`). **No hay proceso de compilación**: son archivos estáticos bajo
+`web/`, servidos por el propio FastAPI. Esa decisión sostiene el criterio de
+aceptación del proyecto —un clon limpio levanta el servidor siguiendo solo
+este README— sin añadir una cadena de herramientas de JavaScript.
+
+Para verla con datos de demostración:
+
+```bash
+ELSA_ENV=DEV ELSA_CORS_ORIGINS=http://127.0.0.1:8000 ELSA_DEMO_SEED=true \
+  uv run uvicorn elsa.main:create_app --factory
+```
+
+`ELSA_DEMO_SEED` siembra cuatro personas y un BOM **sintéticos**; nada procede
+de la planta. Solo funciona en DEV y solo contra los almacenes en memoria.
+
+El recorrido completo —consultar, grabar una nota de voz, revisar lo entendido,
+enviar y validar— está en [`docs/demo-runbook.md`](docs/demo-runbook.md), junto
+con lo que falta para publicarla en una URL HTTPS.
+
+Dos cosas que la interfaz declara en pantalla y conviene saber de antemano: el
+chat **no usa un modelo de lenguaje** (busca literalmente en el BOM publicado)
+y la **transcripción es simulada** (el audio sí se graba de verdad).
 
 ## Endpoints
 
@@ -127,6 +154,7 @@ uv run pre-commit install
 | [`docs/private-acceptance-test.md`](docs/private-acceptance-test.md) | Prueba local con archivos reales, sin tocar Git |
 | [`docs/environment-variables.md`](docs/environment-variables.md) | Referencia de variables de entorno |
 | [`docs/contributing.md`](docs/contributing.md) | Convención de commits y flujo de trabajo |
+| [`docs/demo-runbook.md`](docs/demo-runbook.md) | Cómo levantar y enseñar el piloto, y qué falta para HTTPS |
 | [`docs/brand/`](docs/brand/) | Identidad visual PAPELSA: guía de marca, design tokens y reglas de interfaz |
 | [`docs/adr/`](docs/adr/) | Decisiones arquitectónicas registradas (ADR) |
 
@@ -144,9 +172,12 @@ src/elsa/
   services/        # orquestación de casos de uso (ingesta, reconciliación)
   tools/           # utilidades de línea de comandos (aceptación privada)
   container.py     # composición: qué adaptador implementa cada puerto
+  demo/            # siembra de datos sintéticos para la demostración
+  web.py           # publica la interfaz estática y los assets de marca
   ports/           # interfaces (Protocol) de dependencias externas
   adapters/        # implementaciones reales y fakes deterministas
 supabase/migrations/  # migraciones SQL (autoridad única del esquema)
+web/                  # interfaz del piloto: HTML, CSS y JS sin compilar
 tests/                # pytest
 docs/                 # documentación, ADRs y guía de marca
 assets/brand/         # logotipo PAPELSA para la interfaz web (SVG)

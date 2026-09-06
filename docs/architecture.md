@@ -289,11 +289,80 @@ Capacidad separada de la de administrador, con el mismo alcance
 (dominio + equipo opcional) que los permisos de lectura. Revisar exige poder
 leer; poder leer **no** habilita a revisar. Ver ADR 0009.
 
+## Piloto de interfaz (Bloque 3)
+
+### La interfaz es estática y la sirve el backend
+
+`web/` son HTML, CSS y JavaScript sin compilar, publicados por FastAPI en
+`/app` (`elsa.web`). No hay `npm`, ni bundler, ni segundo servidor. La
+decisión sostiene el criterio de aceptación del proyecto: un clon limpio
+levanta todo siguiendo solo el README.
+
+El montaje va en `/app` y no en `/` a propósito. Un montaje en la raíz atrapa
+toda ruta que no se haya registrado **antes** que él, de modo que un endpoint
+añadido en un bloque futuro quedaría muerto sin aviso. La raíz redirige a
+`/app/`. Hay un test que fija esa garantía.
+
+Solo se publican dos árboles: `web/` y `assets/brand/`. El resto del
+repositorio queda fuera del alcance del servidor de archivos.
+
+### Tres capacidades, no una
+
+| Capacidad | Dependencia | Dónde vive |
+|---|---|---|
+| Consultar | `RequireScope` | puerto `permissions` |
+| Aportar | `RequireContributor` | puerto `contributions` |
+| Revisar | `RequireReviewer` | puerto `permissions` |
+
+Ninguna implica a las demás: tener acceso de lectura a un equipo no habilita a
+añadirle conocimiento. La capacidad de aportar vive en el puerto
+`contributions` y no en el de permisos porque es un concepto nuevo de este
+bloque y el piloto todavía lo guarda en memoria; llevarlo al modelo de
+autorización exigiría una migración del esquema que aún no toca.
+
+### Un aporte pendiente no es conocimiento
+
+`ContributionState` es `draft → pending → approved | rejected`. **No existe el
+estado «publicado»**, y esa ausencia es el mecanismo: un aporte aprobado queda
+marcado como válido, no pasa a ser conocimiento vigente. Publicar sigue siendo
+una operación del BOM versionado, con su propia autoridad (ver «Ciclo de vida
+de una versión»). La API de consulta del Bloque 2 no ve los aportes en ningún
+estado.
+
+Un adjunto enviado por el chat tampoco entra: el endpoint del asistente recibe
+la **declaración** de los adjuntos —para poder aplicar los límites en el
+servidor— pero no los archivos, así que no hay camino por el que puedan
+almacenarse.
+
+### Lo simulado se declara
+
+Dos capacidades del piloto no existen todavía, y ninguna se disfraza:
+
+- **Sin modelo de lenguaje.** `elsa.core.retrieval` busca literalmente los
+  términos de la pregunta en el BOM y el AMEF publicados, y la respuesta se
+  compone con una plantilla. Cada resultado dice qué término lo produjo. La
+  respuesta lleva `engine` e `is_generated` para que el cliente no tenga que
+  suponerlo.
+- **Sin voz a texto.** El puerto `transcription` tiene un solo adaptador, que
+  devuelve un marcador de posición y lo marca con `is_simulated`. No inventa
+  contenido técnico: un párrafo verosímil producido sin haber oído nada
+  acabaría aprobado y convertido en conocimiento del equipo. El audio, en
+  cambio, se graba y se guarda de verdad, en el almacén privado de artefactos
+  y servido tras la misma comprobación de permisos.
+
+La bandera viaja con el aporte hasta la pantalla de revisión: quien aprueba
+tiene que saber si el texto se reconoció o lo escribió una persona.
+
 ## Qué no existe todavía (a propósito)
 
-RAG, LLM real, OCR, embeddings, reranking, agentes, UI, tablas de documentos,
-integración con el motor de búsqueda de Materiales, IH06/IW13, Centro de
-Control y despliegue. Los bloques 0 y 1 dejan las fronteras preparadas
-(puertos, health por dependencia, migraciones versionadas, cadena de confianza
-y modelo de permisos) para que esos componentes lleguen sin romper la
-arquitectura.
+RAG, LLM real, OCR, embeddings, reranking, agentes, transcripción real, tablas
+de documentos, integración con el motor de búsqueda de Materiales, IH06/IW13,
+Centro de Control y despliegue. Los bloques anteriores dejan las fronteras
+preparadas (puertos, health por dependencia, migraciones versionadas, cadena
+de confianza y modelo de permisos) para que esos componentes lleguen sin
+romper la arquitectura.
+
+Los aportes del Bloque 3 se guardan **solo en memoria**: no hay adaptador de
+PostgreSQL ni migración, y por tanto no sobreviven a un reinicio. Es lo
+correcto para un piloto; cuando el flujo se dé por bueno, el adaptador real
+llegará con su migración versionada, como el resto del esquema (ADR 0001).
