@@ -18,6 +18,10 @@ from elsa.ports.auth import (
 
 ENGINEER_ID = "00000000-0000-4000-8000-000000000001"
 ADMIN_ID = "00000000-0000-4000-8000-000000000002"
+# Dos revisores técnicos: hacen falta dos para poder comprobar que una
+# validación puede revertirla otra persona con alcance equivalente.
+REVIEWER_ID = "00000000-0000-4000-8000-000000000003"
+OTHER_REVIEWER_ID = "00000000-0000-4000-8000-000000000004"
 
 _DEFAULT_USERS: dict[str, AuthenticatedUser] = {
     "fake-token-engineer": AuthenticatedUser(
@@ -31,6 +35,18 @@ _DEFAULT_USERS: dict[str, AuthenticatedUser] = {
         email="admin@example.test",
         claims={"role": "admin"},
         session_id="00000000-0000-4000-8000-0000000000a2",
+    ),
+    "fake-token-reviewer": AuthenticatedUser(
+        id=REVIEWER_ID,
+        email="reviewer@example.test",
+        claims={"role": "reviewer"},
+        session_id="00000000-0000-4000-8000-0000000000a3",
+    ),
+    "fake-token-other-reviewer": AuthenticatedUser(
+        id=OTHER_REVIEWER_ID,
+        email="other.reviewer@example.test",
+        claims={"role": "reviewer"},
+        session_id="00000000-0000-4000-8000-0000000000a4",
     ),
 }
 

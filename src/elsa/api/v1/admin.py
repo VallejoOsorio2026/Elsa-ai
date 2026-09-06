@@ -20,6 +20,7 @@ from pydantic import BaseModel, field_validator
 
 from elsa.api.deps import (
     VerifiedIdentity,
+    get_knowledge,
     get_permissions,
     get_settings,
     require_admin,
@@ -29,6 +30,11 @@ from elsa.api.errors import ApiError
 from elsa.config import Settings
 from elsa.core.authorization import InvalidScopeError, Principal, normalize_scope_value
 from elsa.logging import get_request_id
+from elsa.ports.knowledge import (
+    AssetAlreadyExistsError,
+    KnowledgeRepositoryPort,
+    KnowledgeUnavailableError,
+)
 from elsa.ports.permissions import (
     AccountNotFoundError,
     BootstrapAlreadyCompletedError,
@@ -36,6 +42,7 @@ from elsa.ports.permissions import (
     PermissionGrant,
     PermissionsRepositoryPort,
     PermissionsUnavailableError,
+    ReviewerGrant,
     UnknownDomainError,
 )
 
@@ -103,6 +110,33 @@ class GrantView(BaseModel):
 class AccountDetail(BaseModel):
     account: AccountView
     grants: list[GrantView]
+    reviewer_grants: list[GrantView] = []
+
+
+class AssetBody(BaseModel):
+    """Alta de un Activo Técnico. El alcance es ``(domain, code)``."""
+
+    code: str
+    name: str
+    domain: str
+    description: str | None = None
+
+    @field_validator("code", "domain")
+    @classmethod
+    def _normalize_scope(cls, value: str) -> str:
+        try:
+            return normalize_scope_value(value)
+        except InvalidScopeError as exc:
+            raise ValueError(str(exc)) from None
+
+
+class AssetView(BaseModel):
+    id: str
+    code: str
+    name: str
+    domain: str
+    description: str | None = None
+    is_active: bool
 
 
 class BootstrapResponse(BaseModel):
@@ -128,6 +162,19 @@ def _account_view(account: ElsaAccount) -> AccountView:
         display_name=account.display_name,
         is_active=account.is_active,
         is_admin=account.is_admin,
+    )
+
+
+def _reviewer_view(grant: ReviewerGrant) -> GrantView:
+    return GrantView(
+        id=grant.id,
+        external_user_id=grant.external_user_id,
+        domain=grant.domain,
+        equipment=grant.equipment,
+        granted_by=grant.granted_by,
+        granted_at=grant.granted_at.isoformat(),
+        revoked_by=grant.revoked_by,
+        revoked_at=None if grant.revoked_at is None else grant.revoked_at.isoformat(),
     )
 
 
@@ -246,6 +293,7 @@ async def read_account(
     try:
         account = await permissions.get_account(subject)
         grants = () if account is None else await permissions.list_active_grants(subject)
+        reviewer = () if account is None else await permissions.list_active_reviewer_grants(subject)
     except PermissionsUnavailableError:
         raise _unavailable() from None
     if account is None:
@@ -253,6 +301,7 @@ async def read_account(
     return AccountDetail(
         account=_account_view(account),
         grants=[_grant_view(grant) for grant in grants],
+        reviewer_grants=[_reviewer_view(grant) for grant in reviewer],
     )
 
 
@@ -406,3 +455,138 @@ async def read_audit(
         )
         for entry in entries
     ]
+
+
+# ---------------------------------------------------------------------
+# Revisor Técnico
+# ---------------------------------------------------------------------
+
+
+@router.post("/users/{user_id}/reviewer", response_model=GrantView)
+async def grant_reviewer(
+    request: Request,
+    user_id: uuid.UUID,
+    body: GrantBody,
+    admin: Principal = Depends(require_admin),
+    permissions: PermissionsRepositoryPort = Depends(get_permissions),
+) -> GrantView:
+    """Habilita a un usuario como Revisor Técnico sobre un alcance.
+
+    Es una capacidad distinta de la de administrador: el revisor podrá
+    validar conocimiento técnico, pero no gestionará usuarios, ni permisos,
+    ni configuración. Solo un administrador llega aquí.
+    """
+    try:
+        grant = await permissions.grant_reviewer(
+            subject=str(user_id),
+            domain=body.domain,
+            equipment=body.equipment,
+            actor=admin.external_user_id,
+            display_name=body.display_name,
+            request_id=get_request_id(request),
+        )
+    except UnknownDomainError:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Unknown knowledge domain.",
+            code="unknown_domain",
+        ) from None
+    except PermissionsUnavailableError:
+        raise _unavailable() from None
+    _logger.info(
+        "technical reviewer granted",
+        extra={
+            "user_id": str(user_id),
+            "domain": grant.domain,
+            "equipment": grant.equipment,
+            "request_id": get_request_id(request),
+        },
+    )
+    return _reviewer_view(grant)
+
+
+@router.post("/users/{user_id}/reviewer/revoke", response_model=GrantView)
+async def revoke_reviewer(
+    request: Request,
+    user_id: uuid.UUID,
+    body: ScopeBody,
+    admin: Principal = Depends(require_admin),
+    permissions: PermissionsRepositoryPort = Depends(get_permissions),
+) -> GrantView:
+    """Deshabilita a un Revisor Técnico.
+
+    La capacidad se pierde en la petición siguiente. Su historial de
+    validaciones permanece intacto: borrarlo dejaría aprobaciones sin
+    responsable, que es exactamente lo que una auditoría necesita saber.
+    """
+    try:
+        grant = await permissions.revoke_reviewer(
+            subject=str(user_id),
+            domain=body.domain,
+            equipment=body.equipment,
+            actor=admin.external_user_id,
+            request_id=get_request_id(request),
+        )
+    except PermissionsUnavailableError:
+        raise _unavailable() from None
+    if grant is None:
+        raise ApiError(
+            status.HTTP_404_NOT_FOUND,
+            "That user is not an active reviewer for that scope.",
+            code="reviewer_grant_not_found",
+        )
+    return _reviewer_view(grant)
+
+
+# ---------------------------------------------------------------------
+# Activos técnicos
+# ---------------------------------------------------------------------
+
+
+@router.post("/assets", response_model=AssetView, status_code=status.HTTP_201_CREATED)
+async def create_asset(
+    body: AssetBody,
+    _admin: Principal = Depends(require_admin),
+    permissions: PermissionsRepositoryPort = Depends(get_permissions),
+    knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
+) -> AssetView:
+    """Da de alta un Activo Técnico.
+
+    El modelo es genérico: Tampella será el primer caso, no una excepción
+    programada. El dominio tiene que existir en el catálogo, porque
+    ``(domain, code)`` es el alcance con el que después se autoriza.
+    """
+    try:
+        domains = await permissions.list_domains()
+    except PermissionsUnavailableError:
+        raise _unavailable() from None
+    if body.domain not in domains:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Unknown knowledge domain.",
+            code="unknown_domain",
+        )
+    try:
+        asset = await knowledge.create_asset(
+            code=body.code, name=body.name, domain=body.domain, description=body.description
+        )
+    except AssetAlreadyExistsError:
+        raise ApiError(
+            status.HTTP_409_CONFLICT,
+            "A technical asset with that code already exists.",
+            code="asset_already_exists",
+        ) from None
+    except KnowledgeUnavailableError:
+        raise ApiError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "The knowledge store is temporarily unavailable.",
+            code="knowledge_store_unavailable",
+        ) from None
+    return AssetView(
+        id=asset.id,
+        code=asset.code,
+        name=asset.name,
+        domain=asset.domain,
+        description=asset.description,
+        is_active=asset.is_active,
+    )

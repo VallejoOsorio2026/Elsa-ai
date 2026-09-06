@@ -157,6 +157,72 @@ Solo hay **un** proyecto Supabase remoto de ELSA. DEV trabaja con
 configuración local (fakes o una base local); TEST es el que usa el proyecto
 remoto.
 
+## Trabajar con conocimiento técnico (Bloque 2)
+
+Flujo completo en DEV, con adaptadores en memoria y los usuarios *fake*.
+Igual que en el resto de esta guía, los tokens van en variables de entorno
+en vez de escribirse en la línea de comandos:
+
+```bash
+# Tokens de prueba del adaptador fake
+ELSA_ADMIN=fake-token-admin
+ELSA_REVIEWER=fake-token-reviewer
+REVIEWER_ID=00000000-0000-4000-8000-000000000003   # el usuario de ese token
+API=http://127.0.0.1:8000/api/v1
+
+# 1. Alta del Activo Técnico (administrador)
+curl -X POST "$API/admin/assets" \
+     -H "Authorization: Bearer $ELSA_ADMIN" -H "Content-Type: application/json" \
+     -d '{"code":"tampella","name":"Tampella","domain":"mantenimiento"}'
+
+# 2. Permiso de lectura y, aparte, capacidad de Revisor Técnico.
+#    Son dos cosas distintas: leer no habilita a validar.
+curl -X POST "$API/admin/users/$REVIEWER_ID/grants" \
+     -H "Authorization: Bearer $ELSA_ADMIN" -H "Content-Type: application/json" \
+     -d '{"domain":"mantenimiento","equipment":"tampella"}'
+curl -X POST "$API/admin/users/$REVIEWER_ID/reviewer" \
+     -H "Authorization: Bearer $ELSA_ADMIN" -H "Content-Type: application/json" \
+     -d '{"domain":"mantenimiento","equipment":"tampella"}'
+
+# 3. Cargar el BOM de Ingeniería. Queda PENDIENTE de validación: cargar no publica.
+curl -X POST "$API/technical/mantenimiento/tampella/engineering-bom" \
+     -H "Authorization: Bearer $ELSA_REVIEWER" -F "file=@bom.xlsx"
+VER=<version_id devuelto>
+
+# 4. Aprobar y publicar
+curl -X POST "$API/technical/mantenimiento/tampella/versions/$VER/review" \
+     -H "Authorization: Bearer $ELSA_REVIEWER" -H "Content-Type: application/json" \
+     -d '{"decision":"approved"}'
+curl -X POST "$API/technical/mantenimiento/tampella/versions/$VER/publish" \
+     -H "Authorization: Bearer $ELSA_REVIEWER"
+
+# 5. Cargar un snapshot de SAP y reconciliar contra la versión publicada
+curl -X POST "$API/technical/mantenimiento/tampella/sap-snapshots" \
+     -H "Authorization: Bearer $ELSA_REVIEWER" -F "file=@export.htm"
+SNAP=<snapshot_id devuelto>
+curl -X POST "$API/technical/mantenimiento/tampella/reconciliations" \
+     -H "Authorization: Bearer $ELSA_REVIEWER" -H "Content-Type: application/json" \
+     -d "{\"snapshot_id\":\"$SNAP\"}"
+
+# 6. Lo que ve un ingeniero de planta: solo lo publicado, sin IDs internos
+curl -H "Authorization: Bearer $ELSA_REVIEWER" \
+     "$API/knowledge/mantenimiento/tampella/components"
+```
+
+Rechazar y revertir exigen motivo; aprobar admite comentario opcional. Una
+versión rechazada no puede publicarse, y publicar una segunda versión deja la
+primera como `superseded`, nunca la borra.
+
+Para generar un XLSX de prueba **sin datos reales**, usa los generadores de
+la suite (`tests/fixtures_sources.py`): están hechos para eso y no contienen
+información de planta.
+
+### Archivos reales
+
+Nunca se copian al repositorio ni se versionan. Para probar la ingesta contra
+los archivos reales de Ingeniería y de SAP, ver
+[`private-acceptance-test.md`](private-acceptance-test.md).
+
 ## Estructura del repositorio
 
 Ver el árbol comentado en el [`README.md`](../README.md) y la descripción de

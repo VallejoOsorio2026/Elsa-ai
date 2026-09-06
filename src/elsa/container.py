@@ -16,15 +16,21 @@ import httpx
 from elsa.adapters.fake_auth import FakeAuthAdapter
 from elsa.adapters.fake_materials_identity import FakeMaterialsIdentityAdapter
 from elsa.adapters.jwks import JwksCache
+from elsa.adapters.local_artifact_storage import LocalArtifactStorage
 from elsa.adapters.memory_abuse_guard import InMemoryAbuseGuard
+from elsa.adapters.memory_artifact_storage import InMemoryArtifactStorage
+from elsa.adapters.memory_knowledge import InMemoryKnowledgeRepository
 from elsa.adapters.memory_permissions import InMemoryPermissionsRepository
+from elsa.adapters.postgres_knowledge import PostgresKnowledgeRepository
 from elsa.adapters.postgres_permissions import PostgresPermissionsRepository
 from elsa.adapters.supabase_auth import SupabaseJwtAuthAdapter
 from elsa.adapters.supabase_materials_identity import SupabaseMaterialsIdentityAdapter
-from elsa.config import AuthProvider, PermissionsBackend, Settings
+from elsa.config import ArtifactStorageBackend, AuthProvider, PermissionsBackend, Settings
 from elsa.core.health import DependencyReport, DependencyStatus
 from elsa.ports.abuse import AbuseGuardPort, AbusePolicy
+from elsa.ports.artifact_storage import ArtifactStoragePort, ArtifactStorageUnavailableError
 from elsa.ports.auth import AuthPort, IdentityProviderUnavailableError
+from elsa.ports.knowledge import KnowledgeRepositoryPort, KnowledgeUnavailableError
 from elsa.ports.materials_identity import MaterialsIdentityPort
 from elsa.ports.permissions import PermissionsRepositoryPort, PermissionsUnavailableError
 
@@ -49,11 +55,15 @@ class Container:
         materials_identity: MaterialsIdentityPort | None = None,
         permissions: PermissionsRepositoryPort | None = None,
         abuse_guard: AbuseGuardPort | None = None,
+        knowledge: KnowledgeRepositoryPort | None = None,
+        artifact_storage: ArtifactStoragePort | None = None,
     ) -> None:
         self.settings = settings
         self._http: httpx.AsyncClient | None = None
         self._postgres: PostgresPermissionsRepository | None = None
+        self._postgres_knowledge: PostgresKnowledgeRepository | None = None
         self._overridden_permissions = permissions is not None
+        self._overridden_knowledge = knowledge is not None
 
         self.abuse_guard: AbuseGuardPort = abuse_guard or InMemoryAbuseGuard(
             AbusePolicy(
@@ -87,28 +97,53 @@ class Container:
         if self.permissions is None and settings.permissions_backend is PermissionsBackend.MEMORY:
             self.permissions = InMemoryPermissionsRepository()
 
+        # El conocimiento técnico vive en la misma base que los permisos, así
+        # que sigue el mismo selector: no tendría sentido que uno fuera a
+        # PostgreSQL y el otro a memoria.
+        self.knowledge: KnowledgeRepositoryPort | None = knowledge
+        if self.knowledge is None and settings.permissions_backend is PermissionsBackend.MEMORY:
+            self.knowledge = InMemoryKnowledgeRepository()
+
+        self.artifact_storage: ArtifactStoragePort = (
+            artifact_storage or self._build_artifact_storage(settings)
+        )
+
     # -----------------------------------------------------------------
     # Ciclo de vida
     # -----------------------------------------------------------------
 
     async def start(self) -> None:
         """Abre los recursos que requieren un bucle de eventos."""
-        if self._overridden_permissions or self.permissions is not None:
-            return
         settings = self.settings
         if settings.permissions_backend is not PermissionsBackend.POSTGRES:
             return
+        if self.permissions is not None and self.knowledge is not None:
+            return
         assert settings.database_url is not None  # noqa: S101 - garantizado por la configuración
-        self._postgres = await PostgresPermissionsRepository.connect(
-            settings.database_url.get_secret_value(),
-            min_size=settings.database_pool_min_size,
-            max_size=settings.database_pool_max_size,
-        )
-        self.permissions = self._postgres
-        _logger.info("permissions store connected")
+
+        if self.permissions is None:
+            self._postgres = await PostgresPermissionsRepository.connect(
+                settings.database_url.get_secret_value(),
+                min_size=settings.database_pool_min_size,
+                max_size=settings.database_pool_max_size,
+            )
+            self.permissions = self._postgres
+            _logger.info("permissions store connected")
+
+        if self.knowledge is None:
+            self._postgres_knowledge = await PostgresKnowledgeRepository.connect(
+                settings.database_url.get_secret_value(),
+                min_size=settings.database_pool_min_size,
+                max_size=settings.database_pool_max_size,
+            )
+            self.knowledge = self._postgres_knowledge
+            _logger.info("knowledge store connected")
 
     async def aclose(self) -> None:
         """Cierra los recursos abiertos por :meth:`start`."""
+        if self._postgres_knowledge is not None:
+            await self._postgres_knowledge.close()
+            self._postgres_knowledge = None
         if self._postgres is not None:
             await self._postgres.close()
             self._postgres = None
@@ -122,13 +157,31 @@ class Container:
             raise PermissionsUnavailableError("the ELSA permissions store is not connected")
         return self.permissions
 
+    def require_knowledge(self) -> KnowledgeRepositoryPort:
+        """Devuelve el repositorio de conocimiento o falla como indisponible."""
+        if self.knowledge is None:
+            raise KnowledgeUnavailableError("the ELSA knowledge store is not connected")
+        return self.knowledge
+
+    @staticmethod
+    def _build_artifact_storage(settings: Settings) -> ArtifactStoragePort:
+        if settings.artifact_storage_backend is ArtifactStorageBackend.LOCAL:
+            # La configuración garantiza la raíz para el backend local.
+            assert settings.artifact_storage_root is not None  # noqa: S101
+            return LocalArtifactStorage(settings.artifact_storage_root)
+        return InMemoryArtifactStorage()
+
     # -----------------------------------------------------------------
     # Salud
     # -----------------------------------------------------------------
 
     async def health_reports(self) -> tuple[DependencyReport, ...]:
         """Estado por dependencia para ``/health/ready``."""
-        reports = [await self._auth_report(), await self._database_report()]
+        reports = [
+            await self._auth_report(),
+            await self._database_report(),
+            await self._storage_report(),
+        ]
         reports.extend(
             DependencyReport(
                 name=name,
@@ -186,6 +239,30 @@ class Container:
                 detail="the permissions store is not reachable",
             )
         return DependencyReport(name="database", status=DependencyStatus.OK, critical=True)
+
+    async def _storage_report(self) -> DependencyReport:
+        """El almacenamiento es crítico: sin él no se puede ingerir evidencia.
+
+        Se marca ``degraded`` con el adaptador en memoria porque responde,
+        pero pierde todo al reiniciar: es utilizable en DEV y nunca fuera.
+        """
+        if isinstance(self.artifact_storage, InMemoryArtifactStorage):
+            return DependencyReport(
+                name="artifact_storage",
+                status=DependencyStatus.DEGRADED,
+                critical=True,
+                detail="in-memory artifact storage (DEV only)",
+            )
+        try:
+            await self.artifact_storage.check_health()
+        except ArtifactStorageUnavailableError:
+            return DependencyReport(
+                name="artifact_storage",
+                status=DependencyStatus.DOWN,
+                critical=True,
+                detail="the private artifact storage is not writable",
+            )
+        return DependencyReport(name="artifact_storage", status=DependencyStatus.OK, critical=True)
 
     # -----------------------------------------------------------------
     # Construcción de adaptadores reales

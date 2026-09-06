@@ -18,7 +18,40 @@ pytestmark = pytest.mark.anyio
 ADMIN = "aaaaaaaa-0000-4000-8000-000000000001"
 USER = "bbbbbbbb-0000-4000-8000-000000000002"
 
-ELSA_TABLES = {"accounts", "knowledge_domains", "permission_grants", "admin_audit_log"}
+# Bloque 1: identidad y autorización.
+AUTHORIZATION_TABLES = {
+    "accounts",
+    "knowledge_domains",
+    "permission_grants",
+    "admin_audit_log",
+}
+
+# Bloque 2: conocimiento técnico. La lista es explícita a propósito: una
+# tabla nueva que nadie declara aquí es una tabla que nadie revisó.
+KNOWLEDGE_TABLES = {
+    "technical_assets",
+    "subsystems",
+    "components",
+    "component_identifiers",
+    "source_artifacts",
+    "derived_artifacts",
+    "imports",
+    "engineering_bom_versions",
+    "engineering_bom_items",
+    "drawings",
+    "drawing_images",
+    "failure_modes",
+    "sod_criteria",
+    "option_tables",
+    "sap_bom_snapshots",
+    "sap_snapshot_items",
+    "reconciliation_runs",
+    "reconciliation_items",
+    "reviewer_grants",
+    "reviews",
+}
+
+ELSA_TABLES = AUTHORIZATION_TABLES | KNOWLEDGE_TABLES
 
 
 @pytest.fixture
@@ -38,6 +71,27 @@ async def test_migrations_create_the_expected_tables(connection: asyncpg.Connect
     rows = await connection.fetch("select tablename from pg_tables where schemaname = 'elsa'")
 
     assert {row["tablename"] for row in rows} == ELSA_TABLES
+
+
+async def test_the_block_2_migration_builds_on_the_block_1_schema(
+    connection: asyncpg.Connection,
+) -> None:
+    """El modelo de autorización del Bloque 1 sigue intacto bajo el nuevo.
+
+    Un activo técnico apunta al catálogo de dominios que ya existía, de modo
+    que autorizar un activo es autorizar un alcance del Bloque 1 y no hace
+    falta un segundo modelo de permisos.
+    """
+    rows = await connection.fetch("select tablename from pg_tables where schemaname = 'elsa'")
+    tables = {row["tablename"] for row in rows}
+    assert AUTHORIZATION_TABLES <= tables
+
+    referenced = await connection.fetchval(
+        "select target.relname from pg_constraint c "
+        "join pg_class target on target.oid = c.confrelid "
+        "where c.conrelid = 'elsa.technical_assets'::regclass and c.contype = 'f'"
+    )
+    assert referenced == "knowledge_domains"
 
 
 async def test_migrations_are_idempotent(connection: asyncpg.Connection) -> None:

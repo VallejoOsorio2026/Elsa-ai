@@ -73,6 +73,27 @@ las limitaciones conocidas en [`security.md`](security.md).
 | `ELSA_MAX_SESSIONS_PER_USER` | No | `0` | Máximo de sesiones ELSA simultáneas. Solo aplicable si el JWT trae un identificador de sesión fiable; si no lo trae, no se aplica y se avisa en el log. |
 | `ELSA_SESSION_IDLE_TIMEOUT_SECONDS` | No | `1800` | Inactividad tras la cual una sesión deja de contar como activa. |
 
+## Almacenamiento privado de artefactos
+
+| Variable | Obligatoria | Por defecto | Descripción |
+|---|---|---|---|
+| `ELSA_ARTIFACT_STORAGE_BACKEND` | no | `memory` | `local` \| `memory`. `memory` **solo** en DEV |
+| `ELSA_ARTIFACT_STORAGE_ROOT` | con `local` | — | Directorio privado, **fuera del repositorio** y sin exposición web |
+
+Los bytes de los archivos originales y de los planos extraídos viven aquí,
+nunca en PostgreSQL ni en Git. Ver `docs/private-storage.md`.
+
+## Límites de ingesta
+
+| Variable | Obligatoria | Por defecto | Descripción |
+|---|---|---|---|
+| `ELSA_INGESTION_MAX_UPLOAD_BYTES` | no | `26214400` (25 MiB) | Tamaño máximo del archivo subido |
+| `ELSA_INGESTION_MAX_UNCOMPRESSED_BYTES` | no | `209715200` (200 MiB) | Expansión máxima del paquete XLSX |
+| `ELSA_INGESTION_MAX_ARCHIVE_ENTRIES` | no | `5000` | Entradas máximas dentro del paquete |
+
+Se aplican **antes** de interpretar el archivo. El límite de expansión no
+puede ser menor que el de subida; la configuración lo rechaza al arrancar.
+
 ## Solo para tests
 
 | Variable | Descripción |

@@ -12,9 +12,17 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from elsa.adapters.fake_auth import ADMIN_ID, ENGINEER_ID, FakeAuthAdapter
+from elsa.adapters.fake_auth import (
+    ADMIN_ID,
+    ENGINEER_ID,
+    OTHER_REVIEWER_ID,
+    REVIEWER_ID,
+    FakeAuthAdapter,
+)
 from elsa.adapters.fake_materials_identity import FakeMaterialsIdentityAdapter
 from elsa.adapters.memory_abuse_guard import InMemoryAbuseGuard
+from elsa.adapters.memory_artifact_storage import InMemoryArtifactStorage
+from elsa.adapters.memory_knowledge import InMemoryKnowledgeRepository
 from elsa.adapters.memory_permissions import InMemoryPermissionsRepository
 from elsa.config import AuthProvider, Environment, PermissionsBackend, Settings
 from elsa.container import Container
@@ -24,6 +32,8 @@ from elsa.ports.materials_identity import MaterialsProfile
 
 ENGINEER_TOKEN = "fake-token-engineer"
 ADMIN_TOKEN = "fake-token-admin"
+REVIEWER_TOKEN = "fake-token-reviewer"
+OTHER_REVIEWER_TOKEN = "fake-token-other-reviewer"
 
 
 def auth_header(token: str) -> dict[str, str]:
@@ -82,6 +92,12 @@ def materials_identity() -> FakeMaterialsIdentityAdapter:
             ADMIN_ID: MaterialsProfile(
                 user_id=ADMIN_ID, display_name="Administradora de prueba", is_active=True
             ),
+            REVIEWER_ID: MaterialsProfile(
+                user_id=REVIEWER_ID, display_name="Revisor de prueba", is_active=True
+            ),
+            OTHER_REVIEWER_ID: MaterialsProfile(
+                user_id=OTHER_REVIEWER_ID, display_name="Segundo revisor", is_active=True
+            ),
         }
     )
 
@@ -93,12 +109,24 @@ def abuse_guard() -> InMemoryAbuseGuard:
 
 
 @pytest.fixture
+def knowledge() -> InMemoryKnowledgeRepository:
+    return InMemoryKnowledgeRepository()
+
+
+@pytest.fixture
+def artifact_storage() -> InMemoryArtifactStorage:
+    return InMemoryArtifactStorage()
+
+
+@pytest.fixture
 def container(
     settings: Settings,
     auth_adapter: FakeAuthAdapter,
     materials_identity: FakeMaterialsIdentityAdapter,
     permissions: InMemoryPermissionsRepository,
     abuse_guard: InMemoryAbuseGuard,
+    knowledge: InMemoryKnowledgeRepository,
+    artifact_storage: InMemoryArtifactStorage,
 ) -> Container:
     return Container(
         settings,
@@ -106,6 +134,8 @@ def container(
         materials_identity=materials_identity,
         permissions=permissions,
         abuse_guard=abuse_guard,
+        knowledge=knowledge,
+        artifact_storage=artifact_storage,
     )
 
 

@@ -76,12 +76,22 @@ En DEV la documentación interactiva queda en `http://127.0.0.1:8000/docs`.
 | `GET /api/v1/access/{dominio}` | Permiso sobre el dominio |
 | `GET /api/v1/access/{dominio}/{equipo}` | Permiso sobre ese equipo |
 | `POST /api/v1/admin/bootstrap` | JWT válido + `X-Bootstrap-Token` |
-| `/api/v1/admin/users/...` · `/api/v1/admin/audit` | Ser administrador de ELSA |
+| `/api/v1/admin/users/...` · `/api/v1/admin/audit` · `/api/v1/admin/assets` | Ser administrador de ELSA |
+| `GET /api/v1/knowledge/{dominio}/{activo}` · `/components` · `/failure-modes` | Permiso de lectura sobre el activo |
+| `/api/v1/technical/{dominio}/{activo}/...` | Permiso de lectura **y** capacidad de Revisor Técnico |
 
 Las rutas `/access/...` son sondas de autorización: no recuperan conocimiento,
 existen para poder verificar la cadena de confianza y desaparecerán cuando
 lleguen los endpoints reales. La API administrativa es el mínimo para probar
 el modelo; **no** es el Centro de Control.
+
+`/knowledge/...` sirve **solo conocimiento publicado**, sin identificadores
+internos, y reporta las diferencias con SAP como una advertencia contada, no
+como un informe. `/technical/...` es la API de gobierno: cargar fuentes,
+revisar, publicar y reconciliar. Revisar exige poder leer, pero poder leer no
+habilita a revisar.
+
+**ELSA no escribe en SAP.** Importa archivos exportados, compara e informa.
 
 Si falta una variable obligatoria, el arranque falla con un mensaje que nombra
 la variable afectada: es el comportamiento esperado, no un bug.
@@ -111,7 +121,10 @@ uv run pre-commit install
 |---|---|
 | [`docs/architecture.md`](docs/architecture.md) | Arquitectura, capas y fronteras del sistema |
 | [`docs/development.md`](docs/development.md) | Desarrollo local, tests y flujo de migraciones |
-| [`docs/security.md`](docs/security.md) | Política de secretos, logs y CORS |
+| [`docs/security.md`](docs/security.md) | Política de secretos, logs, CORS y fuentes de entrada |
+| [`docs/ingestion-contract.md`](docs/ingestion-contract.md) | Qué acepta la ingesta y qué no hace nunca |
+| [`docs/private-storage.md`](docs/private-storage.md) | Almacenamiento privado de archivos originales y planos |
+| [`docs/private-acceptance-test.md`](docs/private-acceptance-test.md) | Prueba local con archivos reales, sin tocar Git |
 | [`docs/environment-variables.md`](docs/environment-variables.md) | Referencia de variables de entorno |
 | [`docs/contributing.md`](docs/contributing.md) | Convención de commits y flujo de trabajo |
 | [`docs/adr/`](docs/adr/) | Decisiones arquitectónicas registradas (ADR) |
@@ -124,7 +137,11 @@ src/elsa/
   config.py        # configuración tipada por variables de entorno
   logging.py       # logging JSON + request-id
   api/             # capa HTTP: cadena de confianza, rutas v1 y errores
-  core/            # lógica de dominio (salud y decisión de autorización)
+  core/            # lógica de dominio pura: autorización, salud, emparejamiento,
+                   #   versionado, reconciliación y reglas de revisión
+  ingestion/       # parsers de XLSX y HTM, independientes de FastAPI
+  services/        # orquestación de casos de uso (ingesta, reconciliación)
+  tools/           # utilidades de línea de comandos (aceptación privada)
   container.py     # composición: qué adaptador implementa cada puerto
   ports/           # interfaces (Protocol) de dependencias externas
   adapters/        # implementaciones reales y fakes deterministas

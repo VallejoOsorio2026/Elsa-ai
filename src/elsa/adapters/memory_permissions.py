@@ -18,6 +18,7 @@ from elsa.ports.permissions import (
     BootstrapAlreadyCompletedError,
     ElsaAccount,
     PermissionGrant,
+    ReviewerGrant,
     UnknownDomainError,
 )
 
@@ -31,6 +32,7 @@ class InMemoryPermissionsRepository:
         self._domains = tuple(normalize_scope_value(domain) for domain in domains)
         self._accounts: dict[str, ElsaAccount] = {}
         self._grants: list[PermissionGrant] = []
+        self._reviewers: list[ReviewerGrant] = []
         self._audit: list[AuditEntry] = []
         self._lock = asyncio.Lock()
 
@@ -68,6 +70,13 @@ class InMemoryPermissionsRepository:
             if subject is None or entry.subject_external_user_id == subject
         ]
         return tuple(entries[:limit])
+
+    async def list_active_reviewer_grants(self, external_user_id: str) -> tuple[ReviewerGrant, ...]:
+        return tuple(
+            grant
+            for grant in self._reviewers
+            if grant.external_user_id == external_user_id and grant.is_active
+        )
 
     async def check_health(self) -> None:
         return None
@@ -149,6 +158,84 @@ class InMemoryPermissionsRepository:
                 actor=actor,
                 subject=subject,
                 operation=AdminOperation.REVOKE_PERMISSION,
+                domain=scope_domain,
+                equipment=scope_equipment,
+                request_id=request_id,
+            )
+            return revoked
+
+    async def grant_reviewer(
+        self,
+        *,
+        subject: str,
+        domain: str,
+        equipment: str | None,
+        actor: str,
+        display_name: str | None = None,
+        request_id: str | None = None,
+    ) -> ReviewerGrant:
+        scope_domain = normalize_scope_value(domain)
+        scope_equipment = None if equipment is None else normalize_scope_value(equipment)
+        if scope_domain not in self._domains:
+            raise UnknownDomainError(f"unknown knowledge domain: {scope_domain!r}")
+
+        async with self._lock:
+            self._ensure_account(subject, display_name, actor, request_id)
+            existing = self._find_active_reviewer(subject, scope_domain, scope_equipment)
+            if existing is not None:
+                return existing
+
+            grant = ReviewerGrant(
+                id=str(uuid.uuid4()),
+                external_user_id=subject,
+                domain=scope_domain,
+                equipment=scope_equipment,
+                granted_by=actor,
+                granted_at=datetime.now(tz=UTC),
+            )
+            self._reviewers.append(grant)
+            self._record(
+                actor=actor,
+                subject=subject,
+                operation=AdminOperation.REVIEWER_GRANTED,
+                domain=scope_domain,
+                equipment=scope_equipment,
+                request_id=request_id,
+            )
+            return grant
+
+    async def revoke_reviewer(
+        self,
+        *,
+        subject: str,
+        domain: str,
+        equipment: str | None,
+        actor: str,
+        request_id: str | None = None,
+    ) -> ReviewerGrant | None:
+        scope_domain = normalize_scope_value(domain)
+        scope_equipment = None if equipment is None else normalize_scope_value(equipment)
+
+        async with self._lock:
+            existing = self._find_active_reviewer(subject, scope_domain, scope_equipment)
+            if existing is None:
+                return None
+
+            revoked = ReviewerGrant(
+                id=existing.id,
+                external_user_id=existing.external_user_id,
+                domain=existing.domain,
+                equipment=existing.equipment,
+                granted_by=existing.granted_by,
+                granted_at=existing.granted_at,
+                revoked_by=actor,
+                revoked_at=datetime.now(tz=UTC),
+            )
+            self._reviewers[self._reviewers.index(existing)] = revoked
+            self._record(
+                actor=actor,
+                subject=subject,
+                operation=AdminOperation.REVIEWER_REVOKED,
                 domain=scope_domain,
                 equipment=scope_equipment,
                 request_id=request_id,
@@ -288,6 +375,22 @@ class InMemoryPermissionsRepository:
         equipment: str | None,
     ) -> PermissionGrant | None:
         for grant in self._grants:
+            if (
+                grant.external_user_id == subject
+                and grant.domain == domain
+                and grant.equipment == equipment
+                and grant.is_active
+            ):
+                return grant
+        return None
+
+    def _find_active_reviewer(
+        self,
+        subject: str,
+        domain: str,
+        equipment: str | None,
+    ) -> ReviewerGrant | None:
+        for grant in self._reviewers:
             if (
                 grant.external_user_id == subject
                 and grant.domain == domain

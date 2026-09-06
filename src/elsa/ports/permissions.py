@@ -34,6 +34,18 @@ class AdminOperation(StrEnum):
     PROMOTE_ADMIN = "promote_admin"
     DEMOTE_ADMIN = "demote_admin"
 
+    # Bloque 2: gobierno del conocimiento técnico.
+    REVIEWER_GRANTED = "reviewer_granted"
+    REVIEWER_REVOKED = "reviewer_revoked"
+    SOURCE_UPLOADED = "source_uploaded"
+    IMPORT_COMPLETED = "import_completed"
+    IMPORT_FAILED = "import_failed"
+    VALIDATION_APPROVED = "validation_approved"
+    VALIDATION_REJECTED = "validation_rejected"
+    VALIDATION_REVERTED = "validation_reverted"
+    BOM_PUBLISHED = "bom_published"
+    RECONCILIATION_CREATED = "reconciliation_created"
+
 
 @dataclass(frozen=True, slots=True)
 class ElsaAccount:
@@ -50,6 +62,32 @@ class PermissionGrant:
     """Permiso otorgado a un usuario sobre un alcance.
 
     ``equipment`` a ``None`` significa el dominio completo.
+    """
+
+    id: str
+    external_user_id: str
+    domain: str
+    equipment: str | None
+    granted_by: str
+    granted_at: datetime
+    revoked_by: str | None = None
+    revoked_at: datetime | None = None
+
+    @property
+    def is_active(self) -> bool:
+        return self.revoked_at is None
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewerGrant:
+    """Capacidad de Revisor Técnico otorgada a un usuario sobre un alcance.
+
+    Tiene la misma forma que :class:`PermissionGrant` porque responde a la
+    misma pregunta —¿sobre qué puede actuar esta persona?— pero es una
+    capacidad **distinta**: leer conocimiento y validarlo son cosas
+    separadas, y tener permiso de lectura no convierte a nadie en revisor.
+
+    ``equipment`` a ``None`` significa todo el dominio.
     """
 
     id: str
@@ -190,6 +228,43 @@ class PermissionsRepositoryPort(Protocol):
         limit: int = 50,
     ) -> tuple[AuditEntry, ...]:
         """Entradas de auditoría, de la más reciente a la más antigua."""
+        ...
+
+    async def list_active_reviewer_grants(self, external_user_id: str) -> tuple[ReviewerGrant, ...]:
+        """Capacidades de revisor vigentes del usuario."""
+        ...
+
+    async def grant_reviewer(
+        self,
+        *,
+        subject: str,
+        domain: str,
+        equipment: str | None,
+        actor: str,
+        display_name: str | None = None,
+        request_id: str | None = None,
+    ) -> ReviewerGrant:
+        """Habilita a un usuario como Revisor Técnico sobre un alcance.
+
+        Idempotente, como :meth:`grant_permission`. Solo un administrador
+        debe llegar hasta aquí: la comprobación la hace la capa HTTP.
+        """
+        ...
+
+    async def revoke_reviewer(
+        self,
+        *,
+        subject: str,
+        domain: str,
+        equipment: str | None,
+        actor: str,
+        request_id: str | None = None,
+    ) -> ReviewerGrant | None:
+        """Deshabilita a un revisor; ``None`` si no estaba habilitado.
+
+        La capacidad se pierde de inmediato, pero las validaciones que ya
+        firmó permanecen: borrarlas dejaría aprobaciones sin responsable.
+        """
         ...
 
     async def check_health(self) -> None:
