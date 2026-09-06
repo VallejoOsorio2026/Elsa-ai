@@ -119,6 +119,83 @@ async def test_bootstrap_refuses_a_second_administrator(
     assert response.json()["error"]["code"] == "bootstrap_already_completed"
 
 
+async def _post_bootstrap(
+    settings: Settings, container: Container, headers: dict[str, str]
+) -> httpx.Response:
+    """Llama al bootstrap contra una app construida con `settings` a medida."""
+    app: FastAPI = create_app(settings, container)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        return await client.post("/api/v1/admin/bootstrap", headers=headers)
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+async def test_a_blank_configured_token_never_enables_bootstrap(
+    container: Container,
+    permissions: InMemoryPermissionsRepository,
+    blank: str,
+) -> None:
+    """Regresión del defecto de seguridad encontrado en validación.
+
+    `ELSA_BOOTSTRAP_ADMIN_TOKEN=` —la línea que trae la plantilla— dejaba el
+    token como cadena vacía. Como una cabecera ausente también se leía como
+    cadena vacía, `compare_digest` daba verdadera y cualquier usuario
+    autenticado de Materiales podía declararse primer administrador sin
+    presentar ningún token. Declarado sin valor debe significar deshabilitado.
+    """
+    settings = make_test_settings(bootstrap_admin_token=SecretStr(blank))
+    assert settings.bootstrap_admin_token is None
+
+    for headers in (
+        auth_header(ADMIN_TOKEN),  # sin la cabecera
+        {**auth_header(ADMIN_TOKEN), BOOTSTRAP_TOKEN_HEADER: ""},  # cabecera vacía
+        {**auth_header(ADMIN_TOKEN), BOOTSTRAP_TOKEN_HEADER: "   "},
+    ):
+        response = await _post_bootstrap(settings, container, headers)
+
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "bootstrap_not_allowed"
+
+    # Y no dejó rastro: ni cuenta, ni administrador, ni auditoría.
+    assert await permissions.get_account(ADMIN_ID) is None
+    assert await permissions.count_admins() == 0
+    assert not await permissions.list_audit_entries(subject=None, limit=50)
+
+
+@pytest.mark.parametrize("header", [None, "", "   "])
+async def test_a_missing_or_empty_header_never_passes(
+    api: httpx.AsyncClient,
+    permissions: InMemoryPermissionsRepository,
+    header: str | None,
+) -> None:
+    """Con un token real configurado, una cabecera vacía sigue sin valer."""
+    headers = auth_header(ADMIN_TOKEN)
+    if header is not None:
+        headers = {**headers, BOOTSTRAP_TOKEN_HEADER: header}
+
+    response = await api.post("/api/v1/admin/bootstrap", headers=headers)
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "bootstrap_not_allowed"
+    assert await permissions.count_admins() == 0
+
+
+async def test_bootstrap_is_audited_once(
+    api: httpx.AsyncClient,
+    bootstrap_header: dict[str, str],
+    permissions: InMemoryPermissionsRepository,
+) -> None:
+    """Repetirlo es idempotente y no vuelve a auditar."""
+    headers = {**auth_header(ADMIN_TOKEN), **bootstrap_header}
+    await api.post("/api/v1/admin/bootstrap", headers=headers)
+    await api.post("/api/v1/admin/bootstrap", headers=headers)
+
+    entries = await permissions.list_audit_entries(subject=ADMIN_ID, limit=50)
+
+    operations = [entry.operation.value for entry in entries]
+    assert operations.count("bootstrap_admin") == 1
+
+
 # ---------------------------------------------------------------------
 # Otorgar y revocar
 # ---------------------------------------------------------------------

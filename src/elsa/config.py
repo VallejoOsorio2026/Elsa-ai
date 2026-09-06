@@ -221,9 +221,20 @@ class Settings(BaseSettings):
     @field_validator("materials_supabase_url", "auth_jwks_url")
     @classmethod
     def _validate_url(cls, value: str | None) -> str | None:
+        """Valida una URL opcional, tolerando la variable declarada sin valor.
+
+        Copiar ``.env.example`` a ``.env`` deja líneas como
+        ``ELSA_AUTH_JWKS_URL=``. Eso significa «no configurada», no «URL
+        vacía»: se interpreta como ausencia para que el valor derivado de
+        ``ELSA_MATERIALS_SUPABASE_URL`` tome el relevo. Una URL no vacía y
+        malformada se sigue rechazando.
+        """
         if value is None:
             return None
-        url = value.strip().rstrip("/")
+        stripped = value.strip()
+        if not stripped:
+            return None
+        url = stripped.rstrip("/")
         if not url.startswith(("http://", "https://")):
             raise ValueError(f"must include an http(s) scheme: {value!r}")
         return url
@@ -235,6 +246,25 @@ class Settings(BaseSettings):
             return None
         stripped = value.strip()
         return stripped or None
+
+    @field_validator("auth_jwt_secret", "database_url", "bootstrap_admin_token")
+    @classmethod
+    def _empty_secret_is_none(cls, value: SecretStr | None) -> SecretStr | None:
+        """Un secreto declarado sin valor es un secreto ausente.
+
+        Es la diferencia entre «no hay token» y «el token es la cadena
+        vacía». Sin esto, ``ELSA_BOOTSTRAP_ADMIN_TOKEN=`` —la línea que trae
+        la plantilla— habilitaría el bootstrap y una comparación contra una
+        cabecera ausente daría verdadera.
+
+        Solo se descarta el valor si es vacío o son espacios; un secreto real
+        se conserva tal cual, sin recortarlo.
+        """
+        if value is None:
+            return None
+        if not value.get_secret_value().strip():
+            return None
+        return value
 
     @field_validator(
         "auth_jwt_leeway_seconds",

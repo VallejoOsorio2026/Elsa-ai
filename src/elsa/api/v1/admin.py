@@ -170,8 +170,9 @@ async def bootstrap_admin(
 
     - un JWT válido de Materiales, con perfil activo: el UUID administrado
       es el del usuario **realmente autenticado**, nunca uno escrito a mano;
-    - el token de bootstrap (``ELSA_BOOTSTRAP_TOKEN``) en la cabecera
-      ``X-Bootstrap-Token``. Sin esa variable el endpoint está deshabilitado;
+    - el token de bootstrap (``ELSA_BOOTSTRAP_ADMIN_TOKEN``) en la cabecera
+      ``X-Bootstrap-Token``. Sin esa variable, o declarada sin valor, el
+      endpoint está deshabilitado;
     - que ELSA no tenga todavía ningún otro administrador.
 
     Es idempotente: repetirlo con el mismo usuario no cambia nada y no
@@ -182,7 +183,17 @@ async def bootstrap_admin(
     presented = request.headers.get(BOOTSTRAP_TOKEN_HEADER, "")
     # Un único código de error para "deshabilitado" y "token incorrecto":
     # no se confirma al solicitante si el mecanismo está activo.
-    if configured is None or not hmac.compare_digest(presented, configured.get_secret_value()):
+    #
+    # `configured` nunca puede ser un secreto vacío: la configuración traduce
+    # `ELSA_BOOTSTRAP_ADMIN_TOKEN=` a ausencia. Aun así se descarta aquí la
+    # cabecera vacía, para que ninguna comparación pueda resultar verdadera
+    # por tratarse de dos cadenas vacías. La comparación de tokens reales
+    # sigue siendo en tiempo constante.
+    if (
+        configured is None
+        or not presented
+        or not hmac.compare_digest(presented, configured.get_secret_value())
+    ):
         _logger.warning(
             "bootstrap rejected",
             extra={
