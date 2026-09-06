@@ -147,14 +147,41 @@ async def test_an_administrator_keeps_global_intervention(
     assert response.status_code == 200
 
 
-async def test_an_unknown_asset_is_not_found(
+async def test_an_unknown_asset_is_not_found_for_someone_authorised(
     api: httpx.AsyncClient, asset: TechnicalAssetRecord
 ) -> None:
+    """Un administrador, que sí puede mirar, obtiene 404."""
     response = await api.get(
         f"/api/v1/technical/{DOMAIN}/inexistente/versions", headers=auth_header(ADMIN_TOKEN)
     )
 
-    assert response.status_code in (403, 404)
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "asset_not_found"
+
+
+async def test_authorization_runs_before_the_asset_is_even_looked_up(
+    api: httpx.AsyncClient,
+    asset: TechnicalAssetRecord,
+    knowledge: InMemoryKnowledgeRepository,
+) -> None:
+    """Los permisos se aplican antes de recuperar conocimiento.
+
+    Quien no tiene alcance recibe 403 tanto si el activo existe como si no,
+    así que la respuesta no revela cuáles existen. Si la autorización
+    corriera después de la búsqueda, el caso inexistente devolvería 404 y
+    filtraría esa diferencia.
+    """
+    for code in ("otro-activo", "no-existe-en-absoluto"):
+        response = await api.get(
+            f"/api/v1/technical/{DOMAIN}/{code}/versions", headers=auth_header(ENGINEER_TOKEN)
+        )
+        assert response.status_code == 403, code
+
+    await knowledge.create_asset(code="otro-activo", name="Otro", domain=DOMAIN)
+    response = await api.get(
+        f"/api/v1/technical/{DOMAIN}/otro-activo/versions", headers=auth_header(ENGINEER_TOKEN)
+    )
+    assert response.status_code == 403
 
 
 # ---------------------------------------------------------------------

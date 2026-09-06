@@ -22,9 +22,8 @@ antes de recuperar nada.
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from elsa.api.deps import RequireScope, get_knowledge
+from elsa.api.deps import get_knowledge
 from elsa.api.v1.technical import resolve_asset
-from elsa.core.authorization import Principal
 from elsa.ports.knowledge import KnowledgeRepositoryPort, TechnicalAssetRecord
 
 router = APIRouter(prefix="/knowledge/{domain}/{asset}", tags=["knowledge"])
@@ -132,7 +131,6 @@ async def _discrepancy_warning(
 @router.get("", response_model=AssetKnowledgeView)
 async def read_asset(
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _principal: Principal = Depends(RequireScope(equipment_param="asset")),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
 ) -> AssetKnowledgeView:
     """Resumen del activo y de su BOM publicado vigente."""
@@ -168,7 +166,6 @@ async def read_asset(
 @router.get("/components", response_model=list[PublishedComponentView])
 async def list_components(
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _principal: Principal = Depends(RequireScope(equipment_param="asset")),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
 ) -> list[PublishedComponentView]:
     """Componentes del BOM publicado.
@@ -199,7 +196,6 @@ async def list_components(
 @router.get("/failure-modes", response_model=list[PublishedFailureModeView])
 async def list_failure_modes(
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _principal: Principal = Depends(RequireScope(equipment_param="asset")),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
 ) -> list[PublishedFailureModeView]:
     """AMEF publicado, con el NPR calculado por el backend."""

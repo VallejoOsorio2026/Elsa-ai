@@ -253,9 +253,18 @@ def _not_found(message: str, code: str) -> ApiError:
 async def resolve_asset(
     domain: str = Path(...),
     asset: str = Path(...),
+    _principal: Principal = Depends(RequireScope(equipment_param="asset")),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
 ) -> TechnicalAssetRecord:
-    """Carga el activo de la ruta y comprueba que vive en ese dominio.
+    """Autoriza el alcance y **después** carga el activo de la ruta.
+
+    El orden es la razón de que la autorización sea una sub-dependencia y no
+    un parámetro más del endpoint: FastAPI resuelve las sub-dependencias
+    antes del cuerpo, así que ``RequireScope`` ya negó el acceso —si tocaba—
+    cuando aquí se consulta el almacén. Los permisos se aplican **antes** de
+    recuperar conocimiento, no después (CLAUDE.md, regla 4); si la
+    autorización fuese un parámetro hermano, el orden dependería de cómo esté
+    escrita la firma del endpoint.
 
     Un activo de otro dominio se trata como inexistente: quien pregunta ya
     superó la autorización de *su* dominio, y confirmarle que el activo
@@ -357,7 +366,6 @@ async def upload_engineering_bom(
     request: Request,
     file: UploadFile,
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _scope: Principal = Depends(RequireScope(equipment_param="asset")),
     capability: ReviewerCapability = Depends(RequireReviewer()),
     service: IngestionService = Depends(get_ingestion_service),
 ) -> ImportAccepted:
@@ -401,7 +409,6 @@ async def upload_sap_snapshot(
     request: Request,
     file: UploadFile,
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _scope: Principal = Depends(RequireScope(equipment_param="asset")),
     capability: ReviewerCapability = Depends(RequireReviewer()),
     service: IngestionService = Depends(get_ingestion_service),
 ) -> ImportAccepted:
@@ -446,7 +453,6 @@ async def upload_sap_snapshot(
 @router.get("/imports", response_model=list[ImportView])
 async def list_imports(
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _scope: Principal = Depends(RequireScope(equipment_param="asset")),
     _reviewer: ReviewerCapability = Depends(RequireReviewer()),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
 ) -> list[ImportView]:
@@ -456,7 +462,6 @@ async def list_imports(
 @router.get("/versions", response_model=list[VersionView])
 async def list_versions(
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _scope: Principal = Depends(RequireScope(equipment_param="asset")),
     _reviewer: ReviewerCapability = Depends(RequireReviewer()),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
 ) -> list[VersionView]:
@@ -481,7 +486,6 @@ async def _load_version(
 async def read_version(
     version_id: uuid.UUID,
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _scope: Principal = Depends(RequireScope(equipment_param="asset")),
     _reviewer: ReviewerCapability = Depends(RequireReviewer()),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
 ) -> VersionDetail:
@@ -564,7 +568,6 @@ async def review_version(
     version_id: uuid.UUID,
     body: DecisionBody,
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _scope: Principal = Depends(RequireScope(equipment_param="asset")),
     capability: ReviewerCapability = Depends(RequireReviewer()),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
 ) -> ReviewView:
@@ -615,7 +618,6 @@ async def revert_review(
     review_id: uuid.UUID,
     body: RevertBody,
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _scope: Principal = Depends(RequireScope(equipment_param="asset")),
     capability: ReviewerCapability = Depends(RequireReviewer()),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
 ) -> ReviewView:
@@ -670,7 +672,6 @@ async def publish_version(
     request: Request,
     version_id: uuid.UUID,
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _scope: Principal = Depends(RequireScope(equipment_param="asset")),
     capability: ReviewerCapability = Depends(RequireReviewer()),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
 ) -> VersionView:
@@ -696,7 +697,6 @@ async def publish_version(
 @router.get("/reviews", response_model=list[ReviewView])
 async def list_reviews(
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _scope: Principal = Depends(RequireScope(equipment_param="asset")),
     _reviewer: ReviewerCapability = Depends(RequireReviewer()),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
 ) -> list[ReviewView]:
@@ -714,7 +714,6 @@ async def list_reviews(
 @router.get("/snapshots", response_model=list[SnapshotView])
 async def list_snapshots(
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _scope: Principal = Depends(RequireScope(equipment_param="asset")),
     _reviewer: ReviewerCapability = Depends(RequireReviewer()),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
 ) -> list[SnapshotView]:
@@ -740,7 +739,6 @@ async def create_reconciliation(
     request: Request,
     body: ReconciliationRequest,
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _scope: Principal = Depends(RequireScope(equipment_param="asset")),
     capability: ReviewerCapability = Depends(RequireReviewer()),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
     service: IngestionService = Depends(get_ingestion_service),
@@ -786,7 +784,6 @@ async def create_reconciliation(
 async def read_reconciliation(
     run_id: uuid.UUID,
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
-    _scope: Principal = Depends(RequireScope(equipment_param="asset")),
     _reviewer: ReviewerCapability = Depends(RequireReviewer()),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
 ) -> ReconciliationDetail:
