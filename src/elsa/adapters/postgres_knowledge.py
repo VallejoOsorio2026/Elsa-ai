@@ -154,6 +154,14 @@ def _loads(value: Any) -> dict[str, Any]:
     return dict(value)
 
 
+def _warning_counts(warnings: Sequence[Any]) -> dict[str, int]:
+    """Avisos agrupados por código. Solo códigos y conteos."""
+    counts: dict[str, int] = {}
+    for warning in warnings:
+        counts[warning.code] = counts.get(warning.code, 0) + 1
+    return counts
+
+
 def _lock_key(asset_id: uuid.UUID) -> int:
     """Clave del cerrojo consultivo derivada del activo.
 
@@ -504,11 +512,12 @@ class PostgresKnowledgeRepository:
                 await self._store_options(connection, version_id, data.option_rows)
                 await self._store_drawings(connection, version_id, asset_uuid, data)
 
-                stats = {
+                stats: dict[str, Any] = {
                     "bom_items": len(data.rows),
                     "failure_modes": len(data.failure_modes),
                     "sod_criteria": len(data.sod_criteria),
                     "drawing_images": len(data.drawing_images),
+                    "warnings": dict(data.warning_counts),
                 }
                 await connection.execute(
                     "update elsa.imports set status = 'completed', finished_at = now(), "
@@ -919,9 +928,10 @@ class PostgresKnowledgeRepository:
                         item.depth,
                         _json(dict(item.extra)),
                     )
-                stats = {
+                stats: dict[str, Any] = {
                     "materials": len(snapshot.materials),
                     "equipments": len(snapshot.equipments),
+                    "warnings": _warning_counts(snapshot.warnings),
                 }
                 await connection.execute(
                     "update elsa.imports set status = 'completed', finished_at = now(), "

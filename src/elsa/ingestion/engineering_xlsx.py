@@ -24,6 +24,7 @@ pendiente de revisión.
 """
 
 import logging
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from decimal import Decimal
@@ -161,15 +162,58 @@ _AMEF_COLUMNS: dict[str, tuple[str, ...]] = {
 _BOM_INDEX = _synonym_index(_BOM_COLUMNS)
 _AMEF_INDEX = _synonym_index(_AMEF_COLUMNS)
 
+# Vocabulario de las tres dimensiones. Se compara por subcadena sobre el
+# texto normalizado, así que cubre «Severidad», «Índice de severidad» o
+# «Valoración de la severidad» sin enumerarlos.
 _SOD_DIMENSIONS: dict[str, str] = {
     "severidad": "severity",
+    "gravedad": "severity",
     "severity": "severity",
     "ocurrencia": "occurrence",
     "occurrence": "occurrence",
     "frecuencia": "occurrence",
+    "probabilidad": "occurrence",
     "deteccion": "detection",
     "detection": "detection",
 }
+
+# Rótulos que designan la dimensión por su inicial, como «Calificación (S)»
+# o simplemente «(O)». Se buscan como token aislado para que la «s» de
+# cualquier palabra no dispare una coincidencia.
+_SOD_INITIALS: dict[str, str] = {"s": "severity", "o": "occurrence", "d": "detection"}
+_SOD_INITIAL_PATTERN = re.compile(r"\(\s*([sod])\s*\)")
+
+# Rótulos de la columna que lleva el valor de la escala. Cuando la tabla
+# declara uno, manda él: elegir «el primer número de la fila» falla en cuanto
+# la tabla antepone una tasa o un porcentaje, que es justo lo que suelen
+# hacer las tablas de ocurrencia.
+_SOD_SCALE_COLUMNS: tuple[str, ...] = (
+    "valor",
+    "escala",
+    "nivel",
+    "indice",
+    "calificacion",
+    "puntaje",
+    "rango",
+    "grado",
+    "criterio numerico",
+)
+
+
+def _dimension_of(text: str | None) -> str | None:
+    """Dimensión S/O/D que designa un rótulo, o ``None``."""
+    key = normalize_key(text)
+    if key is None:
+        return None
+    match = _SOD_INITIAL_PATTERN.search(key)
+    if match:
+        return _SOD_INITIALS[match.group(1)]
+    for name, dimension in _SOD_DIMENSIONS.items():
+        if name in key:
+            return dimension
+    # Un rótulo que es exactamente la inicial («S», «O», «D») también vale.
+    return _SOD_INITIALS.get(key.strip())
+
 
 # Longitud mínima de un sinónimo para admitir coincidencia laxa. Debajo de
 # esto (`s`, `o`, `d`, `no`) una coincidencia parcial sería ruido.
@@ -445,78 +489,151 @@ def _parse_amef(
     return tuple(parsed), tuple(warnings)
 
 
+def _sod_announcements(row: Sequence[Any]) -> list[tuple[int, str]]:
+    """Dimensiones que anuncia una fila, con la columna en la que lo hace."""
+    found: list[tuple[int, str]] = []
+    for position, cell in enumerate(row):
+        dimension = _dimension_of(normalize_text(cell))
+        if dimension is not None and dimension not in {name for _, name in found}:
+            found.append((position, dimension))
+    return found
+
+
+def _sod_scale_columns(row: Sequence[Any]) -> dict[int, int]:
+    """Columnas de escala declaradas por una fila de rótulos.
+
+    Devuelve, por cada columna de escala encontrada, su propia posición. Se
+    usa para leer el valor de la escala de la columna correcta en vez de
+    tomar «el primer número de la fila».
+    """
+    columns: dict[int, int] = {}
+    for position, cell in enumerate(row):
+        key = normalize_key(cell)
+        if key is None:
+            continue
+        if any(name in key for name in _SOD_SCALE_COLUMNS):
+            columns[position] = position
+    return columns
+
+
+def _dimension_for_column(
+    position: int, layout: list[tuple[int, str]], stacked: str | None
+) -> str | None:
+    """Dimensión a la que pertenece una columna.
+
+    Con las tres tablas una debajo de otra, la dimensión es la última
+    anunciada y no depende de la columna. Con las tablas una al lado de otra,
+    cada una gobierna desde la columna en la que se anuncia hasta donde
+    empieza la siguiente.
+    """
+    if len(layout) > 1:
+        current: str | None = None
+        for start, dimension in layout:
+            if position >= start:
+                current = dimension
+        return current
+    return stacked
+
+
 def _parse_sod(
     rows: Sequence[Sequence[Any]], sheet: str
 ) -> tuple[tuple[ParsedSodCriterion, ...], tuple[IngestionWarning, ...]]:
     """Lee los criterios S/O/D.
 
-    La hoja suele traer las tres tablas una debajo de otra, encabezadas por
-    el nombre de la dimensión. Se recorre de arriba abajo recordando la
-    última dimensión anunciada; una fila cuyo primer número esté entre 1 y 10
-    es un nivel de esa escala. Sin dimensión anunciada no se inventa
-    ninguna: las filas se ignoran y se avisa.
+    Se admiten las dos formas en que la plantilla puede disponer las tres
+    tablas, porque ambas son igual de habituales y elegir solo una hacía que
+    la otra se perdiera **en silencio**:
+
+    - **Apiladas**: cada tabla va precedida de su rótulo y se recorre de
+      arriba abajo recordando la última dimensión anunciada.
+    - **Una al lado de otra**: una misma fila anuncia varias dimensiones en
+      columnas distintas, y cada una gobierna su franja de columnas.
+
+    El valor de la escala se toma de la columna que la tabla declare
+    («Valor», «Nivel», «Calificación»…). Solo si no declara ninguna se
+    recurre al primer entero entre 1 y 10 de la fila.
+
+    Una dimensión anunciada que no produce ningún criterio genera un aviso:
+    quedarse callado ahí es exactamente el defecto que se corrigió.
     """
     criteria: list[ParsedSodCriterion] = []
-    dimension: str | None = None
+    warnings: list[IngestionWarning] = []
+
+    stacked: str | None = None
+    layout: list[tuple[int, str]] = []
+    scale_columns: dict[int, int] = {}
+    announced: set[str] = set()
     orphan_rows = 0
 
     for offset, row in enumerate(rows, start=1):
         if _row_is_empty(row):
             continue
-        texts = [normalize_key(cell) for cell in row]
-        announced = next(
-            (
-                _SOD_DIMENSIONS[name]
-                for text in texts
-                if text
-                for name in _SOD_DIMENSIONS
-                if name in text
-            ),
-            None,
-        )
-        if announced is not None:
-            dimension = announced
-            # La fila que anuncia la dimensión puede además ser un nivel, así
-            # que no se descarta: sigue evaluándose más abajo.
 
-        scale: int | None = None
-        scale_position = -1
-        for position, cell in enumerate(row):
-            value = _scale_value(cell)
-            if value is not None:
-                scale, scale_position = value, position
-                break
-        if scale is None:
-            continue
-        if dimension is None:
-            orphan_rows += 1
+        announcements = _sod_announcements(row)
+        if announcements:
+            if len(announcements) > 1:
+                # Varias dimensiones en la misma fila: tablas en paralelo.
+                layout = announcements
+            else:
+                stacked = announcements[0][1]
+            announced.update(dimension for _, dimension in announcements)
+            # La fila que anuncia puede además declarar columnas de escala.
+            scale_columns = _sod_scale_columns(row) or scale_columns
             continue
 
-        remaining = [
-            normalize_text(cell)
-            for position, cell in enumerate(row)
-            if position != scale_position and normalize_text(cell) is not None
-        ]
-        # De los números restantes salen los extremos del rango, cuando la
-        # tabla los declare (p. ej. «entre 1 y 3 fallas por año»).
-        numbers = [
-            normalize_quantity(cell)
-            for position, cell in enumerate(row)
-            if position != scale_position and normalize_quantity(cell) is not None
-        ]
-        criteria.append(
-            ParsedSodCriterion(
-                source_row=offset,
-                dimension=dimension,
-                scale_value=scale,
-                label=remaining[0] if remaining else None,
-                description=remaining[1] if len(remaining) > 1 else None,
-                range_low=numbers[0] if numbers else None,
-                range_high=numbers[1] if len(numbers) > 1 else None,
+        declared = _sod_scale_columns(row)
+        if declared:
+            scale_columns = declared
+            continue
+
+        # Candidatos a valor de escala: los de las columnas declaradas, o
+        # cualquier entero de 1 a 10 si la tabla no declaró ninguna.
+        positions = sorted(scale_columns) if scale_columns else range(len(row))
+        for position in positions:
+            if position >= len(row):
+                continue
+            scale = _scale_value(row[position])
+            if scale is None:
+                continue
+            dimension = _dimension_for_column(position, layout, stacked)
+            if dimension is None:
+                orphan_rows += 1
+                continue
+
+            # El texto y los rangos se leen de la franja de columnas de esta
+            # dimensión, para que dos tablas en paralelo no se mezclen.
+            limit = len(row)
+            for start, _ in layout:
+                if start > position:
+                    limit = min(limit, start)
+            window = list(row[position:limit])
+
+            remaining = [
+                normalize_text(cell)
+                for index, cell in enumerate(window)
+                if index != 0 and normalize_text(cell) is not None
+            ]
+            numbers = [
+                value
+                for index, cell in enumerate(window)
+                if index != 0 and (value := normalize_quantity(cell)) is not None
+            ]
+            criteria.append(
+                ParsedSodCriterion(
+                    source_row=offset,
+                    dimension=dimension,
+                    scale_value=scale,
+                    label=remaining[0] if remaining else None,
+                    description=remaining[1] if len(remaining) > 1 else None,
+                    range_low=numbers[0] if numbers else None,
+                    range_high=numbers[1] if len(numbers) > 1 else None,
+                )
             )
-        )
+            if not scale_columns:
+                # Sin columna declarada, el primer entero válido de la fila
+                # es el valor: seguir buscando duplicaría el criterio.
+                break
 
-    warnings: list[IngestionWarning] = []
     if orphan_rows:
         warnings.append(
             IngestionWarning(
@@ -526,6 +643,29 @@ def _parse_sod(
                     "imported: the dimension is not guessed."
                 ),
                 location=f"{sheet}: {orphan_rows} row(s)",
+            )
+        )
+
+    extracted = {criterion.dimension for criterion in criteria}
+    empty = sorted(announced - extracted)
+    if empty:
+        warnings.append(
+            IngestionWarning(
+                code="sod_dimension_without_criteria",
+                message=(
+                    "A S/O/D dimension is announced in the sheet but no scale value could "
+                    "be read for it. The criteria are not invented."
+                ),
+                location=f"{sheet}: {', '.join(empty)}",
+            )
+        )
+    missing = sorted({"severity", "occurrence", "detection"} - extracted)
+    if missing:
+        warnings.append(
+            IngestionWarning(
+                code="sod_dimension_missing",
+                message="The S/O/D sheet did not yield criteria for every dimension.",
+                location=f"{sheet}: {', '.join(missing)}",
             )
         )
     return tuple(criteria), tuple(warnings)

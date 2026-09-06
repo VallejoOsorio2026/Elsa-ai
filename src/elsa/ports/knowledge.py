@@ -422,6 +422,15 @@ class EngineeringVersionInput:
     drawing_storage_keys: Mapping[str, str] = field(default_factory=dict)
     """SHA-256 de cada imagen → clave con la que quedó guardada."""
 
+    warning_counts: Mapping[str, int] = field(default_factory=dict)
+    """Avisos del parser, como ``código → nº de veces``.
+
+    Se guardan en ``imports.stats`` para que un revisor pueda ver, sin volver
+    a procesar el archivo, que hubo fórmulas sin evaluar o planos sin
+    asociar. Son **códigos estables y conteos**, nunca contenido técnico:
+    ``formula_not_evaluated: 3`` no dice nada de ninguna pieza.
+    """
+
 
 # ---------------------------------------------------------------------
 # Puerto

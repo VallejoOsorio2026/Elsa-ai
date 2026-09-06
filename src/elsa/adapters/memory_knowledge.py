@@ -20,7 +20,7 @@ from typing import Any
 from elsa.core.matching import MatchCandidate
 from elsa.core.reconciliation import ReconciliationEntry
 from elsa.core.review import ReviewDecision, ReviewSubject
-from elsa.ingestion.model import ParsedSapSnapshot
+from elsa.ingestion.model import IngestionWarning, ParsedSapSnapshot
 from elsa.ports.knowledge import (
     AssetAlreadyExistsError,
     BomItemRecord,
@@ -52,6 +52,14 @@ def _new_id() -> str:
 
 def _now() -> datetime:
     return datetime.now(tz=UTC)
+
+
+def _warning_counts(warnings: Sequence[IngestionWarning]) -> dict[str, int]:
+    """Avisos agrupados por código. Solo códigos y conteos."""
+    counts: dict[str, int] = {}
+    for warning in warnings:
+        counts[warning.code] = counts.get(warning.code, 0) + 1
+    return counts
 
 
 class InMemoryKnowledgeRepository:
@@ -406,6 +414,7 @@ class InMemoryKnowledgeRepository:
                     "failure_modes": len(failure_modes),
                     "sod_criteria": len(data.sod_criteria),
                     "drawing_images": len(data.drawing_images),
+                    "warnings": dict(data.warning_counts),
                 },
             )
             return version
@@ -545,6 +554,7 @@ class InMemoryKnowledgeRepository:
                 {
                     "materials": len(snapshot.materials),
                     "equipments": len(snapshot.equipments),
+                    "warnings": _warning_counts(snapshot.warnings),
                 },
             )
             return record

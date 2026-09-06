@@ -40,7 +40,7 @@ from elsa.core.reconciliation import (
 from elsa.core.versioning import ChangeKind, VersionedItem, classify_versions, fingerprint
 from elsa.ingestion.engineering_xlsx import parse_engineering_workbook
 from elsa.ingestion.errors import IngestionError
-from elsa.ingestion.model import ParsedBomRow, ParsedEngineeringBom
+from elsa.ingestion.model import IngestionWarning, ParsedBomRow, ParsedEngineeringBom
 from elsa.ingestion.safety import ArchiveLimits
 from elsa.ingestion.sap_htm import parse_sap_snapshot
 from elsa.ports.artifact_storage import (
@@ -65,7 +65,7 @@ from elsa.ports.knowledge import (
 
 _logger = logging.getLogger("elsa.services.ingestion")
 
-__all__ = ["DuplicateImport", "IngestionService", "row_fingerprint"]
+__all__ = ["DuplicateImport", "IngestionService", "row_fingerprint", "warning_counts"]
 
 _ENGINEERING_ARTIFACT = "engineering_bom_xlsx"
 _SAP_ARTIFACT = "sap_bom_htm"
@@ -76,6 +76,19 @@ class DuplicateImport:
     """Se subió un archivo ya importado; se devuelve el original."""
 
     existing_import_id: str | None
+
+
+def warning_counts(warnings: Sequence[IngestionWarning]) -> dict[str, int]:
+    """Avisos del parser agrupados por código.
+
+    Lo que se persiste son **códigos estables y conteos**, no mensajes ni
+    contenido del archivo: ``formula_not_evaluated: 3`` le dice a un revisor
+    que hubo tres fórmulas sin evaluar sin revelar ninguna celda.
+    """
+    counts: dict[str, int] = {}
+    for warning in warnings:
+        counts[warning.code] = counts.get(warning.code, 0) + 1
+    return counts
 
 
 def row_fingerprint(row: ParsedBomRow) -> str:
@@ -234,6 +247,7 @@ class IngestionService:
                 option_rows=parsed.option_rows,
                 drawing_images=parsed.drawing_images,
                 drawing_storage_keys=keys,
+                warning_counts=warning_counts(parsed.warnings),
             ),
             actor=actor,
             request_id=request_id,
