@@ -9,6 +9,16 @@ Si falta una variable obligatoria o un valor es inválido, la aplicación no
 arranca: termina con un `ConfigurationError` que nombra cada variable
 afectada.
 
+**Variable opcional declarada sin valor = variable ausente.** Copiar
+`.env.example` a `.env` deja líneas como `ELSA_AUTH_JWKS_URL=`. Un valor
+vacío o compuesto solo por espacios se interpreta como «no configurada», de
+modo que el valor por defecto o derivado toma el relevo. Esto vale también
+para los secretos: `ELSA_BOOTSTRAP_ADMIN_TOKEN=` es *no hay token*, nunca
+*el token es la cadena vacía*.
+
+La tolerancia se limita al valor vacío. Un valor no vacío y malformado se
+sigue rechazando: `ELSA_AUTH_JWKS_URL=esto-no-es-una-url` impide el arranque.
+
 Las variables marcadas como **secreto** no se versionan nunca: viven en
 `.env` (ignorado por git) o en el gestor de secretos del entorno de
 despliegue. Se cargan como `SecretStr`, de modo que no aparecen al imprimir
@@ -32,9 +42,9 @@ la configuración.
 | `ELSA_MATERIALS_API_KEY` | Con `supabase` | — | Clave publicable (`sb_publishable_...` o `anon`) de Materiales. Pública por diseño: se envía como cabecera `apikey` a PostgREST. |
 | `ELSA_AUTH_JWT_ALGORITHMS` | No | `ES256,RS256` | Algoritmos aceptados, separados por coma. Cualquier otro se rechaza; `none` no es configurable. Con un `HS*` se exige `ELSA_AUTH_JWT_SECRET`. |
 | `ELSA_AUTH_JWT_AUDIENCE` | No | `authenticated` | Audiencia esperada (`aud`). Vacío desactiva la comprobación. |
-| `ELSA_AUTH_JWT_ISSUER` | No | derivada | Emisor esperado. Por defecto `<ELSA_MATERIALS_SUPABASE_URL>/auth/v1`. |
-| `ELSA_AUTH_JWKS_URL` | No | derivada | Por defecto `<ELSA_MATERIALS_SUPABASE_URL>/auth/v1/.well-known/jwks.json`. |
-| `ELSA_AUTH_JWT_SECRET` | Con `HS*` | — | **Secreto.** Solo si Materiales firma de forma simétrica (ver ADR 0005). |
+| `ELSA_AUTH_JWT_ISSUER` | No | derivada | Emisor esperado. Por defecto `<ELSA_MATERIALS_SUPABASE_URL>/auth/v1`. Vacía o ausente, se deriva. |
+| `ELSA_AUTH_JWKS_URL` | No | derivada | Por defecto `<ELSA_MATERIALS_SUPABASE_URL>/auth/v1/.well-known/jwks.json`. Vacía o ausente, se deriva; no vacía y malformada, se rechaza. |
+| `ELSA_AUTH_JWT_SECRET` | Con `HS*` | — | **Secreto.** Solo si Materiales firma de forma simétrica (ver ADR 0005). Con `ES256`/`RS256` no hace falta. Declarada sin valor cuenta como ausente: con un `HS*` la app no arranca. |
 | `ELSA_AUTH_JWT_LEEWAY_SECONDS` | No | `10` | Tolerancia de reloj al comprobar `exp` / `iat`. |
 | `ELSA_AUTH_TIMEOUT_SECONDS` | No | `5.0` | Timeout de las llamadas al proveedor de identidad. |
 | `ELSA_AUTH_JWKS_CACHE_SECONDS` | No | `600` | Vigencia del JWKS en caché. |
@@ -48,7 +58,7 @@ la configuración.
 | `ELSA_DATABASE_URL` | Con `postgres` | — | **Secreto.** Cadena de conexión a Supabase ELSA. Credencial exclusiva del servidor: nunca en el frontend, el repositorio ni los logs. |
 | `ELSA_DATABASE_POOL_MIN_SIZE` | No | `1` | Tamaño mínimo del pool de conexiones. |
 | `ELSA_DATABASE_POOL_MAX_SIZE` | No | `10` | Tamaño máximo del pool de conexiones. |
-| `ELSA_BOOTSTRAP_ADMIN_TOKEN` | No | — | **Secreto.** Habilita `POST /api/v1/admin/bootstrap`. Sin valor, el endpoint queda deshabilitado. Úsalo una vez y bórralo. |
+| `ELSA_BOOTSTRAP_ADMIN_TOKEN` | No | — | **Secreto.** Habilita `POST /api/v1/admin/bootstrap`, que se presenta en la cabecera `X-Bootstrap-Token`. Ausente, vacía o con solo espacios, el endpoint queda **deshabilitado**: nunca vale como token vacío. Genera uno aleatorio (`openssl rand -hex 32`), úsalo una vez y bórralo. |
 
 ## Control de abuso
 

@@ -57,8 +57,9 @@ aplicación se niega a arrancar con ellos.
 
    El UUID que se promueve es el del usuario autenticado: no se escribe a
    mano en ningún sitio.
-3. Borra `ELSA_BOOTSTRAP_ADMIN_TOKEN`. A partir de aquí, la administración se
-   otorga y se transfiere con `POST /api/v1/admin/users/{id}/admin`.
+3. Borra `ELSA_BOOTSTRAP_ADMIN_TOKEN` o déjala sin valor: ambas cosas
+   deshabilitan el endpoint. A partir de aquí, la administración se otorga y
+   se transfiere con `POST /api/v1/admin/users/{id}/admin`.
 
 ## Ciclo de trabajo
 

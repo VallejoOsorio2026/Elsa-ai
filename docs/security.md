@@ -121,6 +121,12 @@ lo mismo que con un token incorrecto, para no confirmar si el mecanismo está
 activo. La operación es idempotente, queda auditada y solo funciona mientras
 ELSA no tenga ya un administrador. Después de usarlo, borra la variable.
 
+El bootstrap solo se habilita con un valor **no vacío**. La variable ausente,
+vacía (`ELSA_BOOTSTRAP_ADMIN_TOKEN=`, la línea que trae `.env.example`) o con
+solo espacios significa siempre *deshabilitado*: nunca un token válido vacío
+que una cabecera ausente pudiera igualar. El endpoint rechaza además toda
+cabecera `X-Bootstrap-Token` vacía, con independencia de la configuración.
+
 ## Auditoría
 
 Se registran los cambios administrativos —otorgar y revocar permisos,
