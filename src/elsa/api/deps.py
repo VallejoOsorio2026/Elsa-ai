@@ -38,14 +38,19 @@ from elsa.core.authorization import (
     authorize,
     normalize_scope_value,
 )
+from elsa.core.review import ReviewerCapability, build_capability, can_review
+from elsa.ingestion.safety import ArchiveLimits
 from elsa.logging import get_request_id
+from elsa.ports.artifact_storage import ArtifactStoragePort
 from elsa.ports.auth import (
     AuthenticatedUser,
     IdentityProviderUnavailableError,
     InvalidTokenError,
 )
+from elsa.ports.knowledge import KnowledgeRepositoryPort, KnowledgeUnavailableError
 from elsa.ports.materials_identity import MaterialsProfile
 from elsa.ports.permissions import PermissionsRepositoryPort, PermissionsUnavailableError
+from elsa.services.ingestion import IngestionService
 
 _logger = logging.getLogger("elsa.api.auth")
 
@@ -299,3 +304,110 @@ async def require_admin(principal: Principal = Depends(current_principal)) -> Pr
     if not principal.is_admin:
         raise _forbidden("Administrator privileges are required.", "insufficient_permissions")
     return principal
+
+
+# ---------------------------------------------------------------------
+# Conocimiento técnico (Bloque 2)
+# ---------------------------------------------------------------------
+
+
+def get_knowledge(
+    container: Container = Depends(get_container),
+) -> KnowledgeRepositoryPort:
+    """Repositorio de conocimiento, o 503 si todavía no está conectado."""
+    try:
+        return container.require_knowledge()
+    except KnowledgeUnavailableError:
+        raise _unavailable(
+            "The knowledge store is temporarily unavailable.",
+            code="knowledge_store_unavailable",
+        ) from None
+
+
+def get_artifact_storage(
+    container: Container = Depends(get_container),
+) -> ArtifactStoragePort:
+    """Almacenamiento privado de artefactos."""
+    return container.artifact_storage
+
+
+def get_ingestion_service(
+    container: Container = Depends(get_container),
+    knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
+) -> IngestionService:
+    """Servicio de ingesta con los límites configurados para este ambiente."""
+    settings = container.settings
+    return IngestionService(
+        knowledge,
+        container.artifact_storage,
+        limits=ArchiveLimits(
+            max_bytes=settings.ingestion_max_upload_bytes,
+            max_uncompressed_bytes=settings.ingestion_max_uncompressed_bytes,
+            max_entries=settings.ingestion_max_archive_entries,
+        ),
+    )
+
+
+async def reviewer_capability(
+    principal: Principal = Depends(current_principal),
+    permissions: PermissionsRepositoryPort = Depends(get_permissions),
+) -> ReviewerCapability:
+    """Capacidades de revisor **vigentes** de quien hace la petición.
+
+    Se resuelven en cada petición, no se cachean: deshabilitar a un revisor
+    tiene que surtir efecto de inmediato, sin esperar a que expire nada.
+    """
+    try:
+        grants = await permissions.list_active_reviewer_grants(principal.external_user_id)
+    except PermissionsUnavailableError:
+        raise _unavailable(
+            "The authorization store is temporarily unavailable.",
+            code="permissions_store_unavailable",
+        ) from None
+    return build_capability(
+        principal,
+        [Scope(domain=grant.domain, equipment=grant.equipment) for grant in grants],
+    )
+
+
+class RequireReviewer:
+    """Exige capacidad de Revisor Técnico sobre el alcance de la ruta.
+
+    Se aplica **después** de :class:`RequireScope`: revisar exige además
+    poder leer. Un administrador pasa siempre, porque conserva capacidad
+    global de intervención.
+    """
+
+    def __init__(self, *, domain_param: str = "domain", asset_param: str = "asset") -> None:
+        self._domain_param = domain_param
+        self._asset_param = asset_param
+
+    async def __call__(
+        self,
+        request: Request,
+        capability: ReviewerCapability = Depends(reviewer_capability),
+    ) -> ReviewerCapability:
+        try:
+            required = Scope(
+                domain=normalize_scope_value(str(request.path_params[self._domain_param])),
+                equipment=normalize_scope_value(str(request.path_params[self._asset_param])),
+            )
+        except (InvalidScopeError, KeyError):
+            raise _forbidden(
+                "Technical review is not allowed for this scope.", "reviewer_scope_denied"
+            ) from None
+
+        if not can_review(capability, required):
+            _logger.info(
+                "review denied",
+                extra={
+                    "user_id": capability.external_user_id,
+                    "domain": required.domain,
+                    "equipment": required.equipment,
+                    "request_id": get_request_id(request),
+                },
+            )
+            raise _forbidden(
+                "Technical review is not allowed for this scope.", "reviewer_scope_denied"
+            )
+        return capability

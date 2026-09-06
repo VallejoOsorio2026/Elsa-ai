@@ -24,7 +24,9 @@ from elsa.api.errors import register_error_handlers
 from elsa.api.v1.access import router as access_router
 from elsa.api.v1.admin import router as admin_router
 from elsa.api.v1.health import router as health_router
+from elsa.api.v1.knowledge import router as knowledge_router
 from elsa.api.v1.me import router as me_router
+from elsa.api.v1.technical import router as technical_router
 from elsa.config import Environment, Settings, load_settings
 from elsa.container import Container
 from elsa.logging import RequestContextMiddleware, configure_logging
@@ -83,6 +85,8 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     app.include_router(me_router, prefix=API_V1_PREFIX)
     app.include_router(access_router, prefix=API_V1_PREFIX)
     app.include_router(admin_router, prefix=API_V1_PREFIX)
+    app.include_router(knowledge_router, prefix=API_V1_PREFIX)
+    app.include_router(technical_router, prefix=API_V1_PREFIX)
 
     _logger.info(
         "application configured",

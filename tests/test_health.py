@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 EXPECTED_DEPENDENCIES = {
     "database",
     "auth",
+    "artifact_storage",
     "llm",
     "embeddings",
     "ocr",
@@ -32,6 +33,8 @@ def test_readiness_reports_degraded_with_fake_adapters(client: TestClient) -> No
     # sin adaptador real.
     assert body["dependencies"]["auth"]["status"] == "degraded"
     assert body["dependencies"]["database"]["status"] == "degraded"
+    # El almacenamiento en memoria responde, pero pierde todo al reiniciar.
+    assert body["dependencies"]["artifact_storage"]["status"] == "degraded"
     assert body["dependencies"]["llm"]["status"] == "not_configured"
 
 

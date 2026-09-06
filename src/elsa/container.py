@@ -262,9 +262,7 @@ class Container:
                 critical=True,
                 detail="the private artifact storage is not writable",
             )
-        return DependencyReport(
-            name="artifact_storage", status=DependencyStatus.OK, critical=True
-        )
+        return DependencyReport(name="artifact_storage", status=DependencyStatus.OK, critical=True)
 
     # -----------------------------------------------------------------
     # Construcción de adaptadores reales
