@@ -54,6 +54,16 @@ class PermissionsBackend(StrEnum):
     """Almacén en memoria, no persistente. Solo permitido en DEV."""
 
 
+class ArtifactStorageBackend(StrEnum):
+    """Dónde viven los bytes de los archivos originales y sus derivados."""
+
+    LOCAL = "local"
+    """Sistema de archivos privado, fuera del repositorio."""
+
+    MEMORY = "memory"
+    """En memoria, no persistente. Solo permitido en DEV."""
+
+
 class ConfigurationError(RuntimeError):
     """Configuración ausente o inválida detectada al arranque."""
 
@@ -151,6 +161,30 @@ class Settings(BaseSettings):
 
     bootstrap_admin_token: SecretStr | None = None
     """Token del bootstrap del primer administrador. Sin él, queda deshabilitado."""
+
+    # ---------------------------------------------------------------
+    # Almacenamiento privado de artefactos e ingesta
+    # ---------------------------------------------------------------
+
+    artifact_storage_backend: ArtifactStorageBackend = ArtifactStorageBackend.MEMORY
+    """Adaptador del puerto ``artifact_storage``. ``memory`` solo es válido en DEV."""
+
+    artifact_storage_root: Path | None = None
+    """Directorio privado de artefactos. Obligatorio con el backend ``local``.
+
+    Debe estar **fuera del repositorio**: guarda archivos internos de planta
+    (XLSX de Ingeniería, exportes de SAP, imágenes de plano) que nunca pueden
+    entrar en Git ni quedar expuestos por un servidor web.
+    """
+
+    ingestion_max_upload_bytes: int = 25 * 1024 * 1024
+    """Tamaño máximo aceptado de un archivo subido."""
+
+    ingestion_max_uncompressed_bytes: int = 200 * 1024 * 1024
+    """Tamaño máximo al que puede expandirse un XLSX (bomba de descompresión)."""
+
+    ingestion_max_archive_entries: int = 5_000
+    """Número máximo de entradas dentro del paquete XLSX."""
 
     # ---------------------------------------------------------------
     # Control de abuso
@@ -266,6 +300,25 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator("artifact_storage_root", mode="before")
+    @classmethod
+    def _empty_path_is_none(cls, value: object) -> object:
+        """``ELSA_ARTIFACT_STORAGE_ROOT=`` significa «no configurada»."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator(
+        "ingestion_max_upload_bytes",
+        "ingestion_max_uncompressed_bytes",
+        "ingestion_max_archive_entries",
+    )
+    @classmethod
+    def _positive(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("must be greater than zero")
+        return value
+
     @field_validator(
         "auth_jwt_leeway_seconds",
         "auth_jwks_cache_seconds",
@@ -310,6 +363,24 @@ class Settings(BaseSettings):
 
         if self.auth_timeout_seconds <= 0:
             raise ValueError("must be greater than zero")
+
+        if self.artifact_storage_backend is ArtifactStorageBackend.MEMORY and not is_dev:
+            raise ValueError(
+                "the in-memory artifact storage is only allowed in the DEV environment; "
+                "set ELSA_ARTIFACT_STORAGE_BACKEND=local"
+            )
+        if (
+            self.artifact_storage_backend is ArtifactStorageBackend.LOCAL
+            and self.artifact_storage_root is None
+        ):
+            raise ValueError(
+                "ELSA_ARTIFACT_STORAGE_ROOT is required when the artifact storage is local"
+            )
+        if self.ingestion_max_uncompressed_bytes < self.ingestion_max_upload_bytes:
+            raise ValueError(
+                "ELSA_INGESTION_MAX_UNCOMPRESSED_BYTES cannot be smaller than "
+                "ELSA_INGESTION_MAX_UPLOAD_BYTES"
+            )
 
         return self
 
