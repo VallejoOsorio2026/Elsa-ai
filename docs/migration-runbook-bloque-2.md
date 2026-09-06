@@ -17,10 +17,17 @@ Proyecto destino: `papelsa-elsa` (ref `shiaxoyhallucehoygqt`).
 | `20260905020000_create_elsa_authorization_model.sql` | 1 | Esquema `elsa`, cuentas, dominios, permisos, auditoría |
 | `20260906010000_create_technical_knowledge_model.sql` | 2 | Modelo de conocimiento técnico |
 
-**Ninguno de los dos se ha aplicado todavía a un proyecto Supabase remoto.**
-Por tanto `supabase db push` aplicará **ambos**, no solo el del Bloque 2. Esto
-es correcto y esperado: el Bloque 2 depende de objetos del Bloque 1 y no puede
-aplicarse solo.
+**Estado remoto confirmado** con `supabase migration list` sobre el proyecto
+enlazado:
+
+| Local | Remoto |
+|---|---|
+| `20260905020000` | `20260905020000` |
+| `20260906010000` | — |
+
+El Bloque 1 ya está aplicado. Solo queda pendiente el Bloque 2, y `db push`
+aplicará únicamente ese archivo. Las dependencias listadas abajo ya existen en
+el remoto, de modo que la migración tiene sobre qué apoyarse.
 
 Dependencias del Bloque 2 sobre el Bloque 1:
 
@@ -158,6 +165,90 @@ de red al proyecto, y no debe tenerlos.
    ```
 
 6. **Verificar.** Las consultas de §6 deben coincidir con la tabla de §2.
+
+### Procedimiento en PowerShell (Windows)
+
+Estado de partida ya verificado: Bloque 1 aplicado, Bloque 2 pendiente.
+Ejecutar desde la raíz del repositorio.
+
+```powershell
+# --- 0. Contexto ---
+cd C:\ruta\a\Elsa-ai
+git rev-parse --abbrev-ref HEAD     # claude/bloque-2-activo-tecnico-bom-x8aeic
+git status --porcelain              # sin salida
+supabase --version
+
+# --- 1. Última comprobación segura ---
+supabase migration list             # confirmar que 20260906010000 sigue sin remoto
+supabase db diff --linked --schema elsa   # ver el diferencial real
+supabase db push --dry-run          # listar qué se aplicaría, sin aplicar
+```
+
+Antes de continuar, en el **SQL Editor** del panel de Supabase (así ninguna
+credencial pasa por la terminal) comprobar que la auditoría no tiene
+operaciones fuera del catálogo del Bloque 1, que harían fallar el
+`add constraint` de §3:
+
+```sql
+select distinct operation from elsa.admin_audit_log
+where operation not in (
+  'bootstrap_admin','create_account','grant_permission','revoke_permission',
+  'enable_user','disable_user','promote_admin','demote_admin');
+```
+
+Debe devolver **cero filas**. Si devuelve alguna, detenerse y reportar.
+
+```powershell
+# --- 2. Aplicar únicamente la migración pendiente ---
+# La CLI lista lo pendiente y pide confirmación. Debe mostrar SOLO
+# 20260906010000. Si aparece cualquier otra cosa: responder N y detenerse.
+supabase db push
+```
+
+```powershell
+# --- 3. Validación inmediata ---
+supabase migration list             # 20260906010000 debe aparecer ya en Remoto
+```
+
+Y en el SQL Editor:
+
+```sql
+-- 24
+select count(*) as tablas from pg_tables where schemaname = 'elsa';
+
+-- una sola fila: true | 24
+select c.relrowsecurity as rls, count(*)
+from pg_class c join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'elsa' and c.relkind = 'r'
+group by 1;
+
+-- 0
+select count(*) as politicas from pg_policies where schemaname = 'elsa';
+
+-- debe incluir 'bom_published', 'reviewer_granted', etc.
+select pg_get_constraintdef(oid) from pg_constraint
+where conname = 'ck_audit_operation';
+
+-- índice parcial de versión publicada única
+select indexdef from pg_indexes
+where schemaname = 'elsa' and indexname = 'uq_published_version_per_asset';
+
+-- 20 tablas nuevas, todas vacías
+select relname, n_live_tup from pg_stat_user_tables
+where schemaname = 'elsa' order by relname;
+```
+
+```powershell
+# --- 4. Detenerse ---
+git status --porcelain              # sin salida: db push no toca el repositorio
+```
+
+Aplicar la migración **no** genera cambios en el árbol de trabajo. No abrir PR
+ni hacer merge en este punto: reportar los resultados de la validación primero.
+
+Si algo falla durante `db push`, la migración corre en una transacción y no
+deja estado intermedio (§7). Reportar el error tal cual, sin reintentar a
+ciegas.
 
 ### Ensayo previo realizado
 
