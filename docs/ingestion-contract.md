@@ -221,8 +221,41 @@ En la ruta de líneas:
   identificarse, el renglón **se conserva igual** y se avisa: no se descarta
   un material válido por no poder probar su relación, ni se le inventa una.
 - Lo que no se reconoce **se cuenta y se avisa** (`unrecognised_lines`,
-  `incomplete_material_lines`, `contradictory_type_icons`,
-  `unresolved_hierarchy`); no se rellena por conjetura.
+  `incomplete_material_lines`, `unresolved_hierarchy`); no se rellena por
+  conjetura.
+
+### Cada renglón se clasifica antes de leerle los campos
+
+| Clase | Qué es | ¿Es BOM? |
+|---|---|---|
+| `metadata` | Lleva un rótulo de cabecera | No |
+| `root` | La raíz del activo: declara material y equipo a la vez, o es el propio emplazamiento | No |
+| `connector` | Solo trazos del árbol o símbolos SAPDings | No |
+| `material` | Identificador + contenido + cantidad y unidad | Sí |
+| `equipment` | Identificador + contenido, sin cantidad, o con icono de equipo | Sí |
+| `unresolved` | Parece un registro técnico y no se pudo interpretar | No |
+
+Clasificar primero es lo que impide contar una cabecera, la raíz o una rama
+del árbol como «registros técnicos que no se pudieron resolver». No lo son:
+no son registros.
+
+### Lo que solo dibuja el árbol no es un dato
+
+SAP antepone a cada renglón los trazos de la rama (`|`, `|---`) y un símbolo
+en la tipografía **SAPDings**, cuyos caracteres son glifos: un `0` en SAPDings
+es un icono, no un cero. Ninguno de los dos puede ser código, cantidad,
+unidad ni descripción, así que se apartan antes de leer los campos. Dejarlos
+dentro los coloca delante del identificador y, como no lo parecen, la
+extracción falla y el renglón entero se pierde.
+
+### Cantidad y unidad, por el extremo derecho
+
+El identificador puede venir en un fragmento y la descripción, el estado, la
+cantidad y la unidad compartir otro. Se lee **de derecha a izquierda** y
+**solo después** de haber apartado el identificador: buscar «el último número
+del renglón» antes se lleva el código en cuanto la cantidad no es legible.
+Los números que haya dentro de la descripción se quedan en ella. La unidad es
+la que diga el archivo; no hay ninguna fijada.
 
 ### Diagnóstico estructural
 
@@ -236,8 +269,10 @@ falla:
 | `logical_lines_built` | Renglones reunidos |
 | `html_tables_seen` | Tablas HTML, si las hubiera |
 | `metadata_labels_detected` | Rótulos de cabecera reconocidos |
+| `metadata_values_resolved` | Rótulos que además obtuvieron su valor |
+| `metadata_lines` / `root_lines` / `connector_lines` / `empty_lines` | Renglones que no son BOM |
 | `icon_material_signals` / `icon_equipment_signals` | Tipos declarados por iconos |
-| `candidate_records` | Renglones con algo interpretable |
+| `candidate_records` | Renglones que sí parecen registros técnicos |
 | `parsed_material_records` / `parsed_equipment_records` | Registros importados |
 | `unresolved_records` | Renglones que no se pudieron interpretar |
 

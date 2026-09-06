@@ -72,6 +72,10 @@ base: no hay nada que ejecutar en el camino.
   almacenamiento se deriva del SHA-256 del contenido, así que un nombre
   hostil no llega al sistema de archivos.
 
+El parser SAP lee los atributos de los `<img>` y de los controles de
+formulario del archivo, pero **no solicita ningún recurso**: ni la imagen que
+un `src` indique, ni una hoja de estilos remota, ni un `iframe`, ni un enlace.
+
 El diagnóstico estructural del parser SAP son **solo números por etapa**
 (fragmentos vistos, renglones construidos, candidatos, registros importados).
 Nunca incluye texto original, códigos, descripciones ni ubicaciones, de modo
