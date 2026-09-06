@@ -659,6 +659,19 @@ def _record_from_header(
 
 _CODE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/\-]{1,39}$")
 _UNIT_PATTERN = re.compile(r"^[A-Za-z]{1,4}$")
+
+
+def _looks_like_code(value: str) -> bool:
+    """Indica si un campo puede ser el identificador del renglón.
+
+    Se exige al menos un dígito: los números de material y los de equipo
+    siempre los llevan, y sin ese requisito una línea de totales o un rótulo
+    suelto («Total», «Suma») pasaría por identificador y produciría un
+    renglón inventado.
+    """
+    return bool(_CODE_PATTERN.match(value)) and any(char.isdigit() for char in value)
+
+
 # Un nivel jerárquico es un entero pequeño; un código de material no lo es.
 _MAX_LEVEL = 99
 
@@ -678,6 +691,14 @@ def _record_from_fields(fields: Sequence[str]) -> dict[str, str | None]:
     if remaining and remaining[0].isdigit() and int(remaining[0]) <= _MAX_LEVEL:
         level = remaining.pop(0)
 
+    # El identificador se toma ANTES que la cantidad. Un código de material es
+    # un número, así que buscar primero «el último campo numérico» se lo lleva
+    # por delante en cuanto la cantidad no es legible, y el renglón entero se
+    # pierde por no tener identificador.
+    code: str | None = None
+    if remaining and _looks_like_code(remaining[0]):
+        code = remaining.pop(0)
+
     unit: str | None = None
     if remaining and _UNIT_PATTERN.match(remaining[-1]):
         unit = remaining.pop()
@@ -687,10 +708,6 @@ def _record_from_fields(fields: Sequence[str]) -> dict[str, str | None]:
         if normalize_quantity(remaining[index]) is not None:
             quantity = remaining.pop(index)
             break
-
-    code: str | None = None
-    if remaining and _CODE_PATTERN.match(remaining[0]) and " " not in remaining[0]:
-        code = remaining.pop(0)
 
     return {
         "level": level,

@@ -92,3 +92,45 @@ def test_forbidden_artifacts_are_ignored(path: str) -> None:
 @pytest.mark.parametrize("path", ALLOWED_PATHS)
 def test_required_files_are_not_ignored(path: str) -> None:
     assert not _is_ignored(path), f"{path} must be versionable"
+
+
+# ---------------------------------------------------------------------
+# Los fixtures son sintéticos
+# ---------------------------------------------------------------------
+
+# Prefijos con los que se inventan los códigos en los fixtures. Un código
+# fuera de estos rangos en la suite es señal de que alguien pegó un dato de
+# una fuente real.
+SYNTHETIC_CODE_PREFIXES = ("10000", "90000", "EQ-", "PL-", "MOD-", "R-", "MB-")
+
+FIXTURE_MODULES = ("tests/fixtures_xlsx.py", "tests/fixtures_sources.py")
+
+
+@pytest.mark.parametrize("module", FIXTURE_MODULES)
+def test_fixture_modules_are_versionable(module: str) -> None:
+    """Los fixtures son código, no binarios: tienen que poder versionarse."""
+    assert not _is_ignored(module)
+    assert (REPO_ROOT / module).is_file()
+
+
+def test_generated_fixtures_only_use_invented_identifiers() -> None:
+    """Ningún código de los fixtures sale de los rangos inventados.
+
+    No demuestra que no haya datos reales —eso lo garantiza que los fixtures
+    se generen por código—, pero sí detecta el descuido más probable: pegar
+    un renglón de la fuente real dentro de un test.
+    """
+    import re
+
+    pattern = re.compile(r"\b\d{7,}\b")
+    for module in FIXTURE_MODULES:
+        content = (REPO_ROOT / module).read_text(encoding="utf-8")
+        for code in pattern.findall(content):
+            # SAP rellena los códigos con ceros a la izquierda al mostrarlos,
+            # y los fixtures usan esa forma a propósito para comprobar que la
+            # normalización la deshace. El relleno no cambia de qué rango es
+            # el código.
+            unpadded = code.lstrip("0") or "0"
+            assert unpadded.startswith(SYNTHETIC_CODE_PREFIXES), (
+                f"{module} contains {code!r}, which is outside the invented ranges"
+            )
