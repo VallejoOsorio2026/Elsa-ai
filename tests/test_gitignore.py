@@ -45,6 +45,12 @@ FORBIDDEN_PATHS = [
     "private/original.bin",
     "acceptance/reporte-real.json",
     "reports/reconciliacion.json",
+    # Volcados de Supabase previos a una reversión: contienen datos técnicos
+    # internos. `*.sql` no puede ignorarse en bloque porque las migraciones
+    # también lo son, de modo que se ignoran por prefijo de nombre.
+    "respaldo-elsa-2026-09-06.sql",
+    "backup-elsa.sql",
+    "dump-elsa.sql",
 ]
 
 ALLOWED_PATHS = [
@@ -54,6 +60,9 @@ ALLOWED_PATHS = [
     # `supabase/.temp/` no puede arrastrar consigo `supabase/migrations/`.
     "supabase/migrations/20260905020000_create_elsa_authorization_model.sql",
     "supabase/migrations/20260906010000_create_technical_knowledge_model.sql",
+    # El guion de reversión es procedimiento documentado, no un volcado: se
+    # versiona aunque su nombre termine en `.sql`.
+    "supabase/rollback/20260906010000_rollback.sql",
     # Los fixtures de la suite son código, no archivos binarios: tienen que
     # poder versionarse.
     "tests/fixtures_xlsx.py",

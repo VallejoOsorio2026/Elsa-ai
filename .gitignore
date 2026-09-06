@@ -77,6 +77,11 @@ datasets/
 *.dump
 *.bak
 *.sql.gz
+# Volcados de Supabase. `*.sql` no puede ignorarse en bloque porque las
+# migraciones también lo son, así que se ignoran por prefijo de nombre.
+respaldo-*.sql
+backup-*.sql
+dump-*.sql
 *.sqlite
 *.sqlite3
 *.db
