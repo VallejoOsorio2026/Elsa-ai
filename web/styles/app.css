@@ -1,0 +1,457 @@
+/* Armazón de ELSA: acceso, barra lateral, barra superior y contexto técnico. */
+
+/* --- Pantalla de acceso --------------------------------------------- */
+
+.login {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--elsa-superficie);
+}
+
+.login-header {
+  background: var(--papelsa-blanco);
+  border-bottom: 1px solid var(--elsa-borde-suave);
+  display: flex;
+  align-items: center;
+  padding: var(--elsa-espacio-3) var(--elsa-espacio-4);
+}
+
+.login-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--elsa-espacio-6) var(--elsa-espacio-4) var(--elsa-espacio-12);
+}
+
+.login-panel { width: 100%; max-width: 520px; }
+
+.login-title { margin-bottom: var(--elsa-espacio-2); }
+
+/* ELSA y PAPELSA conviven separadas: nunca se funden en una sola pieza
+ * gráfica (ELSA_UI_BRAND_RULES.md §1). */
+.product-name {
+  font-family: var(--elsa-fuente-titulo);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.identity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--elsa-espacio-3);
+}
+
+.identity-btn {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  gap: var(--elsa-espacio-1);
+  padding: var(--elsa-espacio-3) var(--elsa-espacio-4);
+  background: var(--papelsa-blanco);
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-md);
+  cursor: pointer;
+  font: inherit;
+  min-height: 44px;
+}
+
+.identity-btn:hover { border-color: var(--elsa-acento); }
+.identity-btn strong { font-size: var(--elsa-texto-md); }
+
+@media (min-width: 768px) {
+  .login-main { align-items: center; padding-top: var(--elsa-espacio-12); }
+}
+
+/* --- Armazón de la aplicación --------------------------------------- */
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: var(--elsa-topbar-alto) 1fr;
+}
+
+/* A partir de 1024 px la barra lateral es una columna fija del armazón.
+ * Las áreas nombradas se declaran aquí y solo aquí: referenciarlas en
+ * anchos menores, donde la plantilla no las define, crea pistas implícitas
+ * y abre un hueco vacío sobre la barra superior. */
+@media (min-width: 1024px) {
+  .shell {
+    grid-template-columns: var(--elsa-sidebar-ancho) 1fr;
+    grid-template-rows: var(--elsa-topbar-alto) 1fr;
+    grid-template-areas:
+      "sidebar topbar"
+      "sidebar main";
+  }
+
+  .shell > .sidebar { grid-area: sidebar; }
+  .shell > .topbar { grid-area: topbar; }
+  .shell > .main { grid-area: main; }
+}
+
+/* --- Barra superior -------------------------------------------------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--elsa-espacio-3);
+  padding: 0 var(--elsa-espacio-3);
+  background: var(--papelsa-blanco);
+  border-bottom: 1px solid var(--elsa-borde-suave);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.topbar-title {
+  font-family: var(--elsa-fuente-titulo);
+  font-weight: 700;
+  font-size: var(--elsa-texto-md);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar-spacer { margin-left: auto; }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-md);
+  background: var(--papelsa-blanco);
+  cursor: pointer;
+  font-size: var(--elsa-texto-lg);
+  color: var(--elsa-texto);
+  flex: none;
+}
+
+@media (min-width: 1024px) {
+  .topbar { padding: 0 var(--elsa-espacio-6); }
+  .nav-toggle { display: none; }
+}
+
+.user-chip {
+  display: none;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  font-size: var(--elsa-texto-sm);
+}
+
+@media (min-width: 768px) {
+  .user-chip { display: inline-flex; }
+}
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--elsa-radio-completo);
+  background: var(--elsa-acento);
+  color: var(--elsa-texto-inverso);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: var(--elsa-texto-xs);
+  flex: none;
+}
+
+/* --- Barra lateral --------------------------------------------------- */
+
+/* Bajo 1024 px es un cajón: fuera de pantalla hasta que se abre. */
+.sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: min(88vw, 300px);
+  transform: translateX(-100%);
+  transition: transform 0.2s ease;
+  background: var(--papelsa-petroleo);
+  color: var(--elsa-texto-inverso);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.sidebar.is-open { transform: translateX(0); }
+
+.sidebar-brand {
+  padding: var(--elsa-espacio-4) var(--elsa-espacio-4) var(--elsa-espacio-2);
+}
+
+.sidebar-product {
+  padding: 0 var(--elsa-espacio-4) var(--elsa-espacio-4);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.sidebar-product .product-name { font-size: var(--elsa-texto-lg); }
+.sidebar-product p { color: rgba(255, 255, 255, 0.85); font-size: var(--elsa-texto-xs); margin: 0; }
+
+.nav { list-style: none; margin: 0; padding: var(--elsa-espacio-3); display: grid; gap: var(--elsa-espacio-1); flex: 1; }
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: var(--elsa-espacio-3);
+  min-height: 44px;
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-3);
+  border-radius: var(--elsa-radio-md);
+  color: var(--elsa-texto-inverso);
+  text-decoration: none;
+  font-size: var(--elsa-texto-sm);
+  font-weight: 600;
+  background: none;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.nav-link:hover { background: rgba(255, 255, 255, 0.12); }
+
+.nav-link[aria-current="page"] {
+  background: var(--papelsa-blanco);
+  color: var(--papelsa-petroleo);
+}
+
+.nav-icon { flex: none; width: 20px; text-align: center; }
+
+.nav-badge {
+  margin-left: auto;
+  background: var(--elsa-acento-grafico);
+  color: var(--papelsa-gris-oscuro);
+  border-radius: var(--elsa-radio-completo);
+  padding: 0 var(--elsa-espacio-2);
+  font-size: var(--elsa-texto-xs);
+  font-weight: 700;
+}
+
+.sidebar-footer {
+  padding: var(--elsa-espacio-4);
+  border-top: 1px solid rgba(255, 255, 255, 0.25);
+  font-size: var(--elsa-texto-xs);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(51, 51, 51, 0.5);
+  z-index: 30;
+}
+
+@media (min-width: 1024px) {
+  .sidebar { position: sticky; top: 0; height: 100vh; width: auto; transform: none; }
+  .scrim { display: none; }
+}
+
+/* --- Contenido ------------------------------------------------------- */
+
+.main {
+  padding: var(--elsa-espacio-4) var(--elsa-espacio-3) var(--elsa-espacio-12);
+  min-width: 0;
+}
+
+@media (min-width: 768px) {
+  .main { padding: var(--elsa-espacio-6); }
+}
+
+.content { max-width: var(--elsa-contenido-max); margin: 0 auto; }
+
+.page-head { margin-bottom: var(--elsa-espacio-4); }
+.page-head p { margin: 0; }
+
+/* --- Contexto técnico ------------------------------------------------ */
+
+/* Siempre visible: quien consulta tiene que saber de qué equipo habla ELSA
+ * y con qué versión publicada, sin tener que preguntarlo. */
+.context-bar {
+  display: grid;
+  gap: var(--elsa-espacio-3);
+  padding: var(--elsa-espacio-3) var(--elsa-espacio-4);
+  background: var(--elsa-superficie);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-md);
+  margin-bottom: var(--elsa-espacio-4);
+  font-size: var(--elsa-texto-sm);
+}
+
+@media (min-width: 768px) {
+  .context-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+}
+
+.context-item { min-width: 0; }
+.context-item dt { font-size: var(--elsa-texto-xs); color: var(--elsa-texto-secundario); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.context-item dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+
+.demo-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--elsa-espacio-2);
+  align-items: center;
+  background: var(--elsa-advertencia-surface);
+  color: var(--elsa-advertencia);
+  border-bottom: 1px solid var(--elsa-advertencia);
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-4);
+  font-size: var(--elsa-texto-xs);
+  font-weight: 600;
+}
+
+/* --- Estados vacíos y carga ------------------------------------------ */
+
+.empty {
+  text-align: center;
+  padding: var(--elsa-espacio-8) var(--elsa-espacio-4);
+  color: var(--elsa-texto-secundario);
+}
+
+.spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--elsa-borde);
+  border-top-color: var(--elsa-acento);
+  border-radius: var(--elsa-radio-completo);
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* --- Chat ------------------------------------------------------------ */
+
+.chat {
+  display: grid;
+  gap: var(--elsa-espacio-4);
+  min-width: 0;
+}
+
+/* `min-width: 0` en la rejilla y en cada mensaje: sin eso, un elemento de
+ * grid se niega a encoger por debajo de su contenido y una tabla ancha
+ * empuja toda la página a scroll horizontal en 320 px. */
+.chat-log {
+  display: grid;
+  gap: var(--elsa-espacio-4);
+  min-height: 200px;
+  min-width: 0;
+}
+
+.chat-log > * { min-width: 0; }
+
+.msg {
+  min-width: 0;
+  padding: var(--elsa-espacio-3) var(--elsa-espacio-4);
+  border-radius: var(--elsa-radio-lg);
+  max-width: 100%;
+}
+
+.msg p:last-child { margin-bottom: 0; }
+
+.msg-user {
+  background: var(--elsa-acento);
+  color: var(--elsa-texto-inverso);
+  justify-self: end;
+  max-width: min(100%, 46ch);
+  border-bottom-right-radius: var(--elsa-radio-sm);
+}
+
+.msg-assistant {
+  background: var(--elsa-superficie);
+  border: 1px solid var(--elsa-borde-suave);
+  border-bottom-left-radius: var(--elsa-radio-sm);
+}
+
+.answer-origin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+}
+
+.evidence { margin-top: var(--elsa-espacio-3); min-width: 0; }
+.evidence h3 { font-size: var(--elsa-texto-sm); text-transform: uppercase; letter-spacing: 0.04em; color: var(--elsa-texto-secundario); }
+
+.fmea-card {
+  background: var(--papelsa-blanco);
+  border: 1px solid var(--elsa-borde-suave);
+  border-left: 4px solid var(--elsa-acento-grafico);
+  border-radius: var(--elsa-radio-md);
+  padding: var(--elsa-espacio-3);
+  font-size: var(--elsa-texto-sm);
+}
+
+.fmea-card p { margin-bottom: var(--elsa-espacio-1); }
+.fmea-head { display: flex; flex-wrap: wrap; gap: var(--elsa-espacio-2); align-items: center; justify-content: space-between; }
+
+/* --- Compositor ------------------------------------------------------ */
+
+.composer {
+  position: sticky;
+  bottom: 0;
+  background: var(--elsa-fondo);
+  padding-top: var(--elsa-espacio-2);
+  padding-bottom: var(--elsa-espacio-3);
+  display: grid;
+  gap: var(--elsa-espacio-2);
+}
+
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--elsa-espacio-2);
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-lg);
+  padding: var(--elsa-espacio-2);
+  background: var(--papelsa-blanco);
+}
+
+.composer-row textarea {
+  border: 0;
+  min-height: 44px;
+  padding: var(--elsa-espacio-2);
+  flex: 1;
+  resize: none;
+}
+
+.composer-row textarea:focus-visible { outline-offset: -2px; }
+
+.chip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--elsa-espacio-2);
+  align-items: center;
+  font-size: var(--elsa-texto-xs);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--elsa-espacio-1);
+  background: var(--elsa-superficie);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-completo);
+  padding: var(--elsa-espacio-1) var(--elsa-espacio-3);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.msg-user .chip { background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.4); color: inherit; }
+
+.chip-remove {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  padding: 0 2px;
+  min-width: 24px;
+  min-height: 24px;
+}

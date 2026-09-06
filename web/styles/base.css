@@ -1,0 +1,254 @@
+/* Fundación responsive: reinicio, tipografía y primitivas compartidas.
+ * Mobile-first. Los cortes son 320 / 375 / 768 / 1024 / 1366 / 1920. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--elsa-fondo);
+  color: var(--elsa-texto);
+  font-family: var(--elsa-fuente-cuerpo);
+  font-size: var(--elsa-texto-md);
+  line-height: var(--elsa-interlineado-normal);
+  /* 320 px es el ancho mínimo soportado: por debajo se permite scroll
+   * horizontal en vez de romper el contenido. */
+  min-width: 320px;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--elsa-fuente-titulo);
+  line-height: var(--elsa-interlineado-ajustado);
+  margin: 0 0 var(--elsa-espacio-3);
+  font-weight: 700;
+}
+
+h1 { font-size: var(--elsa-texto-xl); }
+h2 { font-size: var(--elsa-texto-lg); }
+h3 { font-size: var(--elsa-texto-md); }
+
+@media (min-width: 768px) {
+  h1 { font-size: var(--elsa-texto-2xl); }
+  h2 { font-size: var(--elsa-texto-xl); }
+}
+
+p { margin: 0 0 var(--elsa-espacio-3); }
+
+a {
+  color: var(--elsa-acento);
+  text-underline-offset: 2px;
+}
+
+img, svg { max-width: 100%; }
+
+/* Foco siempre visible. Nunca se elimina sin sustituto (regla 4 de
+ * accesibilidad en ELSA_UI_BRAND_RULES.md §6). */
+:focus-visible {
+  outline: 3px solid var(--elsa-foco);
+  outline-offset: 2px;
+  border-radius: var(--elsa-radio-sm);
+}
+
+.on-dark :focus-visible {
+  outline-color: var(--elsa-foco-inverso);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- Utilidades ----------------------------------------------------- */
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+[hidden] { display: none !important; }
+
+.stack > * + * { margin-top: var(--elsa-espacio-4); }
+.stack-sm > * + * { margin-top: var(--elsa-espacio-2); }
+
+.muted {
+  color: var(--elsa-texto-secundario);
+  font-size: var(--elsa-texto-sm);
+}
+
+.mono {
+  font-family: var(--elsa-fuente-dato);
+  font-size: var(--elsa-texto-sm);
+}
+
+/* --- Marca ---------------------------------------------------------- */
+
+/* El área de seguridad del manual (2X = 22,22 % de la altura) se aplica
+ * como padding proporcional. Dentro de .brand-logo no entra nada más. */
+.brand-logo {
+  display: block;
+  padding: calc(var(--logo-alto, 24px) * var(--papelsa-logo-area-seguridad));
+}
+
+.brand-logo img {
+  display: block;
+  /* Nunca por debajo del mínimo del manual (80 px de ancho). */
+  width: var(--logo-ancho, 120px);
+  min-width: var(--papelsa-logo-ancho-minimo);
+  height: auto;
+}
+
+/* --- Botones -------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--elsa-espacio-2);
+  min-height: 44px; /* objetivo táctil cómodo con guantes */
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-4);
+  border: 1px solid transparent;
+  border-radius: var(--elsa-radio-md);
+  font: inherit;
+  font-size: var(--elsa-texto-sm);
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--elsa-superficie);
+  color: var(--elsa-texto);
+  text-decoration: none;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--elsa-acento);
+  color: var(--elsa-texto-inverso);
+}
+
+.btn-secondary {
+  background: var(--papelsa-blanco);
+  border-color: var(--elsa-borde);
+  color: var(--elsa-texto);
+}
+
+/* El verde corporativo no lleva texto sobre blanco (contraste 2,00). Aquí
+ * es fondo, y el texto va en gris oscuro: 6,30. */
+.btn-accent {
+  background: var(--elsa-acento-grafico);
+  color: var(--papelsa-gris-oscuro);
+}
+
+.btn-danger {
+  background: var(--papelsa-blanco);
+  border-color: var(--elsa-error);
+  color: var(--elsa-error);
+}
+
+.btn-block { width: 100%; }
+
+/* --- Superficies ---------------------------------------------------- */
+
+.card {
+  background: var(--elsa-superficie-alta);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-lg);
+  padding: var(--elsa-espacio-4);
+}
+
+@media (min-width: 768px) {
+  .card { padding: var(--elsa-espacio-6); }
+}
+
+/* --- Avisos --------------------------------------------------------- */
+
+/* El color nunca es el único portador del significado: cada aviso lleva
+ * además una etiqueta de texto. */
+.notice {
+  display: flex;
+  gap: var(--elsa-espacio-3);
+  padding: var(--elsa-espacio-3) var(--elsa-espacio-4);
+  border-radius: var(--elsa-radio-md);
+  border-left: 4px solid;
+  font-size: var(--elsa-texto-sm);
+}
+
+.notice-label { font-weight: 700; }
+
+.notice-info { background: var(--elsa-info-surface); border-color: var(--elsa-info); color: var(--elsa-info); }
+.notice-warn { background: var(--elsa-advertencia-surface); border-color: var(--elsa-advertencia); color: var(--elsa-advertencia); }
+.notice-error { background: var(--elsa-error-surface); border-color: var(--elsa-error); color: var(--elsa-error); }
+.notice-success { background: var(--elsa-exito-surface); border-color: var(--elsa-exito); color: var(--elsa-exito); }
+
+/* --- Formularios ---------------------------------------------------- */
+
+label { display: block; font-size: var(--elsa-texto-sm); font-weight: 600; margin-bottom: var(--elsa-espacio-1); }
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+select,
+textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-3);
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-md);
+  font: inherit;
+  font-size: var(--elsa-texto-md); /* 16px evita el zoom automático en iOS */
+  color: var(--elsa-texto);
+  background: var(--papelsa-blanco);
+}
+
+textarea { min-height: 88px; resize: vertical; }
+
+/* --- Etiquetas de estado -------------------------------------------- */
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--elsa-espacio-1);
+  padding: 2px var(--elsa-espacio-2);
+  border-radius: var(--elsa-radio-completo);
+  font-size: var(--elsa-texto-xs);
+  font-weight: 700;
+  border: 1px solid currentColor;
+}
+
+.tag-pending { color: var(--elsa-advertencia); background: var(--elsa-advertencia-surface); }
+.tag-approved { color: var(--elsa-exito); background: var(--elsa-exito-surface); }
+.tag-rejected { color: var(--elsa-error); background: var(--elsa-error-surface); }
+.tag-draft { color: var(--elsa-texto-secundario); background: var(--elsa-superficie); }
+.tag-sim { color: var(--elsa-advertencia); background: var(--elsa-advertencia-surface); }
+
+/* --- Tablas --------------------------------------------------------- */
+
+.table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+  /* Un contenedor con scroll propio también necesita poder encoger cuando
+   * su padre es una rejilla. */
+  min-width: 0;
+}
+
+table { border-collapse: collapse; width: 100%; font-size: var(--elsa-texto-sm); }
+th, td { text-align: left; padding: var(--elsa-espacio-2) var(--elsa-espacio-3); border-bottom: 1px solid var(--elsa-borde-suave); }
+th { font-weight: 700; white-space: nowrap; }

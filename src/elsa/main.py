@@ -23,13 +23,17 @@ from elsa import __version__
 from elsa.api.errors import register_error_handlers
 from elsa.api.v1.access import router as access_router
 from elsa.api.v1.admin import router as admin_router
+from elsa.api.v1.assistant import router as assistant_router
 from elsa.api.v1.health import router as health_router
 from elsa.api.v1.knowledge import router as knowledge_router
 from elsa.api.v1.me import router as me_router
+from elsa.api.v1.session import router as session_router
 from elsa.api.v1.technical import router as technical_router
 from elsa.config import Environment, Settings, load_settings
 from elsa.container import Container
+from elsa.demo.seed import seed_demo_data
 from elsa.logging import RequestContextMiddleware, configure_logging
+from elsa.web import mount_web_ui
 
 API_V1_PREFIX = "/api/v1"
 
@@ -52,6 +56,12 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await resolved_container.start()
+        await seed_demo_data(
+            permissions=resolved_container.permissions,
+            knowledge=resolved_container.knowledge,
+            materials_identity=resolved_container.materials_identity,
+            settings=settings,
+        )
         try:
             yield
         finally:
@@ -87,6 +97,14 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     app.include_router(admin_router, prefix=API_V1_PREFIX)
     app.include_router(knowledge_router, prefix=API_V1_PREFIX)
     app.include_router(technical_router, prefix=API_V1_PREFIX)
+    app.include_router(session_router, prefix=API_V1_PREFIX)
+    app.include_router(assistant_router, prefix=API_V1_PREFIX)
+
+    # El montaje estático va al final a propósito: Starlette resuelve las
+    # rutas en orden y el montaje de la raíz atrapa todo lo que llegue sin
+    # dueño. Registrado antes, se tragaría la API.
+    if settings.web_ui_enabled:
+        mount_web_ui(app)
 
     _logger.info(
         "application configured",
