@@ -127,6 +127,7 @@ uv run pre-commit install
 | [`docs/private-acceptance-test.md`](docs/private-acceptance-test.md) | Prueba local con archivos reales, sin tocar Git |
 | [`docs/environment-variables.md`](docs/environment-variables.md) | Referencia de variables de entorno |
 | [`docs/contributing.md`](docs/contributing.md) | Convención de commits y flujo de trabajo |
+| [`docs/brand/`](docs/brand/) | Identidad visual PAPELSA: guía de marca, design tokens y reglas de interfaz |
 | [`docs/adr/`](docs/adr/) | Decisiones arquitectónicas registradas (ADR) |
 
 ## Estructura del repositorio
@@ -147,5 +148,6 @@ src/elsa/
   adapters/        # implementaciones reales y fakes deterministas
 supabase/migrations/  # migraciones SQL (autoridad única del esquema)
 tests/                # pytest
-docs/                 # documentación y ADRs
+docs/                 # documentación, ADRs y guía de marca
+assets/brand/         # logotipo PAPELSA para la interfaz web (SVG)
 ```
