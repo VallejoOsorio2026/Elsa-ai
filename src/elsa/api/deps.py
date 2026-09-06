@@ -47,9 +47,11 @@ from elsa.ports.auth import (
     IdentityProviderUnavailableError,
     InvalidTokenError,
 )
+from elsa.ports.contributions import ContributionsRepositoryPort, ContributionsUnavailableError
 from elsa.ports.knowledge import KnowledgeRepositoryPort, KnowledgeUnavailableError
 from elsa.ports.materials_identity import MaterialsProfile
 from elsa.ports.permissions import PermissionsRepositoryPort, PermissionsUnavailableError
+from elsa.ports.transcription import TranscriptionPort
 from elsa.services.ingestion import IngestionService
 
 _logger = logging.getLogger("elsa.api.auth")
@@ -411,3 +413,86 @@ class RequireReviewer:
                 "Technical review is not allowed for this scope.", "reviewer_scope_denied"
             )
         return capability
+
+
+# ---------------------------------------------------------------------
+# Aportes de conocimiento (Bloque 3)
+# ---------------------------------------------------------------------
+
+
+def get_contributions(
+    container: Container = Depends(get_container),
+) -> ContributionsRepositoryPort:
+    """Almacén de aportes, o 503 si todavía no está conectado."""
+    contributions = container.contributions
+    if contributions is None:  # pragma: no cover - el contenedor siempre lo compone
+        raise _unavailable(
+            "The contributions store is temporarily unavailable.",
+            code="contributions_store_unavailable",
+        )
+    return contributions
+
+
+def get_transcription(container: Container = Depends(get_container)) -> TranscriptionPort:
+    """Motor de voz a texto seleccionado para esta ejecución."""
+    return container.transcription
+
+
+class RequireContributor:
+    """Exige capacidad de **aportar** sobre el alcance de la ruta.
+
+    Aportar no es consultar. Alguien puede tener permiso para leer el
+    conocimiento de un equipo y no estar habilitado para añadirle nada: lo
+    que entra al conocimiento técnico de una planta pasa por una lista
+    explícita, no por el hecho de tener acceso.
+
+    Se aplica **después** de ``RequireScope``: no se puede aportar sobre un
+    alcance que ni siquiera se puede leer. Un administrador pasa, porque
+    conserva capacidad global de intervención, igual que en la revisión.
+    """
+
+    def __init__(self, *, domain_param: str = "domain", asset_param: str = "asset") -> None:
+        self._domain_param = domain_param
+        self._asset_param = asset_param
+
+    async def __call__(
+        self,
+        request: Request,
+        principal: Principal = Depends(current_principal),
+        contributions: ContributionsRepositoryPort = Depends(get_contributions),
+    ) -> Principal:
+        try:
+            domain = normalize_scope_value(str(request.path_params[self._domain_param]))
+            asset = normalize_scope_value(str(request.path_params[self._asset_param]))
+        except (InvalidScopeError, KeyError):
+            raise _forbidden(
+                "Contributing to this scope is not allowed.", "contributor_scope_denied"
+            ) from None
+
+        if principal.is_admin:
+            return principal
+
+        try:
+            allowed = await contributions.is_contributor(
+                principal.external_user_id, domain=domain, asset_code=asset
+            )
+        except ContributionsUnavailableError:
+            raise _unavailable(
+                "The contributions store is temporarily unavailable.",
+                code="contributions_store_unavailable",
+            ) from None
+
+        if not allowed:
+            _logger.info(
+                "contribution denied",
+                extra={
+                    "user_id": principal.external_user_id,
+                    "domain": domain,
+                    "equipment": asset,
+                    "request_id": get_request_id(request),
+                },
+            )
+            raise _forbidden(
+                "Contributing to this scope is not allowed.", "contributor_scope_denied"
+            )
+        return principal

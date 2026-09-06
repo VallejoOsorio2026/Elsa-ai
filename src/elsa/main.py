@@ -24,6 +24,7 @@ from elsa.api.errors import register_error_handlers
 from elsa.api.v1.access import router as access_router
 from elsa.api.v1.admin import router as admin_router
 from elsa.api.v1.assistant import router as assistant_router
+from elsa.api.v1.contributions import router as contributions_router
 from elsa.api.v1.health import router as health_router
 from elsa.api.v1.knowledge import router as knowledge_router
 from elsa.api.v1.me import router as me_router
@@ -60,6 +61,7 @@ def create_app(settings: Settings | None = None, container: Container | None = N
             permissions=resolved_container.permissions,
             knowledge=resolved_container.knowledge,
             materials_identity=resolved_container.materials_identity,
+            contributions=resolved_container.contributions,
             settings=settings,
         )
         try:
@@ -99,6 +101,7 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     app.include_router(technical_router, prefix=API_V1_PREFIX)
     app.include_router(session_router, prefix=API_V1_PREFIX)
     app.include_router(assistant_router, prefix=API_V1_PREFIX)
+    app.include_router(contributions_router, prefix=API_V1_PREFIX)
 
     # El montaje estático va al final a propósito: Starlette resuelve las
     # rutas en orden y el montaje de la raíz atrapa todo lo que llegue sin

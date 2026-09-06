@@ -19,6 +19,7 @@ from decimal import Decimal
 
 from elsa.adapters.fake_auth import ADMIN_ID, ENGINEER_ID, OTHER_REVIEWER_ID, REVIEWER_ID
 from elsa.adapters.fake_materials_identity import FakeMaterialsIdentityAdapter
+from elsa.adapters.memory_contributions import InMemoryContributionsRepository
 from elsa.adapters.memory_knowledge import InMemoryKnowledgeRepository
 from elsa.adapters.memory_permissions import InMemoryPermissionsRepository
 from elsa.config import Environment, Settings
@@ -204,6 +205,7 @@ async def seed_demo_data(
     knowledge: object,
     settings: Settings,
     materials_identity: object = None,
+    contributions: object = None,
 ) -> bool:
     """Siembra permisos y conocimiento sintéticos. Devuelve si sembró.
 
@@ -228,6 +230,8 @@ async def seed_demo_data(
 
     await _seed_permissions(permissions)
     await _seed_knowledge(knowledge)
+    if isinstance(contributions, InMemoryContributionsRepository):
+        await _seed_contributors(contributions)
     _logger.info("synthetic demo data seeded", extra={"asset": ASSET_CODE, "domain": DOMAIN})
     return True
 
@@ -288,6 +292,19 @@ async def _seed_permissions(permissions: InMemoryPermissionsRepository) -> None:
         display_name=DISPLAY_NAMES[ADMIN],
     )
     await permissions.set_account_admin(subject=ADMIN, is_admin=True, actor=SEED_ACTOR)
+
+
+async def _seed_contributors(contributions: InMemoryContributionsRepository) -> None:
+    """Habilita para aportar a quienes trabajan el equipo.
+
+    La administradora no aparece: pasa por ser administradora, igual que en
+    la revisión. Consultar, aportar y revisar siguen siendo tres capacidades
+    distintas, y esta siembra las reparte para poder enseñar la diferencia.
+    """
+    for subject in (ENGINEER, REVIEWER, OTHER_REVIEWER):
+        await contributions.set_contributor(
+            subject, domain=DOMAIN, asset_code=ASSET_CODE, enabled=True
+        )
 
 
 async def _seed_knowledge(knowledge: InMemoryKnowledgeRepository) -> None:

@@ -4,15 +4,15 @@ import pytest
 
 from elsa.adapters.memory_knowledge import InMemoryKnowledgeRepository
 from elsa.adapters.memory_permissions import InMemoryPermissionsRepository
-from elsa.config import Environment
+from elsa.config import Environment, Settings
 from elsa.demo.seed import ASSET_CODE, DOMAIN, ENGINEER, REVIEWER, seed_demo_data, should_seed
 from tests.conftest import make_test_settings
 
 pytestmark = pytest.mark.anyio
 
 
-def _settings(**overrides: object) -> object:
-    return make_test_settings(demo_seed=True, **overrides)
+def _settings() -> Settings:
+    return make_test_settings(demo_seed=True)
 
 
 async def test_seed_is_off_by_default() -> None:

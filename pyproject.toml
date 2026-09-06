@@ -55,9 +55,12 @@ select = [
 extend-immutable-calls = [
     "fastapi.Body",
     "fastapi.Depends",
+    "fastapi.File",
+    "fastapi.Form",
     "fastapi.Header",
     "fastapi.Path",
     "fastapi.Query",
+    "elsa.api.deps.RequireContributor",
     "elsa.api.deps.RequireReviewer",
     "elsa.api.deps.RequireScope",
 ]

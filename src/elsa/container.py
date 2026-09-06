@@ -19,10 +19,12 @@ from elsa.adapters.jwks import JwksCache
 from elsa.adapters.local_artifact_storage import LocalArtifactStorage
 from elsa.adapters.memory_abuse_guard import InMemoryAbuseGuard
 from elsa.adapters.memory_artifact_storage import InMemoryArtifactStorage
+from elsa.adapters.memory_contributions import InMemoryContributionsRepository
 from elsa.adapters.memory_knowledge import InMemoryKnowledgeRepository
 from elsa.adapters.memory_permissions import InMemoryPermissionsRepository
 from elsa.adapters.postgres_knowledge import PostgresKnowledgeRepository
 from elsa.adapters.postgres_permissions import PostgresPermissionsRepository
+from elsa.adapters.simulated_transcription import SimulatedTranscriptionAdapter
 from elsa.adapters.supabase_auth import SupabaseJwtAuthAdapter
 from elsa.adapters.supabase_materials_identity import SupabaseMaterialsIdentityAdapter
 from elsa.config import ArtifactStorageBackend, AuthProvider, PermissionsBackend, Settings
@@ -30,9 +32,11 @@ from elsa.core.health import DependencyReport, DependencyStatus
 from elsa.ports.abuse import AbuseGuardPort, AbusePolicy
 from elsa.ports.artifact_storage import ArtifactStoragePort, ArtifactStorageUnavailableError
 from elsa.ports.auth import AuthPort, IdentityProviderUnavailableError
+from elsa.ports.contributions import ContributionsRepositoryPort
 from elsa.ports.knowledge import KnowledgeRepositoryPort, KnowledgeUnavailableError
 from elsa.ports.materials_identity import MaterialsIdentityPort
 from elsa.ports.permissions import PermissionsRepositoryPort, PermissionsUnavailableError
+from elsa.ports.transcription import TranscriptionPort
 
 _logger = logging.getLogger("elsa.container")
 
@@ -57,6 +61,8 @@ class Container:
         abuse_guard: AbuseGuardPort | None = None,
         knowledge: KnowledgeRepositoryPort | None = None,
         artifact_storage: ArtifactStoragePort | None = None,
+        contributions: ContributionsRepositoryPort | None = None,
+        transcription: TranscriptionPort | None = None,
     ) -> None:
         self.settings = settings
         self._http: httpx.AsyncClient | None = None
@@ -107,6 +113,27 @@ class Container:
         self.artifact_storage: ArtifactStoragePort = (
             artifact_storage or self._build_artifact_storage(settings)
         )
+
+        # Los aportes del piloto viven en memoria: los de una demostración no
+        # deben sobrevivirla. El adaptador de PostgreSQL llegará con su
+        # migración versionada cuando el flujo se dé por bueno (ADR 0001).
+        self.contributions: ContributionsRepositoryPort = (
+            contributions or InMemoryContributionsRepository()
+        )
+
+        # Todavía no hay motor de voz a texto. El adaptador simulado lo
+        # declara en cada resultado en vez de inventar una transcripción.
+        self.transcription: TranscriptionPort = transcription or SimulatedTranscriptionAdapter()
+
+        self.transcription_is_simulated: bool = isinstance(
+            self.transcription, SimulatedTranscriptionAdapter
+        )
+        """Si el motor de voz conectado no reconoce audio de verdad.
+
+        Se resuelve aquí porque el contenedor es el único sitio que puede
+        conocer el adaptador concreto: la capa HTTP solo ve el puerto, y el
+        puerto no debe declarar si su implementación es de mentira.
+        """
 
     # -----------------------------------------------------------------
     # Ciclo de vida
@@ -182,6 +209,14 @@ class Container:
             await self._database_report(),
             await self._storage_report(),
         ]
+        reports.append(
+            DependencyReport(
+                name="transcription",
+                status=DependencyStatus.DEGRADED,
+                critical=False,
+                detail="simulated adapter: audio is recorded, speech is not recognised",
+            )
+        )
         reports.extend(
             DependencyReport(
                 name=name,

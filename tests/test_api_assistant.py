@@ -60,9 +60,7 @@ async def test_asking_requires_permission_on_the_asset(
 
 async def test_answer_declares_it_is_not_generated(seeded: httpx.AsyncClient) -> None:
     body = (
-        await seeded.post(
-            ASK, json={"question": "rodamiento"}, headers=auth_header(ENGINEER_TOKEN)
-        )
+        await seeded.post(ASK, json={"question": "rodamiento"}, headers=auth_header(ENGINEER_TOKEN))
     ).json()
     assert body["is_generated"] is False
     assert body["engine"] == "literal_search"
@@ -85,9 +83,7 @@ async def test_answer_carries_the_published_version_as_evidence(
 
 async def test_a_material_code_finds_its_component(seeded: httpx.AsyncClient) -> None:
     body = (
-        await seeded.post(
-            ASK, json={"question": "SYN-100003"}, headers=auth_header(ENGINEER_TOKEN)
-        )
+        await seeded.post(ASK, json={"question": "SYN-100003"}, headers=auth_header(ENGINEER_TOKEN))
     ).json()
     assert body["components"][0]["sap_code"] == "SYN-100003"
     assert body["components"][0]["matched_code"] == "SYN-100003"
@@ -120,9 +116,7 @@ async def test_a_question_without_searchable_terms_is_explained(
     seeded: httpx.AsyncClient,
 ) -> None:
     body = (
-        await seeded.post(
-            ASK, json={"question": "¿que hay?"}, headers=auth_header(ENGINEER_TOKEN)
-        )
+        await seeded.post(ASK, json={"question": "¿que hay?"}, headers=auth_header(ENGINEER_TOKEN))
     ).json()
     assert body["components"] == []
     assert "término buscable" in body["message"]
