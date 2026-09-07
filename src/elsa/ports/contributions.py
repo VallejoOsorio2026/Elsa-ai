@@ -149,6 +149,14 @@ class ContributionRecord:
     submitted_at: datetime | None = None
     decided_at: datetime | None = None
     decided_by: str | None = None
+    decided_by_name: str | None = None
+    """Nombre visible de quien decidió.
+
+    Se guarda junto al identificador porque la pantalla de revisión tiene que
+    poder decir quién validó algo sin enseñar un UUID, y porque revertir una
+    decisión exige saber de quién era.
+    """
+
     decision_reason: str | None = None
 
     @property
@@ -222,6 +230,7 @@ class ContributionsRepositoryPort(Protocol):
         *,
         state: ContributionState,
         actor: str,
+        actor_name: str | None = None,
         reason: str | None = None,
     ) -> ContributionRecord:
         """Aprueba o rechaza un aporte pendiente."""

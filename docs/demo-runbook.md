@@ -47,9 +47,17 @@ Entrando como cada una de las cuatro personas de la pantalla de acceso:
 | Segundo revisor | sí | sí | sí |
 | Administradora | sí | sí | sí (por ser administradora) |
 
+Para cambiar de persona no hace falta cerrar sesión: el chip de la barra
+superior dice quién está dentro y se abre en las cuatro identidades. **Ese
+selector solo existe en modo demostración** y no relaja nada — guarda otro
+token, igual que volver a entrar, y el servidor sigue decidiendo los
+permisos. Que el Centro de Revisión aparezca al pasar a la revisora y
+desaparezca al volver al ingeniero es la respuesta del backend, no un
+interruptor de la interfaz.
+
 Recorrido completo: consultar el equipo → grabar una nota de voz → revisar
-«Esto es lo que entendí» → responder la guía → enviar → cambiar de usuario a
-la revisora → aprobar o rechazar. Que el ingeniero **no** vea el Centro de
+«Esto es lo que entendí» → responder la guía → enviar → cambiar a la revisora
+desde el chip → aprobar o rechazar. Que el ingeniero **no** vea el Centro de
 Revisión es parte de lo que se enseña, no una carencia.
 
 ---
@@ -245,6 +253,10 @@ Decirlo antes de enseñarla evita que alguien se lleve una idea equivocada:
 - **No hay transcripción.** El audio se graba y se guarda de verdad; el texto
   es un marcador de posición hasta que la persona escribe lo que dijo. La
   interfaz lo marca como simulado en cada pantalla donde aparece.
+- **El título del aporte se compone, no se redacta.** Cuando quien aporta no
+  pone título, ELSA lo arma pegando el primer componente reconocido y la
+  observación de la guía. Son cadenas que ya estaban en el aporte; si no hay
+  ninguna, queda un rótulo numerado.
 - **No hay RAG, ni documentos, ni planos, ni búsqueda semántica.**
 - **Aprobar un aporte no lo publica.** Queda marcado como válido; el
   conocimiento vigente del equipo solo cambia al publicar una versión.

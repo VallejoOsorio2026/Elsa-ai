@@ -12,7 +12,7 @@
 
 import { api } from '../api.js';
 import { state } from '../state.js';
-import { announce, clear, el, notice } from '../ui.js';
+import { announce, clear, el, formatDate, notice } from '../ui.js';
 import { contributionCard, contributionDetail } from '../contribution-view.js';
 
 let opened = null;
@@ -71,10 +71,20 @@ function paint(host, lists) {
     return;
   }
 
+  // Las pestañas y la regla que gobierna la decisión forman un bloque: el
+  // límite entre validar y publicar se lee donde se decide, no en un
+  // subtítulo suelto tres párrafos más arriba.
   host.append(
-    el('div', { class: 'tabs', role: 'tablist' }, [
-      buildTab('pending', `Pendientes (${lists.pending.length})`, host, lists),
-      buildTab('decided', `Ya decididos (${lists.decided.length})`, host, lists),
+    el('div', { class: 'review-head' }, [
+      el('div', { class: 'tabs', role: 'tablist' }, [
+        buildTab('pending', `Pendientes (${lists.pending.length})`, host, lists),
+        buildTab('decided', `Ya decididos (${lists.decided.length})`, host, lists),
+      ]),
+      el('p', { class: 'governance-note' }, [
+        el('strong', { text: 'Aprobar no publica. ' }),
+        'Marca el aporte como válido y lo deja listo; el conocimiento vigente del equipo ' +
+          'solo cambia al publicar una versión.',
+      ]),
     ]),
   );
 
@@ -161,6 +171,10 @@ function buildDetail(host, lists) {
     }
   }
 
+  const isDecided = contribution.state !== 'pending';
+  const decidedBy = contribution.decided_by_name || 'otra persona autorizada';
+  const wasApproved = contribution.state === 'approved';
+
   const actions = isOwn
     ? notice(
         'info',
@@ -168,18 +182,31 @@ function buildDetail(host, lists) {
           'puedes decidir sobre él.',
         'Sin decisión propia',
       )
-    : el('div', { class: 'card stack' }, [
+    : el('div', { class: `card stack decision-block${isDecided ? ' is-revision' : ''}` }, [
         feedback,
-        el('h3', {
-          text: contribution.state === 'pending' ? 'Decidir' : 'Revisar la decisión anterior',
-        }),
-        contribution.state !== 'pending'
-          ? el('p', {
-              class: 'muted',
-              text:
-                'Ya está decidido. Otra persona con el mismo alcance puede revertirlo si ' +
-                'aparece información nueva.',
-            })
+        // Revisar lo ya decidido no es lo mismo que decidir por primera vez,
+        // y la pantalla tiene que decirlo antes de que alguien pulse.
+        el('div', { class: 'decision-head' }, [
+          el('h3', { text: isDecided ? 'Revisar una decisión ya tomada' : 'Decidir' }),
+          isDecided
+            ? el('span', {
+                class: `tag ${wasApproved ? 'tag-approved' : 'tag-rejected'}`,
+                text: wasApproved ? 'Aprobado' : 'Rechazado',
+              })
+            : null,
+        ]),
+        isDecided
+          ? notice(
+              'warn',
+              // La fecha localizada ya termina en punto («p. m.»), así que se
+              // separa con un interpunto en vez de encadenar dos puntos.
+              `Decidido por ${decidedBy}` +
+                `${contribution.decided_at ? ` el ${formatDate(contribution.decided_at)}` : ''}` +
+                ' · Revertir una decisión solo tiene sentido si aparece información nueva, y ' +
+                'solo puede hacerlo alguien con capacidad de revisión sobre este mismo equipo ' +
+                '—nunca quien escribió el aporte. Queda registrado quién la cambió y por qué.',
+              'Decisión en firme',
+            )
           : null,
         el('label', { for: 'motivo', text: 'Motivo (obligatorio para rechazar)' }),
         reason,
@@ -187,15 +214,15 @@ function buildDetail(host, lists) {
           el('button', {
             class: 'btn btn-danger',
             type: 'button',
-            text: 'Rechazar',
-            disabled: busy,
+            text: isDecided && !wasApproved ? 'Ya rechazado' : 'Rechazar',
+            disabled: busy || (isDecided && !wasApproved),
             onClick: () => decide(false),
           }),
           el('button', {
             class: 'btn btn-primary',
             type: 'button',
-            text: 'Aprobar',
-            disabled: busy,
+            text: isDecided && wasApproved ? 'Ya aprobado' : 'Aprobar',
+            disabled: busy || (isDecided && wasApproved),
             onClick: () => decide(true),
           }),
         ]),

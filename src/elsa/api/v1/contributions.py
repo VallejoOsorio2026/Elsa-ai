@@ -170,6 +170,7 @@ class ContributionView(BaseModel):
     submitted_at: str | None = None
     decided_at: str | None = None
     decided_by: str | None = None
+    decided_by_name: str | None = None
     decision_reason: str | None = None
 
     transcript_text: str
@@ -222,6 +223,7 @@ def _view(record: ContributionRecord, *, viewer_id: str, is_reviewer: bool) -> C
         submitted_at=None if record.submitted_at is None else record.submitted_at.isoformat(),
         decided_at=None if record.decided_at is None else record.decided_at.isoformat(),
         decided_by=record.decided_by,
+        decided_by_name=record.decided_by_name,
         decision_reason=record.decision_reason,
         transcript_text=record.transcript_text,
         transcript_is_simulated=record.transcript_is_simulated,
@@ -916,6 +918,7 @@ async def decide_contribution(
             contribution_id,
             state=target,
             actor=principal.external_user_id,
+            actor_name=principal.display_name,
             reason=reason,
         )
     except ContributionRuleError as error:

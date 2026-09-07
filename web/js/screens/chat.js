@@ -186,6 +186,10 @@ function buildComponents(rows) {
         ),
       ]),
     ]),
+    el('p', {
+      class: 'table-hint',
+      text: 'La tabla se desplaza a los lados para ver el resto de columnas.',
+    }),
   ]);
 }
 

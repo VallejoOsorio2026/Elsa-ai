@@ -67,9 +67,9 @@ const ROUTES = [
     label: 'Centro de Revisión',
     icon: '✅',
     title: 'Centro de Revisión',
-    subtitle:
-      'Aportes esperando validación. Lo que apruebes queda marcado como válido; publicar ' +
-      'sigue siendo otra decisión.',
+    // La regla de gobierno no va aquí suelta: vive pegada a las pestañas,
+    // dentro de la pantalla, donde se toma la decisión.
+    subtitle: 'Aportes de este equipo esperando validación.',
     render: renderReview,
     visible: (current) => Boolean(current.capability?.can_review),
     badge: (current) => current.capability?.pending_count || 0,

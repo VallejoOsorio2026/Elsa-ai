@@ -167,6 +167,7 @@ class InMemoryContributionsRepository:
         *,
         state: ContributionState,
         actor: str,
+        actor_name: str | None = None,
         reason: str | None = None,
     ) -> ContributionRecord:
         async with self._lock:
@@ -177,6 +178,7 @@ class InMemoryContributionsRepository:
                 state=state,
                 decided_at=datetime.now(tz=UTC),
                 decided_by=actor,
+                decided_by_name=actor_name,
                 decision_reason=reason,
             )
             self._records[contribution_id] = updated

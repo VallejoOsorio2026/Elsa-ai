@@ -545,3 +545,65 @@ async def test_the_evidence_of_a_specific_question_is_not_padded(
     assert [item["component"] for item in body["components"]] == [
         "Rodamiento rodillo prensa inferior"
     ]
+
+
+async def test_a_decision_records_who_made_it(seeded: httpx.AsyncClient) -> None:
+    """Revertir una decisión exige saber de quién era."""
+    created = (await _create(seeded)).json()
+    await _answer_required(seeded, created["id"])
+    await seeded.post(f"{BASE}/{created['id']}/submit", headers=auth_header(ENGINEER_TOKEN))
+
+    body = (
+        await seeded.post(
+            f"{BASE}/{created['id']}/decision",
+            json={"approve": True},
+            headers=auth_header(REVIEWER_TOKEN),
+        )
+    ).json()
+    assert body["decided_by_name"] == "Revisora técnica (demo)"
+    assert body["decided_by"] is not None
+    assert body["decided_at"] is not None
+
+
+async def test_reverting_a_decision_records_the_new_reviewer(
+    seeded: httpx.AsyncClient,
+) -> None:
+    """La trazabilidad sigue a la última decisión, no a la primera."""
+    created = (await _create(seeded)).json()
+    await _answer_required(seeded, created["id"])
+    await seeded.post(f"{BASE}/{created['id']}/submit", headers=auth_header(ENGINEER_TOKEN))
+    await seeded.post(
+        f"{BASE}/{created['id']}/decision",
+        json={"approve": True},
+        headers=auth_header(REVIEWER_TOKEN),
+    )
+    reverted = (
+        await seeded.post(
+            f"{BASE}/{created['id']}/decision",
+            json={"approve": False, "reason": "Apareció el informe de vibraciones"},
+            headers=auth_header(OTHER_REVIEWER_TOKEN),
+        )
+    ).json()
+    assert reverted["state"] == "rejected"
+    assert reverted["decided_by_name"] == "Segundo revisor (demo)"
+    assert reverted["decision_reason"] == "Apareció el informe de vibraciones"
+
+
+async def test_a_decision_cannot_be_repeated(seeded: httpx.AsyncClient) -> None:
+    """Aprobar lo ya aprobado no es una acción: la interfaz lo deshabilita
+    y el backend lo rechaza igual."""
+    created = (await _create(seeded)).json()
+    await _answer_required(seeded, created["id"])
+    await seeded.post(f"{BASE}/{created['id']}/submit", headers=auth_header(ENGINEER_TOKEN))
+    await seeded.post(
+        f"{BASE}/{created['id']}/decision",
+        json={"approve": True},
+        headers=auth_header(REVIEWER_TOKEN),
+    )
+    again = await seeded.post(
+        f"{BASE}/{created['id']}/decision",
+        json={"approve": True},
+        headers=auth_header(OTHER_REVIEWER_TOKEN),
+    )
+    assert again.status_code == 409
+    assert again.json()["error"]["code"] == "invalid_contribution_state"

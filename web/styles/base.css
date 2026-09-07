@@ -241,14 +241,64 @@ textarea { min-height: 88px; resize: vertical; }
 
 /* --- Tablas --------------------------------------------------------- */
 
+/* Una tabla ancha se desplaza dentro de su propio contenedor, nunca
+ * arrastrando la página. Los degradados laterales avisan de que hay más
+ * columnas: sin ellos la tabla se ve cortada contra el borde y los
+ * encabezados parecen pegados unos a otros. La técnica es CSS puro
+ * —`background-attachment: local` fija dos capas al contenido y `scroll`
+ * las otras dos al marco— así que la señal aparece y desaparece sola al
+ * desplazar, sin JavaScript. */
 .table-scroll {
   overflow-x: auto;
   max-width: 100%;
   /* Un contenedor con scroll propio también necesita poder encoger cuando
    * su padre es una rejilla. */
   min-width: 0;
+  background-image:
+    linear-gradient(to right, var(--papelsa-blanco), rgba(255, 255, 255, 0)),
+    linear-gradient(to left, var(--papelsa-blanco), rgba(255, 255, 255, 0)),
+    linear-gradient(to right, rgba(51, 51, 51, 0.22), rgba(51, 51, 51, 0)),
+    linear-gradient(to left, rgba(51, 51, 51, 0.22), rgba(51, 51, 51, 0));
+  background-position: left center, right center, left center, right center;
+  background-repeat: no-repeat;
+  background-size: 28px 100%, 28px 100%, 14px 100%, 14px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+
+.table-hint {
+  margin: var(--elsa-espacio-1) 0 0;
+  font-size: var(--elsa-texto-xs);
+  color: var(--elsa-texto-secundario);
+}
+
+@media (min-width: 1024px) {
+  /* Con sitio de sobra la tabla cabe entera y el aviso sobra. */
+  .table-hint { display: none; }
 }
 
 table { border-collapse: collapse; width: 100%; font-size: var(--elsa-texto-sm); }
-th, td { text-align: left; padding: var(--elsa-espacio-2) var(--elsa-espacio-3); border-bottom: 1px solid var(--elsa-borde-suave); }
-th { font-weight: 700; white-space: nowrap; }
+
+th, td {
+  text-align: left;
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-3);
+  border-bottom: 1px solid var(--elsa-borde-suave);
+  vertical-align: top;
+}
+
+/* Banda de encabezado: una línea gruesa y un fondo propio separan los
+ * títulos de los datos aunque la tabla esté desplazada a medias. */
+thead th {
+  white-space: nowrap;
+  font-weight: 700;
+  background: var(--elsa-superficie);
+  border-bottom: 2px solid var(--elsa-borde);
+  font-size: var(--elsa-texto-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--elsa-texto-secundario);
+}
+
+/* La primera columna lleva el nombre del componente: sin un ancho mínimo se
+ * parte en cuatro líneas y la fila se vuelve ilegible en un móvil. */
+thead th:first-child,
+tbody td:first-child { min-width: 11rem; }

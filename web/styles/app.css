@@ -96,6 +96,7 @@
 .topbar {
   display: flex;
   align-items: center;
+  min-width: 0;
   gap: var(--elsa-espacio-3);
   padding: 0 var(--elsa-espacio-3);
   background: var(--papelsa-blanco);
@@ -113,6 +114,11 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* Sin esto un elemento flexible no encoge por debajo de su contenido, y
+   * con `nowrap` su contenido es el título entero: los puntos suspensivos no
+   * llegan a aplicarse nunca y la barra empuja la página a scroll lateral en
+   * pantallas estrechas. */
+  min-width: 0;
 }
 
 .topbar-spacer { margin-left: auto; }
@@ -156,7 +162,12 @@
 
 /* --- Identidad de demostración ---------------------------------------- */
 
+/* Un hijo posicionado en absoluto de un `<details>` cerrado sigue ocupando
+ * caja en Chromium, y con `right: 0` eso alarga el área desplazable. Se
+ * oculta explícitamente. */
 .identity-menu { position: relative; }
+
+.identity-menu:not([open]) .identity-panel { display: none; }
 
 .identity-menu > summary {
   list-style: none;
@@ -198,6 +209,7 @@
   right: 0;
   top: calc(100% + var(--elsa-espacio-2));
   width: min(92vw, 320px);
+  max-width: calc(100vw - 2 * var(--elsa-espacio-3));
   background: var(--papelsa-blanco);
   border: 1px solid var(--elsa-borde);
   border-radius: var(--elsa-radio-md);
@@ -738,3 +750,49 @@
 .recorder-dial.is-live .recorder-status { color: var(--elsa-error); }
 
 .spinner-sm { width: 14px; height: 14px; border-width: 2px; }
+
+/* --- Centro de Revisión: pestañas y regla de gobierno ------------------ */
+
+/* Las pestañas y la regla forman un solo bloque. El límite entre validar y
+ * publicar se lee donde se decide, no en un subtítulo suelto. */
+.review-head {
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-md);
+  background: var(--elsa-superficie);
+  overflow: hidden;
+}
+
+.review-head .tabs {
+  border-bottom: 1px solid var(--elsa-borde-suave);
+  padding: 0 var(--elsa-espacio-3);
+  background: var(--papelsa-blanco);
+}
+
+.governance-note {
+  margin: 0;
+  padding: var(--elsa-espacio-3) var(--elsa-espacio-4);
+  font-size: var(--elsa-texto-sm);
+  color: var(--elsa-texto-secundario);
+}
+
+.governance-note strong { color: var(--elsa-texto); }
+
+/* --- Bloque de decisión ----------------------------------------------- */
+
+.decision-block { border-top: 4px solid var(--elsa-acento); }
+
+/* Revisar algo ya decidido no es decidir por primera vez, y se ve distinto
+ * antes de que nadie pulse nada. */
+.decision-block.is-revision {
+  border-top-color: var(--elsa-advertencia);
+  background: var(--elsa-advertencia-surface);
+}
+
+.decision-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+}
+
+.decision-head h3 { margin: 0; font-size: var(--elsa-texto-lg); }
