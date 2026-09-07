@@ -46,7 +46,10 @@ from elsa.core.contributions import (
     ContributionRuleError,
     NotSubmittableError,
     check_submittable,
+    derive_title,
     ensure_submittable,
+    is_placeholder_title,
+    neutral_title,
 )
 from elsa.core.normalization import normalize_text
 from elsa.core.review import ReviewerCapability, can_review
@@ -156,6 +159,7 @@ class ContributionView(BaseModel):
     domain: str
     asset: str
     title: str
+    title_is_generated: bool = False
     state: str
     is_published_knowledge: bool = False
     """Siempre falso en este bloque. Aprobar no publica."""
@@ -209,6 +213,7 @@ def _view(record: ContributionRecord, *, viewer_id: str, is_reviewer: bool) -> C
         domain=record.domain,
         asset=record.asset_code,
         title=record.title,
+        title_is_generated=record.title_is_generated,
         state=record.state.value,
         is_published_knowledge=record.is_published_knowledge,
         author_id=record.author_id,
@@ -357,6 +362,39 @@ def _initial_normalizations(
 
 def _initial_checklist() -> tuple[ChecklistAnswer, ...]:
     return tuple(ChecklistAnswer(key=item.key, question=item.question) for item in CHECKLIST)
+
+
+def _resolve_title(
+    record: ContributionRecord,
+    *,
+    payload_title: str | None,
+    normalizations: list[Normalization] | None,
+    checklist: list[ChecklistAnswer] | None,
+) -> tuple[str | None, bool | None]:
+    """Decide el título tras una edición del borrador.
+
+    Tres casos, en este orden:
+
+    1. La persona manda un título con contenido: manda ella, y a partir de
+       ahí el título deja de recomponerse.
+    2. La persona manda un marcador («Prueba 1») o lo deja vacío: se vuelve a
+       componer con lo que haya.
+    3. No manda título: solo se recompone si el actual lo compuso ELSA.
+    """
+    if payload_title is not None and not is_placeholder_title(payload_title):
+        return normalize_text(payload_title), False
+
+    should_regenerate = payload_title is not None or record.title_is_generated
+    if not should_regenerate:
+        return None, None
+
+    # Sin material nuevo se conserva el rótulo que ya tenía: renumerarlo
+    # cada vez que se guarda confundiría a quien lo está mirando.
+    derived = derive_title(
+        normalizations=normalizations if normalizations is not None else record.normalizations,
+        checklist=checklist if checklist is not None else record.checklist,
+    )
+    return (derived or record.title, True)
 
 
 async def _visible(
@@ -601,24 +639,45 @@ async def create_contribution(
         )
 
     bom, modes = await _published_context(knowledge, asset_record)
+
+    # Un título como «Prueba 1» deja la cola de revisión llena de renglones
+    # indistinguibles. Cuando el que llega es un marcador, ELSA compone uno
+    # con lo que el aporte ya contiene; recién creado eso todavía es poco, y
+    # el rótulo numerado es el fallback honesto.
+    checklist = _initial_checklist()
+    normalizations = _initial_normalizations(
+        transcript_text if not is_simulated else "",
+        asset=asset_record,
+        bom=bom,
+        modes=modes,
+    )
+    generated = is_placeholder_title(title)
+    if generated:
+        previous = await contributions.list_by_author(
+            principal.external_user_id,
+            domain=asset_record.domain,
+            asset_code=asset_record.code,
+        )
+        resolved_title = derive_title(
+            normalizations=normalizations, checklist=checklist
+        ) or neutral_title(len(previous) + 1)
+    else:
+        resolved_title = normalize_text(title) or ""
+
     record = await contributions.create(
         domain=asset_record.domain,
         asset_code=asset_record.code,
         author_id=principal.external_user_id,
         author_name=principal.display_name,
-        title=normalize_text(title) or "Aporte sin título",
+        title=resolved_title,
+        title_is_generated=generated,
         transcript_text=transcript_text,
         transcript_is_simulated=is_simulated,
         transcript_engine=engine,
         audio=stored_audio,
         attachments=stored_attachments,
-        normalizations=_initial_normalizations(
-            transcript_text if not is_simulated else "",
-            asset=asset_record,
-            bom=bom,
-            modes=modes,
-        ),
-        checklist=_initial_checklist(),
+        normalizations=normalizations,
+        checklist=checklist,
     )
     _logger.info(
         "contribution drafted",
@@ -736,10 +795,21 @@ async def update_contribution(
             for item in record.checklist
         ]
 
+    # El título solo se recompone si lo compuso ELSA. Uno escrito por una
+    # persona se respeta aunque después llegue mejor información: decidir por
+    # ella cómo se llama su aporte no es ayudar.
+    title, title_is_generated = _resolve_title(
+        record,
+        payload_title=payload.title,
+        normalizations=normalizations,
+        checklist=checklist,
+    )
+
     try:
         updated = await contributions.update_draft(
             contribution_id,
-            title=normalize_text(payload.title) if payload.title is not None else None,
+            title=title,
+            title_is_generated=title_is_generated,
             transcript_text=payload.transcript_text,
             transcript_edited=transcript_edited,
             normalizations=normalizations,

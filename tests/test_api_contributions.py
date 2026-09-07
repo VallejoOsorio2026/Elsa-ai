@@ -443,3 +443,105 @@ async def test_an_admin_can_contribute_without_an_explicit_capability(
     seeded: httpx.AsyncClient,
 ) -> None:
     assert (await _create(seeded, ADMIN_TOKEN)).status_code == 201
+
+
+# -- Título del aporte -------------------------------------------------
+
+
+async def test_a_placeholder_title_becomes_a_neutral_label(seeded: httpx.AsyncClient) -> None:
+    """Recién creado el aporte no dice nada de sí mismo: no se inventa un asunto."""
+    body = (await _create(seeded, title="Prueba 1")).json()
+    assert body["title"] == "Aporte técnico 1"
+    assert body["title_is_generated"] is True
+
+
+async def test_the_neutral_label_numbers_each_contribution(
+    seeded: httpx.AsyncClient,
+) -> None:
+    first = (await _create(seeded, title="Prueba 1", audio=b"\x00uno")).json()
+    second = (await _create(seeded, title="test", audio=b"\x00dos")).json()
+    assert first["title"] == "Aporte técnico 1"
+    assert second["title"] == "Aporte técnico 2"
+
+
+async def test_a_generated_title_improves_as_the_contribution_gains_data(
+    seeded: httpx.AsyncClient,
+) -> None:
+    created = (await _create(seeded, title="Prueba 1")).json()
+    body = (
+        await seeded.patch(
+            f"{BASE}/{created['id']}",
+            json={
+                "transcript_text": (
+                    "El rodamiento del rodillo prensa inferior hace ruido en la sección de prensas."
+                ),
+                "checklist": [
+                    {"key": "que_paso", "answer": "Ruido metálico al arrancar", "checked": True}
+                ],
+            },
+            headers=auth_header(ENGINEER_TOKEN),
+        )
+    ).json()
+    assert body["title"] == "Rodamiento rodillo prensa inferior — Ruido metálico al arrancar"
+    assert body["title_is_generated"] is True
+
+
+async def test_a_title_written_by_a_person_is_never_overwritten(
+    seeded: httpx.AsyncClient,
+) -> None:
+    """Decidir por alguien cómo se llama su aporte no es ayudar."""
+    created = (await _create(seeded, title="Revisión anual del tren de secado")).json()
+    assert created["title"] == "Revisión anual del tren de secado"
+    assert created["title_is_generated"] is False
+
+    body = (
+        await seeded.patch(
+            f"{BASE}/{created['id']}",
+            json={
+                "transcript_text": "El rodamiento del rodillo prensa inferior hace ruido.",
+                "checklist": [{"key": "que_paso", "answer": "Ruido", "checked": True}],
+            },
+            headers=auth_header(ENGINEER_TOKEN),
+        )
+    ).json()
+    assert body["title"] == "Revisión anual del tren de secado"
+
+
+async def test_writing_a_real_title_stops_the_regeneration(
+    seeded: httpx.AsyncClient,
+) -> None:
+    created = (await _create(seeded, title="Prueba 1")).json()
+    named = (
+        await seeded.patch(
+            f"{BASE}/{created['id']}",
+            json={"title": "Fuga en la junta rotativa"},
+            headers=auth_header(ENGINEER_TOKEN),
+        )
+    ).json()
+    assert named["title"] == "Fuga en la junta rotativa"
+    assert named["title_is_generated"] is False
+
+    later = (
+        await seeded.patch(
+            f"{BASE}/{created['id']}",
+            json={"transcript_text": "El rodamiento del rodillo prensa inferior hace ruido."},
+            headers=auth_header(ENGINEER_TOKEN),
+        )
+    ).json()
+    assert later["title"] == "Fuga en la junta rotativa"
+
+
+async def test_the_evidence_of_a_specific_question_is_not_padded(
+    seeded: httpx.AsyncClient,
+) -> None:
+    """El chat deja de devolver piezas débilmente relacionadas."""
+    body = (
+        await seeded.post(
+            f"/api/v1/assistant/{DOMAIN}/{ASSET_CODE}/ask",
+            json={"question": "rodamiento del rodillo de la prensa inferior"},
+            headers=auth_header(ENGINEER_TOKEN),
+        )
+    ).json()
+    assert [item["component"] for item in body["components"]] == [
+        "Rodamiento rodillo prensa inferior"
+    ]

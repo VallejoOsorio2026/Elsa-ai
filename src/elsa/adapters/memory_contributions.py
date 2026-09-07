@@ -84,6 +84,7 @@ class InMemoryContributionsRepository:
         transcript_is_simulated: bool,
         transcript_engine: str | None,
         audio: ContributionAudio | None,
+        title_is_generated: bool = False,
         attachments: Sequence[ContributionAttachment] = (),
         normalizations: Sequence[Normalization] = (),
         checklist: Sequence[ChecklistAnswer] = (),
@@ -96,6 +97,7 @@ class InMemoryContributionsRepository:
             author_id=author_id,
             author_name=author_name,
             title=title,
+            title_is_generated=title_is_generated,
             state=ContributionState.DRAFT,
             created_at=datetime.now(tz=UTC),
             transcript_text=transcript_text,
@@ -115,6 +117,7 @@ class InMemoryContributionsRepository:
         contribution_id: str,
         *,
         title: str | None = None,
+        title_is_generated: bool | None = None,
         transcript_text: str | None = None,
         transcript_edited: bool | None = None,
         normalizations: Sequence[Normalization] | None = None,
@@ -129,6 +132,9 @@ class InMemoryContributionsRepository:
             updated = _replace(
                 current,
                 title=current.title if title is None else title,
+                title_is_generated=(
+                    current.title_is_generated if title_is_generated is None else title_is_generated
+                ),
                 transcript_text=(
                     current.transcript_text if transcript_text is None else transcript_text
                 ),

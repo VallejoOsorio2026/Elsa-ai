@@ -123,6 +123,14 @@ class ContributionRecord:
     state: ContributionState
     created_at: datetime
 
+    title_is_generated: bool = False
+    """Si el título lo compuso ELSA a partir del propio aporte.
+
+    Existe para no pisar nunca lo que escribió una persona: un título
+    generado se recompone cuando llega mejor información, y uno escrito a
+    mano se respeta tal cual.
+    """
+
     transcript_text: str = ""
     transcript_is_simulated: bool = True
     transcript_engine: str | None = None
@@ -166,6 +174,7 @@ class ContributionsRepositoryPort(Protocol):
         author_id: str,
         author_name: str | None,
         title: str,
+        title_is_generated: bool = False,
         transcript_text: str,
         transcript_is_simulated: bool,
         transcript_engine: str | None,
@@ -194,6 +203,7 @@ class ContributionsRepositoryPort(Protocol):
         contribution_id: str,
         *,
         title: str | None = None,
+        title_is_generated: bool | None = None,
         transcript_text: str | None = None,
         transcript_edited: bool | None = None,
         normalizations: Sequence[Normalization] | None = None,

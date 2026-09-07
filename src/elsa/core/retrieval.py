@@ -18,6 +18,7 @@ correspondiente y la interfaz no cambia: lo que devuelve ya son evidencias
 con su procedencia.
 """
 
+import math
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -26,6 +27,7 @@ from elsa.core.normalization import canonical_sap_code, normalize_key
 
 __all__ = [
     "MIN_TERM_LENGTH",
+    "RELATIVE_FLOOR",
     "Candidate",
     "Match",
     "Query",
@@ -38,6 +40,19 @@ MIN_TERM_LENGTH = 3
 
 Por debajo de tres letras casi todo coincide con casi todo y el resultado
 deja de significar nada.
+"""
+
+RELATIVE_FLOOR = 0.4
+"""Fracción de la mejor puntuación por debajo de la cual se descarta.
+
+Un resultado que puntúa menos de un 40 % del mejor no es una alternativa:
+es ruido que comparte una palabra genérica. Devolverlo al lado del bueno
+obliga a quien lee a descartarlo, y en una lista de repuestos eso es
+trabajo —y riesgo— que el sistema puede ahorrarle.
+
+El umbral es relativo, no absoluto: cuando todos los candidatos puntúan
+parecido —porque la pregunta es genérica— ninguno queda por debajo del 40 %
+del mejor y se devuelven todos. Solo recorta cuando hay un ganador claro.
 """
 
 # Palabras que aparecen en casi cualquier pregunta y no discriminan nada.
@@ -94,9 +109,16 @@ class Match[T]:
     """Un candidato que coincidió, con la razón de la coincidencia."""
 
     payload: T
-    score: int
+    score: float
     matched_terms: tuple[str, ...]
     matched_code: str | None = None
+    matched_phrase: str | None = None
+    """La secuencia más larga de términos de la pregunta hallada tal cual.
+
+    Es lo que separa «rodamiento rodillo prensa inferior» de un renglón que
+    solo comparte «prensa»: no coinciden las mismas palabras, coinciden en
+    el mismo orden.
+    """
 
     @property
     def is_exact_code(self) -> bool:
@@ -148,6 +170,48 @@ def _looks_like_code(token: str) -> bool:
     return digits * 2 >= len(token)
 
 
+def _term_weights(
+    terms: Sequence[str], candidates: Sequence[Candidate[object]]
+) -> dict[str, float]:
+    """Peso de cada término por lo específico que es en este conjunto.
+
+    Un término que aparece en casi todos los registros no distingue nada:
+    «prensa» está en el nombre y en el subsistema de media máquina, mientras
+    que «rodamiento» señala un renglón concreto. Es la fórmula clásica de
+    frecuencia inversa, calculada sobre los candidatos que hay delante —no
+    hay modelo, ni corpus externo, ni entrenamiento.
+
+    Un término presente en **todos** los candidatos pesa exactamente cero:
+    no aporta información para elegir entre ellos.
+    """
+    total = len(candidates)
+    weights: dict[str, float] = {}
+    for term in terms:
+        frequency = sum(1 for candidate in candidates if term in candidate.text)
+        weights[term] = math.log(total / frequency) if frequency and total else 0.0
+
+    # Si ningún término discrimina —caso de un solo candidato, o de una
+    # pregunta cuyos términos están en todos— se vuelve a contar términos,
+    # que al menos ordena por cobertura.
+    if not any(weights.values()):
+        return dict.fromkeys(terms, 1.0)
+    return weights
+
+
+def _longest_phrase(terms: Sequence[str], text: str) -> tuple[int, str | None]:
+    """Secuencia contigua más larga de términos de la pregunta dentro del texto.
+
+    Se buscan las secuencias en el orden en que se escribieron, de la más
+    larga a la más corta, y se devuelve la primera que aparezca literalmente.
+    """
+    for length in range(len(terms), 1, -1):
+        for start in range(len(terms) - length + 1):
+            phrase = " ".join(terms[start : start + length])
+            if phrase in text:
+                return length, phrase
+    return 0, None
+
+
 def search[T](
     query: Query,
     candidates: Iterable[Candidate[T]],
@@ -156,34 +220,64 @@ def search[T](
 ) -> tuple[Match[T], ...]:
     """Devuelve los candidatos que coinciden, de mejor a peor.
 
-    La puntuación es el número de términos distintos encontrados. Una
-    coincidencia de código pesa más que cualquier número de términos, porque
-    identifica el registro en vez de parecerse a él.
+    La puntuación combina tres señales, todas deterministas y explicables:
+
+    1. **Coincidencia de código.** Identifica el registro en vez de
+       parecerse a él, así que domina sobre cualquier combinación de
+       términos.
+    2. **Especificidad de los términos coincidentes.** Ver
+       :func:`_term_weights`.
+    3. **Frase.** Términos que aparecen contiguos y en el mismo orden que en
+       la pregunta pesan más que los mismos términos dispersos.
+
+    Después se descarta lo que puntúe por debajo de :data:`RELATIVE_FLOOR`
+    respecto del mejor resultado. Una coincidencia exacta de código nunca se
+    descarta.
     """
     if not query.is_searchable:
         return ()
 
+    pool = tuple(candidates)
+    weights = _term_weights(query.terms, pool)
+    total_weight = sum(weights.values())
+    top_weight = max(weights.values(), default=1.0)
+
     matches: list[Match[T]] = []
-    for candidate in candidates:
+    for candidate in pool:
         has_code = candidate.code is not None and candidate.code in query.codes
         matched_code = candidate.code if has_code else None
         matched_terms = tuple(term for term in query.terms if term in candidate.text)
         if matched_code is None and not matched_terms:
             continue
+
+        score = sum(weights[term] for term in matched_terms)
+
+        phrase_length, phrase = _longest_phrase(query.terms, candidate.text)
+        if phrase_length >= 2:
+            score += (phrase_length - 1) * top_weight
+
         # El código suma por encima de cualquier combinación de términos, de
         # forma que un acierto exacto nunca queda por debajo de un parecido.
-        score = len(matched_terms) + (len(query.terms) + 1 if matched_code else 0)
+        if matched_code is not None:
+            score += total_weight + (len(query.terms) + 1) * top_weight
+
         matches.append(
             Match(
                 payload=candidate.payload,
                 score=score,
                 matched_terms=matched_terms,
                 matched_code=matched_code,
+                matched_phrase=phrase if phrase_length >= 2 else None,
             )
         )
 
+    if not matches:
+        return ()
+
     matches.sort(key=lambda match: (-match.score, -len(match.matched_terms)))
-    return tuple(matches[:limit])
+    floor = matches[0].score * RELATIVE_FLOOR
+    kept = [match for match in matches if match.is_exact_code or match.score >= floor]
+    return tuple(kept[:limit])
 
 
 def build_text(*parts: object) -> str:
