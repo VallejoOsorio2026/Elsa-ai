@@ -23,7 +23,14 @@ function base() {
   return `/contributions/${state.scope.domain}/${state.scope.asset}`;
 }
 
+/** Olvida el aporte abierto y vuelve a la cola. */
+export function resetReview() {
+  opened = null;
+  tab = 'pending';
+}
+
 export function renderReview(outlet) {
+  opened = null;
   const host = el('div', { class: 'stack' });
   outlet.append(host);
 

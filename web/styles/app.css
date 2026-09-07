@@ -138,15 +138,105 @@
 }
 
 .user-chip {
-  display: none;
+  display: inline-flex;
   align-items: center;
   gap: var(--elsa-espacio-2);
   font-size: var(--elsa-texto-sm);
+  max-width: 46vw;
 }
 
+/* Bajo 768 px solo cabe el avatar; el nombre y el rol se leen al abrir el
+ * menú. Nunca se oculta quién está dentro: el avatar sigue ahí y el menú
+ * lo dice con todas las letras. */
+.identity-current { display: none; }
+
 @media (min-width: 768px) {
-  .user-chip { display: inline-flex; }
+  .identity-current { display: flex; }
 }
+
+/* --- Identidad de demostración ---------------------------------------- */
+
+.identity-menu { position: relative; }
+
+.identity-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-completo);
+  padding: var(--elsa-espacio-1) var(--elsa-espacio-2);
+  min-height: 44px;
+}
+
+.identity-menu > summary::-webkit-details-marker { display: none; }
+.identity-menu[open] > summary { border-color: var(--elsa-acento); }
+
+.identity-current {
+  flex-direction: column;
+  line-height: 1.15;
+  min-width: 0;
+}
+
+.identity-name {
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.identity-role {
+  font-size: var(--elsa-texto-xs);
+  color: var(--elsa-texto-secundario);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.identity-caret { color: var(--elsa-texto-secundario); }
+
+.identity-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--elsa-espacio-2));
+  width: min(92vw, 320px);
+  background: var(--papelsa-blanco);
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-md);
+  box-shadow: 0 8px 24px rgba(51, 51, 51, 0.18);
+  padding: var(--elsa-espacio-3);
+  z-index: 50;
+}
+
+.identity-hint {
+  margin: 0 0 var(--elsa-espacio-2);
+  font-size: var(--elsa-texto-xs);
+  color: var(--elsa-texto-secundario);
+}
+
+.identity-options { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--elsa-espacio-1); }
+
+.identity-option {
+  width: 100%;
+  min-height: 44px;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-3);
+  border: 1px solid transparent;
+  border-radius: var(--elsa-radio-md);
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.identity-option:hover { background: var(--elsa-superficie); }
+
+.identity-option[aria-current="true"] {
+  border-color: var(--elsa-acento);
+  background: var(--elsa-info-surface);
+}
+
+.identity-option .tag { justify-self: start; }
 
 .avatar {
   width: 32px;

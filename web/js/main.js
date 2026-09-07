@@ -12,6 +12,7 @@
 
 import { getToken, setToken } from './api.js';
 import {
+  activeDemoIdentity,
   loadAsset,
   loadCapability,
   loadContext,
@@ -19,13 +20,14 @@ import {
   signOut,
   state,
   subscribe,
+  switchDemoIdentity,
 } from './state.js';
 import { announce, brandLogo, clear, el, initials, notice } from './ui.js';
 import { renderLogin } from './screens/login.js';
 import { renderChat } from './screens/chat.js';
-import { disposeContribute, renderContribute } from './screens/contribute.js';
-import { renderMine } from './screens/mine.js';
-import { renderReview } from './screens/review.js';
+import { disposeContribute, renderContribute, resetContribute } from './screens/contribute.js';
+import { renderMine, resetMine } from './screens/mine.js';
+import { renderReview, resetReview } from './screens/review.js';
 
 const root = document.getElementById('root');
 
@@ -177,11 +179,107 @@ function buildTopbar(route) {
     ),
     el('h1', { class: 'topbar-title', text: route.title }),
     el('div', { class: 'topbar-spacer' }),
-    el('div', { class: 'user-chip' }, [
-      el('span', { class: 'avatar', 'aria-hidden': 'true', text: initials(state.me?.display_name) }),
-      el('span', { text: state.me?.display_name || '' }),
+    buildIdentityChip(),
+  ]);
+}
+
+/**
+ * Quién está usando ELSA ahora mismo.
+ *
+ * En el ambiente de demostración es además un selector: enseñar los límites
+ * entre consultar, aportar y revisar exige cambiar de persona varias veces, y
+ * hacerlo cerrando sesión cada vez rompe el hilo de la demostración.
+ *
+ * **El selector solo existe en modo demostración** —DEV con identidades
+ * sintéticas— y no relaja nada: cambia el token que se envía, igual que
+ * volver a entrar. El backend sigue verificando identidad y permisos en cada
+ * petición.
+ */
+function buildIdentityChip() {
+  const name = state.me?.display_name || '';
+  const avatar = el('span', {
+    class: 'avatar',
+    'aria-hidden': 'true',
+    text: initials(name),
+  });
+
+  const active = activeDemoIdentity();
+  if (!active) {
+    return el('div', { class: 'user-chip' }, [
+      avatar,
+      el('span', { class: 'identity-current' }, [
+        el('span', { class: 'identity-name', text: name }),
+      ]),
+    ]);
+  }
+
+  const menu = el('details', { class: 'identity-menu' }, [
+    el('summary', { class: 'user-chip is-switch', title: 'Cambiar de identidad de demostración' }, [
+      avatar,
+      el('span', { class: 'identity-current' }, [
+        el('span', { class: 'identity-name', text: active.label }),
+        el('span', { class: 'identity-role', text: roleLabel(active.role) }),
+      ]),
+      el('span', { class: 'identity-caret', 'aria-hidden': 'true', text: '▾' }),
+    ]),
+    el('div', { class: 'identity-panel' }, [
+      el('p', {
+        class: 'identity-hint',
+        text: 'Identidades sintéticas de la demostración. Cambiar aquí equivale a volver a entrar: los permisos los sigue decidiendo el servidor.',
+      }),
+      el(
+        'ul',
+        { class: 'identity-options' },
+        state.context.demo_identities.map((identity) => {
+          const current = identity.token === active.token;
+          return el('li', {}, [
+            el(
+              'button',
+              {
+                class: 'identity-option',
+                type: 'button',
+                'aria-current': current ? 'true' : null,
+                onClick: () => chooseIdentity(identity, menu),
+              },
+              [
+                el('span', { class: 'identity-name', text: identity.label }),
+                el('span', { class: 'identity-role', text: roleLabel(identity.role) }),
+                current ? el('span', { class: 'tag tag-approved', text: 'Activa' }) : null,
+              ],
+            ),
+          ]);
+        }),
+      ),
     ]),
   ]);
+  return menu;
+}
+
+const ROLE_LABEL = {
+  engineer: 'Consulta y aporta',
+  reviewer: 'Consulta, aporta y revisa',
+  admin: 'Administración del dominio',
+};
+
+function roleLabel(role) {
+  return ROLE_LABEL[role] || role;
+}
+
+async function chooseIdentity(identity, menu) {
+  menu.open = false;
+  if (identity.token === activeDemoIdentity()?.token) return;
+
+  // Cada pantalla guarda su propio estado —un borrador a medias, un aporte
+  // abierto—. Al cambiar de persona deja de ser suyo, así que se descarta.
+  resetContribute();
+  resetMine();
+  resetReview();
+
+  if (await switchDemoIdentity(identity.token)) {
+    announce(`Ahora estás como ${identity.label}.`);
+    navigate('/chat');
+    render();
+  }
 }
 
 /**
@@ -304,6 +402,18 @@ async function boot() {
   render();
   if (state.me) announce(`Sesión iniciada como ${state.me.display_name || 'usuario'}.`);
 }
+
+// El menú de identidad se cierra al pulsar fuera de él.
+document.addEventListener('click', (event) => {
+  for (const menu of document.querySelectorAll('.identity-menu[open]')) {
+    if (!menu.contains(event.target)) menu.open = false;
+  }
+});
+
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  for (const menu of document.querySelectorAll('.identity-menu[open]')) menu.open = false;
+});
 
 window.addEventListener('hashchange', () => {
   sidebarOpen = false;

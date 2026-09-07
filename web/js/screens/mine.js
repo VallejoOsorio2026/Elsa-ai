@@ -14,7 +14,15 @@ import { contributionCard, contributionDetail } from '../contribution-view.js';
 
 let opened = null;
 
+/** Olvida el aporte abierto. */
+export function resetMine() {
+  opened = null;
+}
+
 export function renderMine(outlet) {
+  // Se entra siempre por la lista: un detalle abierto hace dos pantallas
+  // sería de otro momento, y quizá de otra persona.
+  opened = null;
   const host = el('div', { class: 'stack' });
   outlet.append(host);
   load(host);

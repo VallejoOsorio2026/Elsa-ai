@@ -566,6 +566,21 @@ function buildSubmitted(draw) {
   ]);
 }
 
+/**
+ * Descarta el borrador en curso.
+ *
+ * Al cambiar de identidad, lo que había empezado a escribir otra persona deja
+ * de ser suyo: seguir editándolo desde otra cuenta confundiría el rastro de
+ * quién aportó qué.
+ */
+export function resetContribute() {
+  disposeContribute();
+  draft = null;
+  attachments = [];
+  busy = false;
+  lastError = null;
+}
+
 /** Libera el micrófono al salir de la pantalla. */
 export function disposeContribute() {
   if (recorder) recorder.dispose();

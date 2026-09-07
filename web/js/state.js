@@ -7,7 +7,7 @@
  * autorizar. Quien autoriza es FastAPI, en cada petición.
  */
 
-import { api, setToken } from './api.js';
+import { api, getToken, setToken } from './api.js';
 
 export const state = {
   context: null,
@@ -104,6 +104,46 @@ export async function loadCapability() {
     state.capability = null;
   }
   return state.capability;
+}
+
+/**
+ * Identidad de demostración activa, o `null` fuera del modo demostración.
+ *
+ * Se resuelve comparando el token guardado con los que publica el backend:
+ * es una correspondencia exacta, no una suposición a partir del nombre.
+ */
+export function activeDemoIdentity() {
+  if (!state.context?.demo_mode) return null;
+  const token = getToken();
+  return state.context.demo_identities.find((identity) => identity.token === token) || null;
+}
+
+/**
+ * Cambia la identidad de demostración.
+ *
+ * Es exactamente lo mismo que cerrar sesión y volver a entrar como otra
+ * persona: se guarda otro token y se vuelve a preguntar al backend quién es
+ * y qué puede. **No hay atajo de permisos**: cada petición posterior recorre
+ * la misma cadena de confianza, y el servidor sigue decidiendo.
+ */
+export async function switchDemoIdentity(token) {
+  if (!state.context?.demo_mode) return false;
+  const known = state.context.demo_identities.some((identity) => identity.token === token);
+  if (!known) return false;
+
+  setToken(token);
+  state.me = null;
+  state.scope = null;
+  state.asset = null;
+  state.capability = null;
+
+  if (!(await loadIdentity())) {
+    setToken(null);
+    return false;
+  }
+  await loadAsset();
+  await loadCapability();
+  return true;
 }
 
 export function signOut() {
