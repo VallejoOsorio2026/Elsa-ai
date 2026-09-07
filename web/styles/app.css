@@ -632,3 +632,19 @@
   color: var(--elsa-acento);
   border-bottom-color: var(--elsa-acento);
 }
+
+/* Estado de la grabadora, escrito. El pulso y el color acompañan; la
+ * palabra es la que informa. */
+.recorder-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  font-size: var(--elsa-texto-sm);
+  font-weight: 700;
+  color: var(--elsa-texto-secundario);
+  min-height: 24px;
+}
+
+.recorder-dial.is-live .recorder-status { color: var(--elsa-error); }
+
+.spinner-sm { width: 14px; height: 14px; border-width: 2px; }

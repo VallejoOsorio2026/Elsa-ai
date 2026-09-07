@@ -26,6 +26,14 @@ let attachments = [];
 let busy = false;
 let lastError = null;
 
+// El contenedor de la grabadora y el botón de continuar viven fuera del
+// dibujado: la grabadora repinta su propio recuadro cuatro veces por segundo
+// y, si el nodo se recreara en cada `draw()`, seguiría escribiendo en el
+// anterior —ya desprendido del documento— y el cronómetro se congelaría a la
+// vista mientras la grabación sigue corriendo.
+let recorderBox = null;
+let submitBtn = null;
+
 function base() {
   return `/contributions/${state.scope.domain}/${state.scope.asset}`;
 }
@@ -93,11 +101,14 @@ function buildCapture(draw) {
     section.append(notice('error', unsupportedReason() || 'No se puede grabar en este navegador.'));
   }
 
-  const recorderBox = el('div', { class: 'recorder' });
+  if (!recorderBox) recorderBox = el('div', { class: 'recorder' });
   if (!recorder) {
     recorder = createRecorder({
       maxSeconds: maxAudio,
-      onChange: () => paintRecorder(recorderBox, draw),
+      onChange: () => {
+        paintRecorder(recorderBox, draw);
+        syncSubmit();
+      },
     });
   }
   paintRecorder(recorderBox, draw);
@@ -154,13 +165,15 @@ function buildCapture(draw) {
     }),
   );
 
-  const submit = el('button', {
+  // No se puede continuar con una grabación a medias: el archivo todavía no
+  // existe y el aporte saldría sin audio.
+  submitBtn = el('button', {
     class: 'btn btn-primary',
     type: 'button',
     text: busy ? 'Guardando…' : 'Continuar',
-    disabled: busy,
     onClick: () => createDraft(title.value, draw),
   });
+  syncSubmit();
 
   section.append(
     el('div', { class: 'card stack' }, [
@@ -179,9 +192,15 @@ function buildCapture(draw) {
       title,
     ]),
     el('div', { class: 'card stack' }, [el('h2', { text: 'Evidencia de apoyo' }), files]),
-    el('div', { class: 'actions' }, [submit]),
+    el('div', { class: 'actions' }, [submitBtn]),
   );
   return section;
+}
+
+/** Mantiene el botón de continuar acorde al estado de la grabadora. */
+function syncSubmit() {
+  if (!submitBtn) return;
+  submitBtn.disabled = busy || Boolean(recorder && recorder.state.busy);
 }
 
 function paintRecorder(box, draw) {
@@ -196,6 +215,12 @@ function paintRecorder(box, draw) {
 
   box.append(
     el('div', { class: `recorder-dial${status.status === 'recording' ? ' is-live' : ''}` }, [
+      // El estado va escrito, no solo insinuado por el color o el pulso: un
+      // botón que tarda sin decir nada se lee como un botón roto.
+      el('span', { class: 'recorder-status' }, [
+        status.busy ? el('span', { class: 'spinner spinner-sm' }) : null,
+        el('span', { text: status.label }),
+      ]),
       el('span', {
         class: 'recorder-time',
         text: formatSeconds(status.seconds),
@@ -208,61 +233,48 @@ function paintRecorder(box, draw) {
     ]),
   );
 
+  // Mientras la grabadora cambia de estado no acepta órdenes: una segunda
+  // pulsación no puede abrir otro micrófono ni duplicar la parada.
+  const button = (props) =>
+    el('button', { type: 'button', ...props, disabled: status.busy || props.disabled });
+
   const actions = el('div', { class: 'recorder-actions' });
-  if (status.status === 'idle') {
+  if (status.status === 'idle' || status.status === 'starting') {
     actions.append(
-      el('button', {
+      button({
         class: 'btn btn-primary btn-record',
-        type: 'button',
         disabled: !isSupported(),
-        text: '⏺ Grabar',
+        text: status.status === 'starting' ? 'Iniciando…' : '⏺ Grabar',
         onClick: () => recorder.start(),
       }),
     );
   }
   if (status.status === 'recording') {
     actions.append(
-      el('button', {
-        class: 'btn btn-secondary',
-        type: 'button',
-        text: '⏸ Pausar',
-        onClick: () => recorder.pause(),
-      }),
-      el('button', {
-        class: 'btn btn-primary',
-        type: 'button',
-        text: '⏹ Terminar',
-        onClick: () => recorder.stop(),
-      }),
+      button({ class: 'btn btn-secondary', text: '⏸ Pausar', onClick: () => recorder.pause() }),
+      button({ class: 'btn btn-primary', text: '⏹ Terminar', onClick: () => recorder.stop() }),
     );
   }
   if (status.status === 'paused') {
     actions.append(
-      el('button', {
-        class: 'btn btn-primary',
-        type: 'button',
-        text: '⏵ Reanudar',
-        onClick: () => recorder.resume(),
-      }),
-      el('button', {
-        class: 'btn btn-secondary',
-        type: 'button',
-        text: '⏹ Terminar',
-        onClick: () => recorder.stop(),
-      }),
+      button({ class: 'btn btn-primary', text: '⏵ Reanudar', onClick: () => recorder.resume() }),
+      button({ class: 'btn btn-secondary', text: '⏹ Terminar', onClick: () => recorder.stop() }),
+    );
+  }
+  if (status.status === 'stopping' || status.status === 'processing') {
+    actions.append(
+      button({ class: 'btn btn-secondary', text: status.label, disabled: true }),
     );
   }
   if (status.status === 'recorded') {
     actions.append(
-      el('button', {
+      button({
         class: 'btn btn-secondary',
-        type: 'button',
         text: '⏺ Grabar de nuevo',
         onClick: () => recorder.start(),
       }),
-      el('button', {
+      button({
         class: 'btn btn-danger',
-        type: 'button',
         text: '🗑 Descartar',
         onClick: () => {
           recorder.discard();
@@ -307,6 +319,8 @@ async function createDraft(title, draw) {
     draft = await api.request(base(), { method: 'POST', body: form });
     recorder.dispose();
     recorder = null;
+    recorderBox = null;
+    submitBtn = null;
     attachments = [];
     announce('Aporte creado. Revisa lo que entendí.');
   } catch (error) {
@@ -556,4 +570,6 @@ function buildSubmitted(draw) {
 export function disposeContribute() {
   if (recorder) recorder.dispose();
   recorder = null;
+  recorderBox = null;
+  submitBtn = null;
 }

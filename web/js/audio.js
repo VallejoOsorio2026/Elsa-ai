@@ -22,6 +22,28 @@ import { announce } from './ui.js';
 /** Avisos al usuario, en segundos restantes. */
 export const WARNING_SECONDS = [60, 30, 10];
 
+/**
+ * Estados de la grabadora, en el orden en que ocurren.
+ *
+ * `starting`, `stopping` y `processing` existen porque el navegador tarda:
+ * pedir el micrófono puede abrir un diálogo de permiso, y entre pedir la
+ * parada y recibir el último trozo de audio pasa un tiempo que no controla
+ * la aplicación. Sin un estado propio, esos huecos se ven como un botón que
+ * no hace nada.
+ */
+export const STATUS_LABEL = {
+  idle: 'Listo para grabar',
+  starting: 'Iniciando grabación…',
+  recording: 'Grabando',
+  paused: 'En pausa',
+  stopping: 'Finalizando…',
+  processing: 'Procesando audio…',
+  recorded: 'Grabación lista',
+};
+
+/** Estados en los que la grabadora está cambiando y no acepta órdenes. */
+export const BUSY_STATUSES = new Set(['starting', 'stopping', 'processing']);
+
 const PREFERRED_TYPES = [
   'audio/webm;codecs=opus',
   'audio/webm',
@@ -83,17 +105,29 @@ export function createRecorder({ maxSeconds = 300, onChange, onWarning } = {}) {
   let pending = new Set(WARNING_SECONDS);
 
   const state = {
-    status: 'idle', // idle | recording | paused | recorded
+    status: 'idle',
     seconds: 0,
     maxSeconds,
     blob: null,
     url: null,
     mimeType: null,
     error: null,
+    get label() {
+      return STATUS_LABEL[this.status] || '';
+    },
+    get busy() {
+      return BUSY_STATUSES.has(this.status);
+    },
   };
 
   function emit() {
     if (onChange) onChange(state);
+  }
+
+  /** Cambia de estado y repinta en el acto: el usuario no espera al navegador. */
+  function transition(status) {
+    state.status = status;
+    emit();
   }
 
   function elapsed() {
@@ -136,6 +170,10 @@ export function createRecorder({ maxSeconds = 300, onChange, onWarning } = {}) {
   }
 
   async function start() {
+    // Una segunda pulsación mientras arranca no debe abrir un segundo
+    // micrófono ni reiniciar el contador.
+    if (state.busy || state.status === 'recording' || state.status === 'paused') return false;
+
     const reason = unsupportedReason();
     if (reason) {
       state.error = reason;
@@ -144,6 +182,11 @@ export function createRecorder({ maxSeconds = 300, onChange, onWarning } = {}) {
     }
     discard({ keepStatus: true });
     state.error = null;
+    state.seconds = 0;
+    // Se pinta ANTES de pedir el micrófono: `getUserMedia` puede abrir un
+    // diálogo de permiso y tardar segundos.
+    transition('starting');
+    announce('Iniciando grabación.');
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (error) {
@@ -152,8 +195,7 @@ export function createRecorder({ maxSeconds = 300, onChange, onWarning } = {}) {
           ? 'No diste permiso para usar el micrófono. Concédelo en el candado de la barra ' +
             'de direcciones y vuelve a intentarlo.'
           : 'No se pudo abrir el micrófono. Comprueba que hay uno conectado y disponible.';
-      state.status = 'idle';
-      emit();
+      transition('idle');
       return false;
     }
 
@@ -166,25 +208,34 @@ export function createRecorder({ maxSeconds = 300, onChange, onWarning } = {}) {
       if (event.data && event.data.size > 0) chunks.push(event.data);
     });
     recorder.addEventListener('stop', () => {
+      // El navegador ya entregó el último trozo: queda armar el archivo.
+      transition('processing');
       releaseStream();
-      const blob = new Blob(chunks, { type: state.mimeType });
-      state.blob = blob.size > 0 ? blob : null;
-      if (state.url) URL.revokeObjectURL(state.url);
-      state.url = state.blob ? URL.createObjectURL(state.blob) : null;
-      state.status = state.blob ? 'recorded' : 'idle';
-      state.seconds = Math.min(elapsed(), maxSeconds);
-      emit();
+
+      // Se cede un fotograma antes de armar el Blob. No es un retardo
+      // artificial: el trabajo se hace de verdad en este estado, pero si se
+      // hiciera en la misma tarea que el cambio de estado el navegador no
+      // llegaría a pintarlo y «Procesando audio…» no lo vería nadie. Con
+      // cinco minutos de audio ese trabajo se nota.
+      const finish = () => {
+        const blob = new Blob(chunks, { type: state.mimeType });
+        state.blob = blob.size > 0 ? blob : null;
+        if (state.url) URL.revokeObjectURL(state.url);
+        state.url = state.blob ? URL.createObjectURL(state.blob) : null;
+        state.seconds = Math.min(elapsed(), maxSeconds);
+        transition(state.blob ? 'recorded' : 'idle');
+      };
+      requestAnimationFrame(() => setTimeout(finish, 0));
     });
 
     accumulated = 0;
     segmentStart = Date.now();
     pending = new Set(WARNING_SECONDS);
     recorder.start();
-    state.status = 'recording';
     state.seconds = 0;
     startTicker();
+    transition('recording');
     announce('Grabando.');
-    emit();
     return true;
   }
 
@@ -192,26 +243,29 @@ export function createRecorder({ maxSeconds = 300, onChange, onWarning } = {}) {
     if (!recorder || state.status !== 'recording') return;
     recorder.pause();
     accumulated = elapsed();
-    state.status = 'paused';
     stopTicker();
+    transition('paused');
     announce('Grabación en pausa.');
-    emit();
   }
 
   function resume() {
     if (!recorder || state.status !== 'paused') return;
     recorder.resume();
     segmentStart = Date.now();
-    state.status = 'recording';
     startTicker();
+    transition('recording');
     announce('Grabación reanudada.');
-    emit();
   }
 
   function stop({ auto = false } = {}) {
     if (!recorder || (state.status !== 'recording' && state.status !== 'paused')) return;
     accumulated = elapsed();
+    state.seconds = Math.min(accumulated, maxSeconds);
     stopTicker();
+    // Se pinta antes de pedir la parada: entre `stop()` y el último trozo de
+    // audio pasa un tiempo que depende del navegador.
+    transition('stopping');
+    announce('Finalizando grabación.');
     recorder.stop();
     recorder = null;
     if (auto) {
@@ -222,6 +276,7 @@ export function createRecorder({ maxSeconds = 300, onChange, onWarning } = {}) {
 
   /** Descarta lo grabado y libera el objeto de audio. */
   function discard({ keepStatus = false } = {}) {
+    if (!keepStatus && state.busy) return;
     stopTicker();
     if (recorder && (state.status === 'recording' || state.status === 'paused')) {
       try {
@@ -240,9 +295,8 @@ export function createRecorder({ maxSeconds = 300, onChange, onWarning } = {}) {
     state.seconds = 0;
     state.error = null;
     if (!keepStatus) {
-      state.status = 'idle';
       announce('Grabación descartada.');
-      emit();
+      transition('idle');
     }
   }
 
