@@ -21,6 +21,15 @@ fallo silencioso que aparecería en un bloque futuro y costaría encontrar.
 Montar en un prefijo propio elimina esa dependencia del orden: la API nunca
 puede quedar tapada. La raíz sigue funcionando para quien escriba la
 dirección a secas: redirige a ``/app/``.
+
+**Cómo se localizan los archivos.** Se busca primero junto al paquete —el
+caso del clon de desarrollo y de una instalación editable— y, si ahí no
+están, bajo el directorio de trabajo. La segunda vía importa en despliegue:
+si el paquete se instalara copiado dentro de ``site-packages`` en vez de en
+modo editable, la ruta relativa al paquete apuntaría al interior del entorno
+virtual y la interfaz desaparecería **en silencio**, con la API respondiendo
+como si todo estuviera bien. Es justo el fallo que no puede descubrirse el
+día de una demostración.
 """
 
 import logging
@@ -33,39 +42,60 @@ from starlette.staticfiles import StaticFiles
 _logger = logging.getLogger("elsa.web")
 
 # src/elsa/web.py -> src/elsa -> src -> raíz del repositorio
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-
-WEB_ROOT = _PROJECT_ROOT / "web"
-BRAND_ROOT = _PROJECT_ROOT / "assets" / "brand"
+_PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 
 UI_PREFIX = "/app"
+
+WEB_DIR = "web"
+BRAND_DIR = "assets/brand"
+
+
+def _locate(relative: str) -> Path | None:
+    """Primer directorio existente entre el del paquete y el de trabajo."""
+    for base in (_PACKAGE_ROOT, Path.cwd()):
+        candidate = base / relative
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
+def web_root() -> Path | None:
+    """Directorio de la interfaz, o ``None`` si no se encuentra."""
+    return _locate(WEB_DIR)
+
+
+def brand_root() -> Path | None:
+    """Directorio de los assets de marca, o ``None`` si no se encuentra."""
+    return _locate(BRAND_DIR)
 
 
 def mount_web_ui(app: FastAPI) -> bool:
     """Publica la interfaz estática. Devuelve si quedó montada."""
-    if not WEB_ROOT.is_dir():
+    web = web_root()
+    if web is None:
         _logger.warning(
             "web UI not mounted: directory not found",
-            extra={"path": str(WEB_ROOT)},
+            extra={"searched": [str(_PACKAGE_ROOT), str(Path.cwd())]},
         )
         return False
 
-    if BRAND_ROOT.is_dir():
-        app.mount("/brand", StaticFiles(directory=BRAND_ROOT), name="brand")
+    brand = brand_root()
+    if brand is not None:
+        app.mount("/brand", StaticFiles(directory=brand), name="brand")
     else:
         # Sin logotipo la interfaz sigue siendo utilizable, pero deja de
         # cumplir el manual de marca: se avisa en vez de fallar en silencio.
         _logger.warning(
             "brand assets not found; the interface will render without the logo",
-            extra={"path": str(BRAND_ROOT)},
+            extra={"searched": [str(_PACKAGE_ROOT), str(Path.cwd())]},
         )
 
-    app.mount(UI_PREFIX, StaticFiles(directory=WEB_ROOT, html=True), name="web")
+    app.mount(UI_PREFIX, StaticFiles(directory=web, html=True), name="web")
 
     @app.get("/", include_in_schema=False)
     async def _root() -> RedirectResponse:
         """La dirección a secas lleva a la aplicación."""
         return RedirectResponse(url=f"{UI_PREFIX}/")
 
-    _logger.info("web UI mounted", extra={"path": str(WEB_ROOT), "prefix": UI_PREFIX})
+    _logger.info("web UI mounted", extra={"path": str(web), "prefix": UI_PREFIX})
     return True

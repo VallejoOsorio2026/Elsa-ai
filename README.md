@@ -88,7 +88,10 @@ de la planta. Solo funciona en DEV y solo contra los almacenes en memoria.
 
 El recorrido completo —consultar, grabar una nota de voz, revisar lo entendido,
 enviar y validar— está en [`docs/demo-runbook.md`](docs/demo-runbook.md), junto
-con lo que falta para publicarla en una URL HTTPS.
+con los pasos para publicarla en HTTPS. Para eso el repositorio trae
+[`render.yaml`](render.yaml): un blueprint de Render que despliega **solo la
+demostración con datos sintéticos**, sin Supabase, sin base de datos y sin
+ningún secreto.
 
 Dos cosas que la interfaz declara en pantalla y conviene saber de antemano: el
 chat **no usa un modelo de lenguaje** (busca literalmente en el BOM publicado)
@@ -178,6 +181,7 @@ src/elsa/
   adapters/        # implementaciones reales y fakes deterministas
 supabase/migrations/  # migraciones SQL (autoridad única del esquema)
 web/                  # interfaz del piloto: HTML, CSS y JS sin compilar
+render.yaml           # blueprint de despliegue de la demostración (sin secretos)
 tests/                # pytest
 docs/                 # documentación, ADRs y guía de marca
 assets/brand/         # logotipo PAPELSA para la interfaz web (SVG)

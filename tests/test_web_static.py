@@ -1,11 +1,15 @@
 """La interfaz se sirve desde el backend sin exponer el repositorio."""
 
+from pathlib import Path
+
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from elsa import web as elsa_web
 from elsa.container import Container
 from elsa.main import create_app
-from elsa.web import BRAND_ROOT, WEB_ROOT
+from elsa.web import brand_root, web_root
 from tests.conftest import make_test_settings
 
 
@@ -54,12 +58,14 @@ def test_the_brand_assets_are_published(client: TestClient) -> None:
 
 def test_every_brand_asset_referenced_by_the_interface_exists() -> None:
     """Un logotipo roto incumple el manual en silencio; mejor que falle aquí."""
+    brand = brand_root()
+    assert brand is not None
     for name in (
         "papelsa-logotipo-color.svg",
         "papelsa-logotipo-blanco.svg",
         "papelsa-simbolo-color.svg",
     ):
-        assert (BRAND_ROOT / name).is_file(), name
+        assert (brand / name).is_file(), name
 
 
 def test_repository_files_are_not_reachable(client: TestClient) -> None:
@@ -90,5 +96,43 @@ def test_the_interface_can_be_switched_off() -> None:
 
 
 def test_the_web_root_is_inside_the_repository() -> None:
-    assert WEB_ROOT.name == "web"
-    assert (WEB_ROOT / "index.html").is_file()
+    root = web_root()
+    assert root is not None
+    assert root.name == "web"
+    assert (root / "index.html").is_file()
+
+
+def test_the_interface_is_found_from_the_working_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Segunda vía de búsqueda, la que salva el despliegue.
+
+    Si el paquete se instalara copiado en `site-packages` en vez de en modo
+    editable, la ruta relativa al paquete apuntaría dentro del entorno
+    virtual y la interfaz desaparecería sin que nada fallara. Buscar también
+    bajo el directorio de trabajo lo evita.
+    """
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "index.html").write_text("<p>demo</p>", encoding="utf-8")
+    (tmp_path / "assets" / "brand").mkdir(parents=True)
+
+    monkeypatch.setattr(elsa_web, "_PACKAGE_ROOT", tmp_path / "no-existe")
+    monkeypatch.chdir(tmp_path)
+
+    assert elsa_web.web_root() == tmp_path / "web"
+    assert elsa_web.brand_root() == tmp_path / "assets" / "brand"
+
+
+def test_a_missing_interface_is_reported_not_guessed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(elsa_web, "_PACKAGE_ROOT", tmp_path / "no-existe")
+    monkeypatch.chdir(tmp_path)
+    assert elsa_web.web_root() is None
+
+    settings = make_test_settings()
+    app = create_app(settings, Container(settings))
+    with TestClient(app) as client:
+        # La API sigue en pie aunque la interfaz no esté.
+        assert client.get("/api/v1/health/live").status_code == 200
+        assert client.get("/app/").status_code == 404

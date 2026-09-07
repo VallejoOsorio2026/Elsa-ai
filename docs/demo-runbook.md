@@ -64,8 +64,8 @@ una dirección que no sea local, y no hay forma de saltárselo.
 El resto de la aplicación —consultar, revisar, ver aportes— sí funciona sobre
 HTTP en la red local. Solo se pierde el micrófono.
 
-Para tener HTTPS hacen falta tres decisiones que **no** están tomadas y que no
-corresponde tomar desde el código; ver §4.
+Si hace falta HTTPS, lo más corto es publicarla en Render (§4) y abrirla
+desde el navegador de cada equipo, en vez de servirla desde la red local.
 
 Mientras tanto, sirviendo en la red local sin cifrar:
 
@@ -108,39 +108,98 @@ sobrevivirla— pero conviene no reiniciar a mitad.
 
 ---
 
-## 4. Qué falta para una URL HTTPS pública
+## 4. Publicarla en HTTPS con Render
 
-Tres decisiones, ninguna de ellas técnica del lado del código:
+Es la ruta elegida para la demostración: da HTTPS con certificado válido sin
+tocar DNS ni gestionar certificados, y con ello el micrófono funciona desde
+cualquier PC corporativo. El repositorio ya trae
+[`render.yaml`](../render.yaml), así que la configuración manual se reduce a
+conectar el repositorio y pulsar «Apply».
 
-1. **Dónde se ejecuta.** Un servidor accesible desde internet: VPS, un equipo
-   de PAPELSA con puerto publicado, o un túnel (Cloudflare Tunnel, ngrok).
-   Cada opción implica una cuenta y unas credenciales que este repositorio no
-   tiene ni debe tener.
-2. **Qué dominio.** CLAUDE.md menciona `elsa-ai.link` como destino previsto.
-   Hace falta confirmar quién controla el DNS y apuntar un registro al
-   servidor elegido.
-3. **Quién termina TLS.** Lo natural es un proxy inverso delante de uvicorn
-   (Caddy obtiene el certificado solo; nginx o Traefik con Let's Encrypt
-   funcionan igual). Uvicorn puede servir TLS directamente con
-   `--ssl-keyfile` y `--ssl-certfile`, pero para algo permanente el proxy es
-   mejor: renueva el certificado y no obliga a reiniciar la aplicación.
+**Lo que se despliega es la demostración con datos sintéticos.** No hay
+Supabase, ni base de datos, ni secretos. Los tests de
+`tests/test_render_blueprint.py` fijan esas propiedades para que un cambio
+descuidado no las rompa en silencio.
 
-Con esas tres respuestas, lo que queda por hacer del lado de ELSA es corto y
-está acotado:
+### 4.1 Pasos en Render
 
-- declarar `ELSA_CORS_ORIGINS=https://<dominio>`;
-- decidir si la demostración pública sigue en DEV con datos sintéticos (lo
-  recomendable) o pasa a TEST, que exige Supabase real, PostgreSQL y
-  desactivar la siembra;
-- ejecutar detrás del proxy con `--proxy-headers --forwarded-allow-ips`, para
-  que los logs registren la IP del cliente y no la del proxy;
-- comprobar en el navegador que el candado aparece y que el micrófono queda
-  habilitado.
+1. Empujar la rama `claude/bloque-3-papelsa-brand-mf5nfm` (ya está en
+   `origin`).
+2. En <https://dashboard.render.com>, crear cuenta o entrar, y autorizar el
+   acceso a GitHub para el repositorio `VallejoOsorio2026/Elsa-ai`. Basta con
+   dar acceso a ese repositorio; no hace falta a toda la organización.
+3. **New → Blueprint**.
+4. Elegir el repositorio `Elsa-ai`. Render encuentra `render.yaml` solo.
+5. Poner nombre al blueprint (por ejemplo `elsa-demo`) y pulsar **Apply**.
+6. Esperar al primer despliegue: instala dependencias y arranca. En el plan
+   gratuito suele tardar entre dos y cinco minutos.
+7. La URL aparece arriba en la página del servicio, con la forma
+   `https://elsa-demo.onrender.com`. Abrirla lleva directamente a `/app/`.
 
-**No se ha elegido servicio, ni preparado credenciales, ni configurado
-dominio.** Es el punto exacto en el que se detuvo este bloque.
+Si el nombre `elsa-demo` ya estuviera tomado, Render asigna otro y la URL
+cambia. En ese caso, corregir `ELSA_CORS_ORIGINS` en **Environment** con la
+URL real y guardar (redespliega solo). La demostración funciona igual —la
+interfaz y la API comparten origen— pero el valor quedaría mal declarado.
 
----
+### 4.2 Si prefieres crear el servicio a mano
+
+Sin blueprint, en **New → Web Service**, con estos valores exactos:
+
+| Campo | Valor |
+|---|---|
+| Repository | `VallejoOsorio2026/Elsa-ai` |
+| Branch | `claude/bloque-3-papelsa-brand-mf5nfm` |
+| Language / Runtime | Python 3 |
+| Build Command | `pip install uv && uv sync --frozen --no-dev` |
+| Start Command | `.venv/bin/uvicorn elsa.main:create_app --factory --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips '*'` |
+| Health Check Path | `/api/v1/health/live` |
+
+Y estas variables de entorno, **ninguna secreta**:
+
+| Variable | Valor |
+|---|---|
+| `ELSA_ENV` | `DEV` |
+| `ELSA_DEMO_SEED` | `true` |
+| `ELSA_CORS_ORIGINS` | la URL HTTPS del servicio, p. ej. `https://elsa-demo.onrender.com` |
+
+### 4.3 Por qué cada pieza es como es
+
+- **`ELSA_ENV=DEV`.** La demostración se sostiene sobre adaptadores en
+  memoria, que la configuración solo permite en DEV. Poner `TEST` no la haría
+  más seria: la aplicación se negaría a arrancar por falta de Supabase y
+  PostgreSQL reales.
+- **`--host 0.0.0.0`.** El proxy de Render no llega por la loopback.
+- **`--port $PORT`.** El puerto lo asigna Render en cada arranque.
+- **`--forwarded-allow-ips '*'`.** Uvicorn solo confía en las cabeceras
+  `X-Forwarded-*` que vengan de 127.0.0.1. Sin esta opción se cree en texto
+  plano detrás del TLS de Render y las redirecciones absolutas de
+  `StaticFiles` salen como `http://`, lo que rompe el contexto seguro del
+  navegador y, con él, el micrófono. El comodín es seguro aquí: solo el proxy
+  de Render alcanza ese puerto, y ELSA no toma ninguna decisión de seguridad
+  a partir de la IP —el control de abuso cuenta por usuario autenticado.
+- **`uv sync --frozen`.** Instala exactamente lo que fija `uv.lock`, sin
+  resolver de nuevo: dos despliegues del mismo commit instalan lo mismo.
+- **`/api/v1/health/live` como sonda.** No depende de nada.
+  `/health/ready` informa `degraded` a propósito en esta demostración (los
+  adaptadores son fake y el motor de voz es simulado); usarla como sonda haría
+  que Render reiniciara en bucle un servicio que funciona como se espera.
+
+### 4.4 Lo que hay que saber del plan gratuito
+
+- **El servicio se apaga tras unos 15 minutos sin tráfico.** La siguiente
+  visita lo despierta y tarda cerca de un minuto en responder. Conviene abrir
+  la URL unos minutos antes de enseñarla.
+- **Cada arranque borra el estado.** Permisos, conocimiento y aportes viven en
+  memoria (§3): al despertar, el servicio vuelve a sembrar los datos
+  sintéticos y los aportes creados en una sesión anterior ya no están.
+- El primer despliegue tras cada `git push` a esa rama es automático.
+
+### 4.5 Lo que sigue sin estar decidido
+
+Render da una URL propia, suficiente para la demostración. Un dominio de
+PAPELSA —CLAUDE.md menciona `elsa-ai.link`— sigue siendo una decisión
+pendiente: requiere confirmar quién controla el DNS y añadir el dominio
+personalizado en Render. No hace falta para enseñarla mañana.
 
 ## 5. Comprobaciones antes de enseñarla
 
@@ -156,6 +215,13 @@ curl http://127.0.0.1:8000/api/v1/health/ready
 curl -I http://127.0.0.1:8000/app/
 ```
 
+Sobre el despliegue de Render, cambiando la dirección:
+
+```bash
+curl -sI https://elsa-demo.onrender.com/            # 307 -> /app/
+curl -s  https://elsa-demo.onrender.com/api/v1/health/live
+```
+
 En el navegador, antes de empezar:
 
 - [ ] La pantalla de acceso muestra las cuatro personas y el aviso de ambiente
@@ -164,6 +230,8 @@ En el navegador, antes de empezar:
       arrancar).
 - [ ] Al pulsar «Grabar» el navegador pide permiso de micrófono y se concede.
 - [ ] La barra de contexto técnico muestra «BOM publicado · 8 componentes».
+- [ ] En el despliegue de Render, el candado del navegador aparece y la
+      dirección es `https://`. Sin eso no habrá micrófono.
 
 ---
 
