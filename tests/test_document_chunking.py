@@ -235,8 +235,22 @@ async def test_the_heading_trail_is_metadata_not_content() -> None:
 
     chunk = next(c for c in result.chunks if c.section_path == "1.1")
 
-    assert chunk.heading_trail == ("Alcance",)
+    assert chunk.heading_trail == ("Manual de ejemplo del equipo de laboratorio", "Alcance")
     assert not chunk.content.startswith("Alcance")
+
+
+async def test_the_heading_trail_carries_the_whole_ancestry() -> None:
+    """Solo el par entero identifica de qué se habla: «Inspeccion» a secas
+    aparece en media docena de manuales."""
+    result = await structure(fx.MANUAL_V1)
+
+    chunk = next(c for c in result.chunks if c.section_path == "1.3.2")
+
+    assert chunk.heading_trail == (
+        "Manual de ejemplo del equipo de laboratorio",
+        "Procedimiento de revision",
+        "Inspeccion",
+    )
 
 
 # ---------------------------------------------------------------------

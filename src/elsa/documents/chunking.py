@@ -74,9 +74,16 @@ def chunk_document(
 
     drafts = build_sections(extracted.blocks, document_title=document_title, warnings=warnings)
 
+    # La ruta de títulos se arma con el árbol completo: un chunk de «3.2
+    # Inspeccion» tiene que poder decir que cuelga de «3 Procedimiento de
+    # revision», porque solo el par entero identifica de qué se habla.
+    titles = {draft.section.path: draft.section.title for draft in drafts}
+
     chunks: list[DocumentChunk] = []
     for draft in drafts:
-        chunks.extend(_chunk_section(draft, active, len(chunks)))
+        chunks.extend(
+            _chunk_section(draft, active, len(chunks), _heading_trail(draft.section, titles))
+        )
 
     return DocumentStructure(
         sections=tuple(draft.section for draft in drafts),
@@ -242,14 +249,27 @@ class _Draft:
         return estimate_tokens(self.text, chars_per_token=policy.chars_per_token)
 
 
+def _heading_trail(section: DocumentSection, titles: dict[str, str]) -> tuple[str, ...]:
+    """Títulos de los ancestros más el de la sección, de la raíz hacia abajo."""
+    trail: list[str] = []
+    path: str | None = section.path
+    while path is not None and path in titles:
+        trail.insert(0, titles[path])
+        path = path.rpartition(".")[0] or None
+    return tuple(trail)
+
+
 def _chunk_section(
-    draft: SectionDraft, policy: ChunkingPolicy, first_ordinal: int
+    draft: SectionDraft,
+    policy: ChunkingPolicy,
+    first_ordinal: int,
+    heading_trail: tuple[str, ...],
 ) -> list[DocumentChunk]:
     units = _units(draft.blocks, policy)
     drafts = _pack(units, policy)
     drafts = _merge_small(drafts, policy)
     drafts = _apply_overlap(drafts, policy)
-    return _materialise(drafts, draft.section, first_ordinal, policy)
+    return _materialise(drafts, draft.section, first_ordinal, policy, heading_trail)
 
 
 def _pack(units: list[_Unit], policy: ChunkingPolicy) -> list[_Draft]:
@@ -594,6 +614,7 @@ def _materialise(
     section: DocumentSection,
     first_ordinal: int,
     policy: ChunkingPolicy,
+    heading_trail: tuple[str, ...],
 ) -> list[DocumentChunk]:
     chunks: list[DocumentChunk] = []
     for index, draft in enumerate(drafts):
@@ -610,7 +631,7 @@ def _materialise(
                 section_ordinal=section.ordinal,
                 section_title=section.title,
                 index_in_section=index,
-                heading_trail=(section.title,),
+                heading_trail=heading_trail,
                 page_start=min(pages) if pages else section.page_start,
                 page_end=max(pages) if pages else section.page_end,
                 block_start=min(block.ordinal for block in draft.blocks) if draft.blocks else None,
