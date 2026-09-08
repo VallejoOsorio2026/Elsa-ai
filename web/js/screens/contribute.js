@@ -4,24 +4,39 @@
  * Una sola pantalla con bloques que aparecen cuando toca, no un asistente de
  * «Siguiente». El orden sigue el de la cabeza de quien aporta:
  *
- *   Capturar → Esencial → Entender → Completar → Revisar
+ *   A Capturar → B Esencial → C Entender → D Contexto → E Revisar
  *
- * Dos decisiones de fondo:
+ * Tres decisiones de fondo:
  *
  * - **Escribir y grabar son equivalentes.** La pantalla abre en «Escribir»
- *   porque es lo que funciona en cualquier equipo y sin permisos; grabar está
- *   al lado, no debajo. Presentar el aporte como algo que solo se hace
- *   hablando dejaba fuera a quien está en una oficina o sin micrófono.
+ *   porque funciona en cualquier equipo y sin permisos; grabar está al lado,
+ *   no debajo.
  * - **Lo derivado va después de lo que lo alimenta.** «Esto es lo que ELSA
  *   entendió» no aparece hasta que hay algo que entender, y solo enseña las
- *   fichas que tienen contenido. Abrir con siete cajas vacías convierte una
- *   respuesta en otro formulario.
+ *   fichas con contenido.
+ * - **Escribir no se interrumpe.** Cada bloque tiene su propio contenedor y
+ *   se rellena por separado. Al teclear se actualizan «lo que entendí» y el
+ *   resumen; el campo donde está el cursor no se toca. Antes se redibujaba
+ *   la pantalla entera y el foco caía al `body` a media frase.
+ *
+ * El orden del DOM es el orden de tabulación: A, B, C, D, E, y dentro de cada
+ * bloque lo obligatorio antes que lo opcional. Ver
+ * `docs/brand/ELSA_UI_BRAND_RULES.md`, «Navegación por teclado».
  */
 
 import { api } from '../api.js';
 import { state } from '../state.js';
 import { createRecorderPanel } from '../recorder-panel.js';
-import { announce, clear, el, formatBytes, formatSeconds, mount, notice } from '../ui.js';
+import {
+  announce,
+  clear,
+  el,
+  formatBytes,
+  formatSeconds,
+  mount,
+  notice,
+  renderInto,
+} from '../ui.js';
 
 const ESSENTIAL_KEYS = ['que_paso', 'donde'];
 const PREVIEW_DELAY_MS = 500;
@@ -40,6 +55,8 @@ const FINDING_ORDER = [
 let form = newForm();
 let recorderPanel = null;
 let previewTimer = null;
+let sections = null;
+let actions = null;
 let redraw = () => {};
 
 function newForm() {
@@ -94,7 +111,7 @@ function extractionSource() {
 }
 
 // ---------------------------------------------------------------------
-// Render
+// Montaje y actualización
 // ---------------------------------------------------------------------
 
 export function renderContribute(outlet) {
@@ -102,7 +119,8 @@ export function renderContribute(outlet) {
   outlet.append(host);
 
   if (!state.capability?.can_contribute) {
-    host.append(
+    mount(
+      host,
       notice(
         'warn',
         'Tu cuenta puede consultar este equipo, pero no está habilitada para aportarle ' +
@@ -113,27 +131,71 @@ export function renderContribute(outlet) {
     return;
   }
 
-  const draw = () => paint(host, draw);
-  redraw = draw;
-  draw();
+  sections = null;
+  redraw = () => paint(host);
+  redraw();
 }
 
-function paint(host, draw) {
-  clear(host);
+function paint(host) {
   if (form.submitted) {
-    host.append(buildSubmitted(draw));
+    sections = null;
+    actions = null;
+    clear(host);
+    mount(host, buildSubmitted());
     return;
   }
-  mount(host, form.error ? notice('error', form.error) : null);
 
-  mount(
-    host,
-    buildCapture(draw),
-    buildEssential(draw),
-    // Devuelve null mientras no haya nada que entender.
-    buildUnderstanding(draw),
-    buildMoreContext(draw),
-    buildReview(draw),
+  if (!sections || !host.contains(sections.capture)) {
+    sections = {
+      problem: el('div'),
+      capture: el('section', { class: 'card stack block-capture' }),
+      essential: el('section', { class: 'card stack block-essential' }),
+      // El encabezado de «Esencial» tiene su propio nodo: el botón de
+      // compactar aparece en cuanto se completan las dos preguntas, y eso
+      // no puede obligar a rehacer los campos que se están escribiendo.
+      essentialHead: el('div'),
+      essentialBody: el('div', { class: 'stack' }),
+      understanding: el('section', { class: 'card stack block-understanding' }),
+      context: el('details', { class: 'card block-context' }),
+      review: el('section', { class: 'card stack block-review' }),
+    };
+    clear(host);
+    // El orden del DOM es el del flujo, y por tanto el de tabulación.
+    mount(
+      host,
+      sections.problem,
+      sections.capture,
+      sections.essential,
+      sections.understanding,
+      sections.context,
+      sections.review,
+    );
+  }
+
+  renderProblem();
+  renderCapture();
+  renderEssential();
+  renderUnderstanding();
+  renderContext();
+  renderReview();
+}
+
+/**
+ * Lo que se actualiza al teclear.
+ *
+ * Nunca incluye el bloque donde está el cursor: ni «Capturar» ni «Esencial»
+ * ni «Contexto» se vuelven a dibujar por escribir en ellos.
+ */
+function refreshDerived() {
+  if (!sections) return;
+  renderUnderstanding();
+  renderSummary();
+  syncActions();
+}
+
+function renderProblem() {
+  renderInto(sections.problem, (node) =>
+    mount(node, form.error ? notice('error', form.error) : null),
   );
 }
 
@@ -141,98 +203,107 @@ function paint(host, draw) {
 // A · Capturar
 // ---------------------------------------------------------------------
 
-function buildCapture(draw) {
-  const { maxAudio } = limits();
-  const saved = Boolean(form.draft);
+function renderCapture() {
+  renderInto(sections.capture, (node) => {
+    const { maxAudio } = limits();
+    const saved = Boolean(form.draft);
 
-  const tab = (method, label, hint) =>
-    el(
-      'button',
-      {
-        class: 'method-tab',
-        type: 'button',
-        role: 'tab',
-        'aria-selected': form.method === method ? 'true' : 'false',
-        disabled: saved,
-        onClick: () => {
-          form.method = method;
-          draw();
+    // Botones de alternancia, no pestañas ARIA: son dos controles normales
+    // que se alcanzan con Tab y se activan con Enter o Espacio, sin teclas
+    // propias que nadie espera.
+    const method = (value, label, hint) =>
+      el(
+        'button',
+        {
+          class: 'method-tab',
+          type: 'button',
+          'aria-pressed': form.method === value ? 'true' : 'false',
+          disabled: saved,
+          onClick: () => {
+            form.method = value;
+            redraw();
+          },
         },
-      },
-      [el('span', { class: 'method-label', text: label }), el('span', { class: 'muted', text: hint })],
-    );
+        [
+          el('span', { class: 'method-label', text: label }),
+          el('span', { class: 'muted', text: hint }),
+        ],
+      );
 
-  const body = el('div', { class: 'method-body' });
+    const body = el('div', { class: 'method-body' });
 
-  if (saved) {
-    body.append(
-      notice(
-        'info',
-        'El borrador ya está guardado. El texto y las respuestas se siguen pudiendo corregir; ' +
-          'la nota de voz y los archivos quedaron fijados al guardarlo.',
-        'Guardado',
-      ),
-      buildCaptureSummary(),
-    );
-  } else if (form.method === 'write') {
-    const area = el('textarea', {
-      id: 'relato',
-      rows: 5,
-      placeholder:
-        'Ej.: El rodamiento del rodillo de la prensa inferior hace un ruido metálico al arrancar.',
-      onInput: (event) => {
-        form.text = event.target.value;
-        schedulePreview(draw);
-      },
-    });
-    area.value = form.text;
-    mount(
-      body,
-      el('label', { for: 'relato', text: 'Cuéntalo con tus palabras' }),
-      area,
-      el('p', {
-        class: 'muted',
-        text: 'Como se lo explicarías a un compañero. Podrás corregirlo todo antes de enviar.',
-      }),
-      recorderPanel && recorderPanel.state.blob ? buildAudioChip(draw) : null,
-    );
-  } else {
-    if (!recorderPanel) {
-      recorderPanel = createRecorderPanel({
-        maxSeconds: maxAudio,
-        onChange: (recorderState) => {
-          syncActions();
-          // Solo se redibuja la pantalla cuando la grabadora llega a un
-          // estado terminal, nunca en cada tic del cronómetro: mover los
-          // controles mientras alguien los está pulsando es justo lo que
-          // hacía perder los clics de ratón.
-          if (recorderState.status === 'recorded' || recorderState.status === 'idle') redraw();
+    if (saved) {
+      mount(
+        body,
+        notice(
+          'info',
+          'El borrador ya está guardado. El texto y las respuestas se siguen pudiendo ' +
+            'corregir; la nota de voz y los archivos quedaron fijados al guardarlo.',
+          'Guardado',
+        ),
+        buildCaptureSummary(),
+      );
+    } else if (form.method === 'write') {
+      const area = el('textarea', {
+        id: 'relato',
+        rows: 5,
+        placeholder:
+          'Ej.: El rodamiento del rodillo de la prensa inferior hace un ruido metálico al arrancar.',
+        onInput: (event) => {
+          form.text = event.target.value;
+          schedulePreview();
         },
       });
+      area.value = form.text;
+      mount(
+        body,
+        el('label', { for: 'relato', text: 'Cuéntalo con tus palabras' }),
+        area,
+        el('p', {
+          class: 'muted',
+          text: 'Como se lo explicarías a un compañero. Podrás corregirlo todo antes de enviar.',
+        }),
+        recorderPanel && recorderPanel.state.blob ? buildAudioChip() : null,
+      );
+    } else {
+      if (!recorderPanel) {
+        recorderPanel = createRecorderPanel({
+          maxSeconds: maxAudio,
+          onChange: (recorderState) => {
+            syncActions();
+            // Solo se redibuja al llegar a un estado terminal, nunca en cada
+            // tic: mover los controles mientras alguien los pulsa es lo que
+            // hacía perder los clics de ratón.
+            if (recorderState.status === 'recorded' || recorderState.status === 'idle') redraw();
+          },
+        });
+      }
+      mount(
+        body,
+        recorderPanel.element,
+        notice(
+          'warn',
+          'La nota de voz se guarda como evidencia, pero no se transcribe: todavía no hay ' +
+            'motor de voz a texto conectado. Escribe también lo que dijiste, en «Escribir», ' +
+            'para que quien revise pueda leerlo.',
+          'El audio no se transcribe',
+        ),
+      );
     }
-    body.append(
-      recorderPanel.element,
-      notice(
-        'warn',
-        'La nota de voz se guarda como evidencia, pero no se transcribe: todavía no hay ' +
-          'motor de voz a texto conectado. Escribe también lo que dijiste, en la pestaña ' +
-          '«Escribir», para que quien revise pueda leerlo.',
-        'El audio no se transcribe',
-      ),
-    );
-  }
 
-  return el('section', { class: 'card stack block-capture' }, [
-    buildStepHead('A', 'Capturar', 'Escribe lo que observaste, grábalo, o las dos cosas.'),
-    el('div', { class: 'method-tabs', role: 'tablist' }, [
-      tab('write', '✍ Escribir', 'Funciona en cualquier equipo'),
-      tab('record', '🎙 Grabar audio', 'Con guantes o con ruido'),
-    ]),
-    body,
-  ]);
+    mount(
+      node,
+      buildStepHead('A', 'Capturar', 'Escribe lo que observaste, grábalo, o las dos cosas.'),
+      el('div', { class: 'method-tabs', role: 'group', 'aria-label': 'Cómo quieres aportarlo' }, [
+        method('write', '✍ Escribir', 'Funciona en cualquier equipo'),
+        method('record', '🎙 Grabar audio', 'Con guantes o con ruido'),
+      ]),
+      body,
+    );
+  });
 }
 
-function buildAudioChip(draw) {
+function buildAudioChip() {
   return el('div', { class: 'audio-chip' }, [
     el('span', { 'aria-hidden': 'true', text: '🎙' }),
     el('span', {
@@ -244,7 +315,7 @@ function buildAudioChip(draw) {
       text: 'Ver grabadora',
       onClick: () => {
         form.method = 'record';
-        draw();
+        redraw();
       },
     }),
   ]);
@@ -279,54 +350,89 @@ function buildCaptureSummary() {
 // B · Información esencial
 // ---------------------------------------------------------------------
 
-function buildEssential(draw) {
-  const done = essentialDone();
-  const collapsed = done && !form.essentialOpen;
-
-  const head = buildStepHead(
-    'B',
-    'Información esencial',
-    'Sin esto, quien revise no puede decidir nada.',
-    done
-      ? el('button', {
-          class: 'btn btn-secondary btn-small',
-          type: 'button',
-          text: collapsed ? 'Editar' : 'Compactar',
-          onClick: () => {
-            form.essentialOpen = collapsed;
-            draw();
-          },
-        })
-      : null,
+function renderEssential() {
+  renderInto(sections.essential, (node) =>
+    mount(node, sections.essentialHead, sections.essentialBody),
   );
-
-  if (collapsed) {
-    return el('section', { class: 'card stack block-essential is-collapsed' }, [
-      head,
-      el('dl', { class: 'summary-list' }, [
-        el('dt', { text: 'Qué observaste' }),
-        el('dd', { text: answerOf('que_paso') }),
-        el('dt', { text: 'En qué parte' }),
-        el('dd', { text: answerOf('donde') }),
-      ]),
-    ]);
-  }
-
-  const fields = questions()
-    .filter((question) => ESSENTIAL_KEYS.includes(question.key))
-    .map((question) => buildQuestion(question, draw, { onInput: () => schedulePreview(draw) }));
-
-  return el('section', { class: 'card stack block-essential' }, [head, ...fields]);
+  renderEssentialHead();
+  renderEssentialBody();
 }
 
-function buildQuestion(question, draw, { onInput } = {}) {
+function renderEssentialHead() {
+  const done = essentialDone();
+  const collapsed = done && !form.essentialOpen;
+  sections.essential.classList.toggle('is-collapsed', collapsed);
+
+  renderInto(sections.essentialHead, (node) =>
+    mount(
+      node,
+      buildStepHead(
+        'B',
+        'Información esencial',
+        'Sin esto, quien revise no puede decidir nada.',
+        done
+          ? el('button', {
+              class: 'btn btn-secondary btn-small',
+              type: 'button',
+              // Un identificador estable permite devolverle el foco tras
+              // redibujar, para quien navega con teclado.
+              id: 'compactar-esencial',
+              text: collapsed ? 'Editar' : 'Compactar',
+              onClick: () => {
+                form.essentialOpen = collapsed;
+                renderEssentialHead();
+                renderEssentialBody();
+              },
+            })
+          : null,
+      ),
+    ),
+  );
+}
+
+function renderEssentialBody() {
+  const collapsed = essentialDone() && !form.essentialOpen;
+
+  renderInto(sections.essentialBody, (node) => {
+    if (collapsed) {
+      mount(
+        node,
+        el('dl', { class: 'summary-list' }, [
+          el('dt', { text: 'Qué observaste' }),
+          el('dd', { text: answerOf('que_paso') }),
+          el('dt', { text: 'En qué parte' }),
+          el('dd', { text: answerOf('donde') }),
+        ]),
+      );
+      return;
+    }
+    mount(
+      node,
+      ...questions()
+        .filter((question) => ESSENTIAL_KEYS.includes(question.key))
+        .map((question) => buildQuestion(question, { derived: true })),
+    );
+  });
+}
+
+/**
+ * Una pregunta de la guía.
+ *
+ * `derived` marca las que alimentan «lo que entendí»: al escribir en ellas se
+ * refrescan los bloques derivados, nunca el propio campo.
+ */
+function buildQuestion(question, { derived = false } = {}) {
   const area = el('textarea', {
     id: `q-${question.key}`,
     rows: 2,
+    'aria-describedby': `hint-${question.key}`,
     onInput: (event) => {
       form.answers[question.key] = event.target.value;
-      syncActions();
-      if (onInput) onInput();
+      if (derived) schedulePreview();
+      else {
+        renderSummary();
+        syncActions();
+      }
     },
   });
   area.value = form.answers[question.key] || '';
@@ -336,7 +442,7 @@ function buildQuestion(question, draw, { onInput } = {}) {
       question.question,
       question.required ? el('span', { class: 'required', text: ' · obligatorio' }) : null,
     ]),
-    el('p', { class: 'muted', text: question.hint }),
+    el('p', { class: 'muted', id: `hint-${question.key}`, text: question.hint }),
     area,
   ]);
 }
@@ -345,21 +451,23 @@ function buildQuestion(question, draw, { onInput } = {}) {
 // C · Esto es lo que ELSA entendió
 // ---------------------------------------------------------------------
 
-function schedulePreview(draw) {
+function schedulePreview() {
   syncActions();
+  renderEssentialHead();
+  renderSummary();
   clearTimeout(previewTimer);
-  previewTimer = setTimeout(() => runPreview(draw), PREVIEW_DELAY_MS);
+  previewTimer = setTimeout(runPreview, PREVIEW_DELAY_MS);
 }
 
-async function runPreview(draw) {
+async function runPreview() {
   const source = extractionSource();
   if (source.length < MIN_TEXT_FOR_PREVIEW) {
     form.understanding = null;
-    draw();
+    refreshDerived();
     return;
   }
   form.previewing = true;
-  draw();
+  refreshDerived();
   try {
     form.understanding = await api.request(`${base()}/understanding`, {
       method: 'POST',
@@ -374,58 +482,66 @@ async function runPreview(draw) {
     form.understanding = null;
   } finally {
     form.previewing = false;
-    draw();
+    refreshDerived();
   }
 }
 
-function buildUnderstanding(draw) {
-  if (extractionSource().length < MIN_TEXT_FOR_PREVIEW) return null;
-
-  const body = el('div', { class: 'stack-sm' });
-
-  if (form.previewing && !form.understanding) {
-    body.append(
-      el('p', { class: 'muted' }, [
-        el('span', { class: 'spinner spinner-sm' }),
-        ' Buscando en el conocimiento publicado…',
-      ]),
-    );
-  } else if (!form.understanding) {
-    body.append(el('p', { class: 'muted', text: 'Todavía no he leído nada que reconocer.' }));
-  } else {
-    const found = form.understanding.normalizations.filter(
-      (field) => valueOf(field) && field.key !== 'resumen',
-    );
-    const useful = FINDING_ORDER.map((key) => found.find((field) => field.key === key)).filter(
-      Boolean,
-    );
-
-    if (!form.understanding.has_findings) {
-      body.append(
-        notice(
-          'info',
-          'No reconocí ningún componente ni código del BOM publicado en lo que llevas escrito. ' +
-            'No es un problema: puede ser algo que todavía no está documentado. Quien revise ' +
-            'lo leerá igual.',
-          'Nada reconocido',
-        ),
-      );
-    }
-    // Solo fichas con contenido. Una caja vacía no informa de nada.
-    for (const field of useful) body.append(buildFinding(field, draw));
+function renderUnderstanding() {
+  const enough = extractionSource().length >= MIN_TEXT_FOR_PREVIEW;
+  sections.understanding.hidden = !enough;
+  if (!enough) {
+    clear(sections.understanding);
+    return;
   }
 
-  return el('section', { class: 'card stack block-understanding' }, [
-    buildStepHead('C', 'Esto es lo que ELSA entendió', null),
-    el('div', { class: 'answer-origin' }, [
-      el('span', { class: 'tag tag-sim', text: 'Sin IA' }),
-      el('span', {
-        class: 'muted',
-        text: 'Coincidencias literales con el BOM publicado. Si aparece algo, esa palabra está escrita arriba.',
-      }),
-    ]),
-    body,
-  ]);
+  renderInto(sections.understanding, (node) => {
+    const body = el('div', { class: 'stack-sm' });
+
+    if (form.previewing && !form.understanding) {
+      mount(
+        body,
+        el('p', { class: 'muted' }, [
+          el('span', { class: 'spinner spinner-sm' }),
+          ' Buscando en el conocimiento publicado…',
+        ]),
+      );
+    } else if (!form.understanding) {
+      mount(body, el('p', { class: 'muted', text: 'Todavía no he leído nada que reconocer.' }));
+    } else {
+      if (!form.understanding.has_findings) {
+        mount(
+          body,
+          notice(
+            'info',
+            'No reconocí ningún componente ni código del BOM publicado en lo que llevas ' +
+              'escrito. No es un problema: puede ser algo que todavía no está documentado. ' +
+              'Quien revise lo leerá igual.',
+            'Nada reconocido',
+          ),
+        );
+      }
+      // Solo fichas con contenido. Una caja vacía no informa de nada.
+      const useful = FINDING_ORDER.map((key) =>
+        form.understanding.normalizations.find((field) => field.key === key && valueOf(field)),
+      ).filter(Boolean);
+      for (const field of useful) mount(body, buildFinding(field));
+    }
+
+    mount(
+      node,
+      buildStepHead('C', 'Esto es lo que ELSA entendió', null),
+      el('div', { class: 'answer-origin' }, [
+        el('span', { class: 'tag tag-sim', text: 'Sin IA' }),
+        el('span', {
+          class: 'muted',
+          text:
+            'Coincidencias literales con el BOM publicado. Si aparece algo, esa palabra ' +
+            'está escrita arriba.',
+        }),
+      ]),
+      body,
+    );
+  });
 }
 
 function valueOf(field) {
@@ -433,7 +549,7 @@ function valueOf(field) {
   return (edited !== undefined ? edited : field.value) || '';
 }
 
-function buildFinding(field, draw) {
+function buildFinding(field) {
   const editing = form.edits[field.key] !== undefined;
 
   const value = editing
@@ -444,6 +560,7 @@ function buildFinding(field, draw) {
         'aria-label': field.label,
         onInput: (event) => {
           form.edits[field.key] = event.target.value;
+          renderSummary();
         },
       })
     : el('span', { class: 'finding-value', text: valueOf(field) });
@@ -462,7 +579,8 @@ function buildFinding(field, draw) {
         onClick: () => {
           if (editing) delete form.edits[field.key];
           else form.edits[field.key] = field.value || '';
-          draw();
+          renderUnderstanding();
+          renderSummary();
         },
       }),
     ]),
@@ -474,40 +592,44 @@ function buildFinding(field, draw) {
 // D · Añadir más contexto
 // ---------------------------------------------------------------------
 
-function buildMoreContext(draw) {
-  const optional = questions().filter((question) => !ESSENTIAL_KEYS.includes(question.key));
-  const answered = optional.filter((question) => answerOf(question.key)).length;
+function renderContext() {
+  renderInto(sections.context, (node) => {
+    const optional = questions().filter((question) => !ESSENTIAL_KEYS.includes(question.key));
+    const answered = optional.filter((question) => answerOf(question.key)).length;
 
-  const inner = el('div', { class: 'stack-sm' }, [
-    el('p', {
-      class: 'muted',
-      text:
-        'Nada de esto es obligatorio, pero es lo que un revisor pregunta cuando le falta ' +
-        'contexto para decidir. Cuanto más completo, menos idas y venidas.',
-    }),
-    ...optional.map((question) => buildQuestion(question, draw)),
-    form.draft ? null : buildAttachments(draw),
-  ]);
-
-  return el('details', { class: 'card block-context' }, [
-    el('summary', {}, [
-      el('span', { class: 'step-badge', 'aria-hidden': 'true', text: 'D' }),
-      el('span', { class: 'step-title', text: 'Añadir más contexto' }),
-      answered > 0
-        ? el('span', { class: 'tag tag-approved', text: `${answered} respondidas` })
-        : el('span', { class: 'muted', text: 'Opcional' }),
-    ]),
-    inner,
-  ]);
+    mount(
+      node,
+      el('summary', {}, [
+        el('span', { class: 'step-badge', 'aria-hidden': 'true', text: 'D' }),
+        el('span', { class: 'step-title', text: 'Añadir más contexto' }),
+        answered > 0
+          ? el('span', { class: 'tag tag-approved', text: `${answered} respondidas` })
+          : el('span', { class: 'muted', text: 'Opcional' }),
+      ]),
+      el('div', { class: 'stack-sm' }, [
+        el('p', {
+          class: 'muted',
+          text:
+            'Nada de esto es obligatorio, pero es lo que un revisor pregunta cuando le falta ' +
+            'contexto para decidir. Cuanto más completo, menos idas y venidas.',
+        }),
+        ...optional.map((question) => buildQuestion(question)),
+        form.draft ? null : buildAttachments(),
+      ]),
+    );
+  });
 }
 
-function buildAttachments(draw) {
+function buildAttachments() {
   const { maxAttachments, maxBytes } = limits();
+  // El input queda oculto y **no** enfocable; quien abre el diálogo es un
+  // botón de verdad, que se alcanza con Tab como cualquier otro.
   const input = el('input', {
     type: 'file',
-    id: 'apoyo',
     multiple: true,
-    class: 'visually-hidden',
+    hidden: true,
+    tabindex: '-1',
+    'aria-hidden': 'true',
     onChange: (event) => {
       const incoming = Array.from(event.target.files || []);
       event.target.value = '';
@@ -523,12 +645,20 @@ function buildAttachments(draw) {
         }
         form.attachments.push(file);
       }
-      draw();
+      renderProblem();
+      renderContext();
+      renderSummary();
     },
   });
 
   return el('div', { class: 'stack-sm' }, [
-    el('label', { for: 'apoyo', class: 'btn btn-secondary' }, ['📎 Adjuntar evidencia']),
+    el('button', {
+      class: 'btn btn-secondary',
+      type: 'button',
+      id: 'adjuntar',
+      text: '📎 Adjuntar evidencia',
+      onClick: () => input.click(),
+    }),
     input,
     el(
       'ul',
@@ -543,7 +673,8 @@ function buildAttachments(draw) {
             text: '✕',
             onClick: () => {
               form.attachments.splice(index, 1);
-              draw();
+              renderContext();
+              renderSummary();
             },
           }),
         ]),
@@ -560,84 +691,111 @@ function buildAttachments(draw) {
 // E · Revisar y enviar
 // ---------------------------------------------------------------------
 
-let saveBtn = null;
-let sendBtn = null;
-
 function syncActions() {
+  if (!actions) return;
   const ready = essentialDone() && hasCapture();
   const blocked = form.busy || Boolean(recorderPanel && recorderPanel.state.busy);
-  if (saveBtn) saveBtn.disabled = blocked || !hasCapture();
-  if (sendBtn) sendBtn.disabled = blocked || !ready;
+  actions.save.disabled = blocked || !hasCapture();
+  actions.save.textContent = form.busy
+    ? 'Guardando…'
+    : form.draft
+      ? 'Guardar cambios'
+      : 'Guardar borrador';
+  actions.send.disabled = blocked || !ready;
+  renderMissing();
 }
 
-function buildReview(draw) {
+function renderReview() {
+  renderInto(sections.review, (node) => {
+    // Los botones se construyen una vez y solo se actualizan: rehacerlos en
+    // cada tecleo repetiría el fallo del clic perdido de la grabadora.
+    actions = {
+      save: el('button', {
+        class: 'btn btn-secondary',
+        type: 'button',
+        text: 'Guardar borrador',
+        onClick: () => save({ submit: false }),
+      }),
+      send: el('button', {
+        class: 'btn btn-primary',
+        type: 'button',
+        text: 'Enviar a revisión',
+        onClick: () => save({ submit: true }),
+      }),
+      summary: el('div'),
+      missing: el('div'),
+    };
+
+    mount(
+      node,
+      buildStepHead('E', 'Revisar y enviar', 'Esto es lo que verá quien revise.'),
+      actions.summary,
+      actions.missing,
+      el('div', { class: 'actions' }, [actions.save, actions.send]),
+      el('p', {
+        class: 'muted',
+        text:
+          'Al enviarlo queda pendiente de revisión. Un aporte pendiente no aparece en las ' +
+          'consultas del equipo: nadie va a operar con él hasta que un revisor lo valide.',
+      }),
+    );
+    renderSummary();
+    syncActions();
+  });
+}
+
+function renderMissing() {
+  if (!actions) return;
   const missing = [];
   if (!hasCapture()) missing.push('escribe o graba lo que observaste');
   for (const question of questions().filter((q) => ESSENTIAL_KEYS.includes(q.key))) {
     if (!answerOf(question.key)) missing.push(`responde «${question.question}»`);
   }
-
-  saveBtn = el('button', {
-    class: 'btn btn-secondary',
-    type: 'button',
-    text: form.busy ? 'Guardando…' : form.draft ? 'Guardar cambios' : 'Guardar borrador',
-    onClick: () => save(draw, { submit: false }),
+  renderInto(actions.missing, (node) => {
+    mount(
+      node,
+      missing.length > 0 ? notice('warn', `Antes de enviar: ${missing.join('; ')}.`, 'Falta') : null,
+    );
   });
-  sendBtn = el('button', {
-    class: 'btn btn-primary',
-    type: 'button',
-    text: 'Enviar a revisión',
-    onClick: () => save(draw, { submit: true }),
-  });
-  syncActions();
-
-  return el('section', { class: 'card stack block-review' }, [
-    buildStepHead('E', 'Revisar y enviar', 'Esto es lo que verá quien revise.'),
-    buildSummary(),
-    missing.length > 0
-      ? notice('warn', `Antes de enviar: ${missing.join('; ')}.`, 'Falta')
-      : null,
-    el('div', { class: 'actions' }, [saveBtn, sendBtn]),
-    el('p', {
-      class: 'muted',
-      text:
-        'Al enviarlo queda pendiente de revisión. Un aporte pendiente no aparece en las ' +
-        'consultas del equipo: nadie va a operar con él hasta que un revisor lo valide.',
-    }),
-  ]);
 }
 
-function buildSummary() {
-  const rows = [];
-  const push = (term, value) => {
-    if (value) rows.push(el('dt', { text: term }), el('dd', { text: value }));
-  };
+function renderSummary() {
+  if (!actions) return;
+  renderInto(actions.summary, (node) => {
+    const rows = [];
+    const push = (term, value) => {
+      if (value) rows.push(el('dt', { text: term }), el('dd', { text: value }));
+    };
 
-  push('Equipo', state.asset?.name || state.scope?.asset);
-  push('Qué observaste', answerOf('que_paso'));
-  push('En qué parte', answerOf('donde'));
-  if (form.text.trim()) push('Relato', form.text.trim());
+    push('Equipo', state.asset?.name || state.scope?.asset);
+    push('Qué observaste', answerOf('que_paso'));
+    push('En qué parte', answerOf('donde'));
+    if (form.text.trim()) push('Relato', form.text.trim());
 
-  if (form.understanding) {
-    for (const key of FINDING_ORDER) {
-      const field = form.understanding.normalizations.find((item) => item.key === key);
-      if (field && valueOf(field) && key !== 'equipo') push(field.label, valueOf(field));
+    if (form.understanding) {
+      for (const key of FINDING_ORDER) {
+        if (key === 'equipo') continue;
+        const field = form.understanding.normalizations.find((item) => item.key === key);
+        if (field && valueOf(field)) push(field.label, valueOf(field));
+      }
     }
-  }
-  for (const question of questions().filter((q) => !ESSENTIAL_KEYS.includes(q.key))) {
-    push(question.question, answerOf(question.key));
-  }
-  if (recorderPanel && recorderPanel.state.blob) {
-    push('Nota de voz', `${formatSeconds(recorderPanel.state.seconds)} · sin transcribir`);
-  }
-  if (form.attachments.length > 0) {
-    push('Adjuntos', form.attachments.map((file) => file.name).join(', '));
-  }
+    for (const question of questions().filter((q) => !ESSENTIAL_KEYS.includes(q.key))) {
+      push(question.question, answerOf(question.key));
+    }
+    if (recorderPanel && recorderPanel.state.blob) {
+      push('Nota de voz', `${formatSeconds(recorderPanel.state.seconds)} · sin transcribir`);
+    }
+    if (form.attachments.length > 0) {
+      push('Adjuntos', form.attachments.map((file) => file.name).join(', '));
+    }
 
-  if (rows.length === 0) {
-    return el('p', { class: 'muted', text: 'Todavía no hay nada que resumir.' });
-  }
-  return el('dl', { class: 'summary-list' }, rows);
+    mount(
+      node,
+      rows.length === 0
+        ? el('p', { class: 'muted', text: 'Todavía no hay nada que resumir.' })
+        : el('dl', { class: 'summary-list' }, rows),
+    );
+  });
 }
 
 // ---------------------------------------------------------------------
@@ -652,10 +810,11 @@ function checklistPayload() {
   }));
 }
 
-async function save(draw, { submit }) {
+async function save({ submit }) {
   form.busy = true;
   form.error = null;
-  draw();
+  renderProblem();
+  syncActions();
 
   try {
     if (!form.draft) {
@@ -677,16 +836,14 @@ async function save(draw, { submit }) {
     }
 
     const edits = Object.entries(form.edits).map(([key, value]) => ({ key, value }));
-    if (edits.length > 0 || form.draft) {
-      form.draft = await api.request(`${base()}/${form.draft.id}`, {
-        method: 'PATCH',
-        body: {
-          transcript_text: form.text,
-          checklist: checklistPayload(),
-          ...(edits.length > 0 ? { normalizations: edits } : {}),
-        },
-      });
-    }
+    form.draft = await api.request(`${base()}/${form.draft.id}`, {
+      method: 'PATCH',
+      body: {
+        transcript_text: form.text,
+        checklist: checklistPayload(),
+        ...(edits.length > 0 ? { normalizations: edits } : {}),
+      },
+    });
 
     if (submit) {
       form.submitted = await api.request(`${base()}/${form.draft.id}/submit`, { method: 'POST' });
@@ -698,11 +855,11 @@ async function save(draw, { submit }) {
     form.error = error.message;
   } finally {
     form.busy = false;
-    draw();
+    redraw();
   }
 }
 
-function buildSubmitted(draw) {
+function buildSubmitted() {
   return el('div', { class: 'card stack' }, [
     notice(
       'success',
@@ -717,8 +874,10 @@ function buildSubmitted(draw) {
         type: 'button',
         text: 'Hacer otro aporte',
         onClick: () => {
+          const keep = redraw;
           resetContribute();
-          draw();
+          redraw = keep;
+          redraw();
         },
       }),
       el('a', { class: 'btn btn-secondary', href: '#/mis-aportes', text: 'Ver mis aportes' }),
@@ -754,6 +913,6 @@ export function disposeContribute() {
   previewTimer = null;
   if (recorderPanel) recorderPanel.dispose();
   recorderPanel = null;
-  saveBtn = null;
-  sendBtn = null;
+  sections = null;
+  actions = null;
 }

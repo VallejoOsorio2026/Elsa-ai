@@ -43,6 +43,50 @@ export function mount(node, ...children) {
   return node;
 }
 
+/**
+ * Rellena un contenedor conservando el foco y el cursor de quien escribe.
+ *
+ * Volver a dibujar un bloque destruye sus nodos, y si dentro estaba el campo
+ * enfocado el foco cae al `body`: la persona pierde el sitio a media frase y
+ * tiene que volver a hacer clic. Aquí se anota qué elemento tenía el foco y
+ * por dónde iba el cursor, y se restituyen sobre el nodo equivalente.
+ *
+ * Es la red de seguridad, no la primera línea: lo que de verdad evita el
+ * problema es no redibujar el bloque donde se está escribiendo. Esta función
+ * cubre los casos en que el redibujado es inevitable —una ficha que cambia
+ * mientras se corrige, por ejemplo—.
+ */
+export function renderInto(node, build) {
+  const active = document.activeElement;
+  const keep =
+    active && active !== node && node.contains(active) && active.id
+      ? {
+          id: active.id,
+          start: active.selectionStart ?? null,
+          end: active.selectionEnd ?? null,
+        }
+      : null;
+
+  clear(node);
+  build(node);
+
+  if (keep) {
+    const again = node.querySelector(`#${CSS.escape(keep.id)}`);
+    if (again) {
+      // `preventScroll` evita que restituir el foco dé un salto de página.
+      again.focus({ preventScroll: true });
+      if (keep.start !== null && typeof again.setSelectionRange === 'function') {
+        try {
+          again.setSelectionRange(keep.start, keep.end);
+        } catch {
+          /* El control no admite selección; basta con el foco. */
+        }
+      }
+    }
+  }
+  return node;
+}
+
 export function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
   return node;
