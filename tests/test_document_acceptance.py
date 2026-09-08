@@ -7,6 +7,7 @@ conocidos y comprobando el código de salida, no solo el contenido.
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -25,7 +26,7 @@ def write(directory: Path, name: str, text: str) -> Path:
 
 def run(
     tmp_path: Path, text: str, *extra: str, second: str | None = None
-) -> tuple[int, dict[str, object]]:
+) -> tuple[int, dict[str, Any]]:
     source = write(tmp_path, "manual.md", text)
     out = tmp_path / "reporte.json"
     argv = ["--input", str(source), "--out", str(out), "--title", "Manual de ejemplo"]
@@ -43,7 +44,7 @@ def run(
         *extra,
     ]
     code = main(argv)
-    report = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
+    report: dict[str, Any] = json.loads(out.read_text(encoding="utf-8")) if out.exists() else {}
     return code, report
 
 
