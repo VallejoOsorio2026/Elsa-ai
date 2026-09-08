@@ -1,5 +1,6 @@
 """El recorrido del aporte: capacidad, borrador, envío y revisión."""
 
+import json
 from collections.abc import AsyncIterator
 
 import httpx
@@ -607,3 +608,181 @@ async def test_a_decision_cannot_be_repeated(seeded: httpx.AsyncClient) -> None:
     )
     assert again.status_code == 409
     assert again.json()["error"]["code"] == "invalid_contribution_state"
+
+
+# -- Aportar escribiendo, sin audio -------------------------------------
+
+
+async def test_a_contribution_can_be_written_without_recording(
+    seeded: httpx.AsyncClient,
+) -> None:
+    """Aportar conocimiento no es solo por voz."""
+    response = await seeded.post(
+        BASE,
+        data={
+            "title": "",
+            "text": "El rodamiento del rodillo prensa inferior hace ruido al arrancar.",
+        },
+        headers=auth_header(ENGINEER_TOKEN),
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["audio"] is None
+    assert body["transcript_source"] == "written"
+    assert body["transcript_is_simulated"] is False
+    assert body["audio_was_not_transcribed"] is False
+
+
+async def test_written_text_is_not_labelled_as_a_simulated_transcript(
+    seeded: httpx.AsyncClient,
+) -> None:
+    """Lo que escribe una persona no es un marcador, aunque además grabe."""
+    body = (await _create(seeded, title="", audio=b"\x00sonido")).json()
+    assert body["transcript_source"] == "simulated"
+
+    written = (
+        await seeded.post(
+            BASE,
+            data={"title": "", "text": "Fuga de vapor en la junta rotativa."},
+            files=[("audio", ("nota.webm", b"\x00sonido2", "audio/webm"))],
+            headers=auth_header(ENGINEER_TOKEN),
+        )
+    ).json()
+    assert written["transcript_source"] == "written"
+    assert written["transcript_is_simulated"] is False
+    # Pero el audio sigue sin transcribirse, y eso se dice aparte.
+    assert written["audio_was_not_transcribed"] is True
+
+
+async def test_editing_the_placeholder_makes_the_text_the_persons_own(
+    seeded: httpx.AsyncClient,
+) -> None:
+    created = (await _create(seeded)).json()
+    assert created["transcript_is_simulated"] is True
+
+    body = (
+        await seeded.patch(
+            f"{BASE}/{created['id']}",
+            json={"transcript_text": "Lo que dije es que la bomba de aceite vibra."},
+            headers=auth_header(ENGINEER_TOKEN),
+        )
+    ).json()
+    assert body["transcript_source"] == "written"
+    assert body["transcript_is_simulated"] is False
+    assert body["audio_was_not_transcribed"] is True
+
+
+async def test_the_guide_answers_feed_the_extraction(
+    seeded: httpx.AsyncClient,
+) -> None:
+    """«¿En qué parte del equipo?» es justo donde se nombra el componente."""
+    body = (
+        await seeded.post(
+            BASE,
+            data={
+                "title": "",
+                "text": "Se oye un golpeteo constante.",
+                "checklist": json.dumps(
+                    [
+                        {"key": "que_paso", "answer": "Golpeteo constante"},
+                        {"key": "donde", "answer": "Junta rotativa de vapor, sección de secado"},
+                    ]
+                ),
+            },
+            headers=auth_header(ENGINEER_TOKEN),
+        )
+    ).json()
+    detected = {item["key"]: item["detected"] for item in body["normalizations"]}
+    assert detected["componentes"] == "Junta rotativa de vapor"
+    assert detected["subsistemas"] == "Sección de secado"
+    answered = {item["key"]: item["answer"] for item in body["checklist"]}
+    assert answered["que_paso"] == "Golpeteo constante"
+
+
+async def test_a_malformed_checklist_is_refused(seeded: httpx.AsyncClient) -> None:
+    response = await seeded.post(
+        BASE,
+        data={"title": "", "text": "algo", "checklist": "no-es-json"},
+        headers=auth_header(ENGINEER_TOKEN),
+    )
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "invalid_checklist"
+
+
+async def test_unknown_checklist_keys_are_ignored(seeded: httpx.AsyncClient) -> None:
+    """Un cliente no puede inventar preguntas de la guía."""
+    body = (
+        await seeded.post(
+            BASE,
+            data={
+                "title": "",
+                "text": "algo",
+                "checklist": json.dumps([{"key": "inventada", "answer": "x"}]),
+            },
+            headers=auth_header(ENGINEER_TOKEN),
+        )
+    ).json()
+    assert {item["key"] for item in body["checklist"]} == {
+        "que_paso",
+        "donde",
+        "cuando",
+        "condiciones",
+        "accion",
+        "evidencia",
+    }
+
+
+# -- Vista previa de lo entendido ---------------------------------------
+
+
+async def test_the_preview_recognises_without_storing_anything(
+    seeded: httpx.AsyncClient,
+) -> None:
+    before = (await seeded.get(f"{BASE}/mine", headers=auth_header(ENGINEER_TOKEN))).json()
+
+    body = (
+        await seeded.post(
+            f"{BASE}/understanding",
+            json={"text": "El rodamiento del rodillo prensa inferior, SYN-100001, hace ruido."},
+            headers=auth_header(ENGINEER_TOKEN),
+        )
+    ).json()
+    detected = {item["key"]: item["detected"] for item in body["normalizations"]}
+    assert detected["componentes"] == "Rodamiento rodillo prensa inferior"
+    assert detected["codigos_sap"] == "SYN-100001"
+    assert body["has_findings"] is True
+    assert body["is_generated"] is False
+
+    after = (await seeded.get(f"{BASE}/mine", headers=auth_header(ENGINEER_TOKEN))).json()
+    assert after == before, "la vista previa no debe dejar rastro"
+
+
+async def test_the_preview_reports_when_it_recognised_nothing(
+    seeded: httpx.AsyncClient,
+) -> None:
+    body = (
+        await seeded.post(
+            f"{BASE}/understanding",
+            json={"text": "Hoy hizo mucho calor en la planta."},
+            headers=auth_header(ENGINEER_TOKEN),
+        )
+    ).json()
+    assert body["has_findings"] is False
+
+
+async def test_the_preview_requires_the_contributor_capability(
+    seeded: httpx.AsyncClient,
+    contributions: InMemoryContributionsRepository,
+) -> None:
+    await contributions.set_contributor(
+        "00000000-0000-4000-8000-000000000001",
+        domain=DOMAIN,
+        asset_code=ASSET_CODE,
+        enabled=False,
+    )
+    response = await seeded.post(
+        f"{BASE}/understanding",
+        json={"text": "rodamiento"},
+        headers=auth_header(ENGINEER_TOKEN),
+    )
+    assert response.status_code == 403

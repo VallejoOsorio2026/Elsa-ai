@@ -33,6 +33,7 @@ __all__ = [
     "ContributionsRepositoryPort",
     "ContributionsUnavailableError",
     "Normalization",
+    "TranscriptSource",
 ]
 
 
@@ -42,6 +43,30 @@ class ContributionsUnavailableError(Exception):
 
 class ContributionNotFoundError(Exception):
     """El aporte no existe, o no es visible para quien pregunta."""
+
+
+class TranscriptSource(StrEnum):
+    """De dónde salió el texto del aporte.
+
+    Existe porque un solo indicador no distinguía dos cosas que importan por
+    separado: si el texto lo produjo un motor de voz, y si hay un audio que
+    nadie ha transcrito. Cuando la persona escribe encima del marcador, el
+    texto pasa a ser suyo —deja de ser simulado— pero su nota de voz sigue
+    sin transcribirse, y la pantalla de revisión tiene que poder decir las
+    dos cosas.
+    """
+
+    NONE = "none"
+    """No hay texto."""
+
+    WRITTEN = "written"
+    """Lo escribió la persona."""
+
+    SIMULATED = "simulated"
+    """Marcador de posición: no hay motor de voz a texto conectado."""
+
+    RECOGNISED = "recognised"
+    """Lo produjo un motor de voz a texto real. Todavía no ocurre."""
 
 
 class ContributionState(StrEnum):
@@ -132,11 +157,11 @@ class ContributionRecord:
     """
 
     transcript_text: str = ""
-    transcript_is_simulated: bool = True
+    transcript_source: TranscriptSource = TranscriptSource.NONE
     transcript_engine: str | None = None
-    """Bandera y motor de la transcripción. Viajan con el aporte hasta la
-    revisión: quien aprueba tiene que saber si el texto se reconoció o se
-    escribió a mano."""
+    """Origen y motor del texto. Viajan con el aporte hasta la revisión:
+    quien aprueba tiene que saber si el texto se reconoció, lo escribió una
+    persona, o es un marcador."""
 
     transcript_edited: bool = False
     """Cierto si la persona cambió el texto que le propuso el motor."""
@@ -158,6 +183,20 @@ class ContributionRecord:
     """
 
     decision_reason: str | None = None
+
+    @property
+    def transcript_is_simulated(self) -> bool:
+        """Cierto solo si el texto es el marcador, no lo que dijo nadie."""
+        return self.transcript_source is TranscriptSource.SIMULATED
+
+    @property
+    def audio_was_not_transcribed(self) -> bool:
+        """Hay nota de voz pero el texto no salió de ella.
+
+        Es lo que la revisión necesita saber para no dar por hecho que el
+        texto describe lo que se oye en el audio.
+        """
+        return self.audio is not None and self.transcript_source is not TranscriptSource.RECOGNISED
 
     @property
     def is_published_knowledge(self) -> bool:
@@ -184,7 +223,7 @@ class ContributionsRepositoryPort(Protocol):
         title: str,
         title_is_generated: bool = False,
         transcript_text: str,
-        transcript_is_simulated: bool,
+        transcript_source: TranscriptSource,
         transcript_engine: str | None,
         audio: ContributionAudio | None,
         attachments: Sequence[ContributionAttachment] = (),
@@ -213,6 +252,7 @@ class ContributionsRepositoryPort(Protocol):
         title: str | None = None,
         title_is_generated: bool | None = None,
         transcript_text: str | None = None,
+        transcript_source: TranscriptSource | None = None,
         transcript_edited: bool | None = None,
         normalizations: Sequence[Normalization] | None = None,
         checklist: Sequence[ChecklistAnswer] | None = None,

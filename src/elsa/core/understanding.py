@@ -26,6 +26,7 @@ __all__ = [
     "ChecklistItem",
     "ExtractedField",
     "extract",
+    "extraction_source",
 ]
 
 
@@ -235,3 +236,19 @@ def _split_codes(query: Query, bom_items: Sequence[object]) -> tuple[list[str], 
     inside = [code for code in mentioned if code in known]
     outside = [code for code in mentioned if code not in known]
     return inside, outside
+
+
+def extraction_source(text: str | None, answers: Sequence[object] = ()) -> str:
+    """Todo lo que la persona escribió, junto, para buscar en ello.
+
+    La extracción no mira solo el relato: las respuestas de la guía son
+    igual de suyas, y a menudo es en «¿en qué parte del equipo?» donde
+    aparece el nombre del componente. Buscar solo en el relato dejaría fuera
+    justo el campo pensado para nombrarlo.
+
+    No se inventa nada al juntarlas: sigue siendo texto escrito por la
+    persona, y la búsqueda sobre él sigue siendo literal.
+    """
+    pieces = [normalize_text(text)]
+    pieces.extend(normalize_text(getattr(answer, "answer", None)) for answer in answers)
+    return " ".join(piece for piece in pieces if piece)

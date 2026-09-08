@@ -19,7 +19,9 @@ bloque no introduce. Lo que sí se comprueba de verdad es el tamaño en bytes.
 Queda anotado como límite conocido.
 """
 
+import json
 import logging
+from collections.abc import Mapping, Sequence
 
 from fastapi import APIRouter, Depends, File, Form, Path, Request, UploadFile, status
 from fastapi.responses import Response
@@ -53,7 +55,7 @@ from elsa.core.contributions import (
 )
 from elsa.core.normalization import normalize_text
 from elsa.core.review import ReviewerCapability, can_review
-from elsa.core.understanding import CHECKLIST, extract
+from elsa.core.understanding import CHECKLIST, extract, extraction_source
 from elsa.logging import get_request_id
 from elsa.ports.artifact_storage import (
     ArtifactAlreadyExistsError,
@@ -70,6 +72,7 @@ from elsa.ports.contributions import (
     ContributionsRepositoryPort,
     ContributionState,
     Normalization,
+    TranscriptSource,
 )
 from elsa.ports.knowledge import KnowledgeRepositoryPort, TechnicalAssetRecord
 from elsa.ports.transcription import TranscriptionPort, TranscriptionUnavailableError
@@ -174,7 +177,9 @@ class ContributionView(BaseModel):
     decision_reason: str | None = None
 
     transcript_text: str
+    transcript_source: str
     transcript_is_simulated: bool
+    audio_was_not_transcribed: bool = False
     transcript_engine: str | None = None
     transcript_edited: bool
     audio: AudioView | None = None
@@ -193,6 +198,26 @@ class UpdateDraftRequest(BaseModel):
     transcript_text: str | None = Field(default=None, max_length=20000)
     normalizations: list[NormalizationInput] | None = None
     checklist: list[ChecklistAnswerInput] | None = None
+
+
+class UnderstandingRequest(BaseModel):
+    """Lo que la persona lleva escrito hasta ahora."""
+
+    text: str = Field(default="", max_length=20000)
+    checklist: list[ChecklistAnswerInput] = Field(default_factory=list)
+
+
+class UnderstandingResponse(BaseModel):
+    """Lo reconocido en ese texto, sin guardar nada."""
+
+    engine: str = "literal_match"
+    is_generated: bool = False
+    """Falso siempre: ningún campo lo redacta un modelo."""
+
+    has_findings: bool
+    """Si algo del BOM publicado apareció en el texto."""
+
+    normalizations: list[NormalizationView] = Field(default_factory=list)
 
 
 class DecisionRequest(BaseModel):
@@ -226,7 +251,9 @@ def _view(record: ContributionRecord, *, viewer_id: str, is_reviewer: bool) -> C
         decided_by_name=record.decided_by_name,
         decision_reason=record.decision_reason,
         transcript_text=record.transcript_text,
+        transcript_source=record.transcript_source.value,
         transcript_is_simulated=record.transcript_is_simulated,
+        audio_was_not_transcribed=record.audio_was_not_transcribed,
         transcript_engine=record.transcript_engine,
         transcript_edited=record.transcript_edited,
         audio=(
@@ -341,10 +368,15 @@ async def _published_context(
 
 
 def _initial_normalizations(
-    text: str, *, asset: TechnicalAssetRecord, bom: object, modes: object
+    text: str,
+    *,
+    asset: TechnicalAssetRecord,
+    bom: object,
+    modes: object,
+    checklist: Sequence[ChecklistAnswer] = (),
 ) -> tuple[Normalization, ...]:
     fields = extract(
-        text,
+        extraction_source(text, checklist),
         asset_name=asset.name,
         bom_items=bom,  # type: ignore[arg-type]
         failure_modes=modes,  # type: ignore[arg-type]
@@ -362,8 +394,89 @@ def _initial_normalizations(
     )
 
 
-def _initial_checklist() -> tuple[ChecklistAnswer, ...]:
-    return tuple(ChecklistAnswer(key=item.key, question=item.question) for item in CHECKLIST)
+def _initial_checklist(
+    answers: Mapping[str, str | None] | None = None,
+) -> tuple[ChecklistAnswer, ...]:
+    """La guía completa, con las respuestas que ya vengan puestas."""
+    given = answers or {}
+    return tuple(
+        ChecklistAnswer(
+            key=item.key,
+            question=item.question,
+            answer=normalize_text(given.get(item.key)),
+            checked=bool(normalize_text(given.get(item.key))),
+        )
+        for item in CHECKLIST
+    )
+
+
+def _parse_checklist(raw: str) -> dict[str, str | None]:
+    """Lee las respuestas de la guía que viajan como JSON en el formulario.
+
+    El aporte se envía como `multipart` porque lleva audio y archivos, y en
+    un formulario no cabe una estructura anidada. Se acepta solo la forma
+    esperada —una lista de ``{key, answer}`` con claves conocidas— y todo lo
+    demás se descarta: un cliente que mande basura no debe poder escribir
+    campos que la guía no contempla.
+    """
+    if not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "The checklist must be valid JSON.",
+            code="invalid_checklist",
+        ) from None
+    if not isinstance(parsed, list):
+        raise ApiError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "The checklist must be a list of answers.",
+            code="invalid_checklist",
+        )
+
+    known = {item.key for item in CHECKLIST}
+    answers: dict[str, str | None] = {}
+    for entry in parsed:
+        if not isinstance(entry, dict):
+            continue
+        key = entry.get("key")
+        answer = entry.get("answer")
+        if key in known and (answer is None or isinstance(answer, str)):
+            answers[key] = None if answer is None else answer[:2000]
+    return answers
+
+
+def _has_content(record: ContributionRecord, incoming: TranscriptSource | None) -> bool:
+    """Si el texto que se va a analizar dice algo de verdad.
+
+    Un marcador de transcripción no es contenido: extraer de él produciría
+    hallazgos que nadie ha dicho.
+    """
+    source = incoming if incoming is not None else record.transcript_source
+    return source is not TranscriptSource.SIMULATED
+
+
+def _merged_checklist(
+    record: ContributionRecord, incoming: list[ChecklistAnswerInput] | None
+) -> list[ChecklistAnswer]:
+    """Las respuestas guardadas, con las que llegan puestas encima.
+
+    Se recorre la guía almacenada, no lo que manda el cliente: así una
+    pregunta no puede aparecer, desaparecer ni cambiar de enunciado desde
+    fuera.
+    """
+    given = {item.key: item for item in (incoming or [])}
+    return [
+        ChecklistAnswer(
+            key=item.key,
+            question=item.question,
+            answer=(normalize_text(given[item.key].answer) if item.key in given else item.answer),
+            checked=given[item.key].checked if item.key in given else item.checked,
+        )
+        for item in record.checklist
+    ]
 
 
 def _resolve_title(
@@ -547,10 +660,60 @@ async def list_decided(
 # ---------------------------------------------------------------------
 
 
+@router.post("/understanding", response_model=UnderstandingResponse)
+async def preview_understanding(
+    payload: UnderstandingRequest,
+    asset_record: TechnicalAssetRecord = Depends(resolve_asset),
+    _principal: Principal = Depends(RequireContributor()),
+    knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
+) -> UnderstandingResponse:
+    """Qué reconoce ELSA en lo escrito, **sin crear ni guardar nada**.
+
+    Existe para que la interfaz pueda enseñar lo entendido mientras la
+    persona escribe, en vez de obligarla a enviar primero y descubrir
+    después qué se reconoció. No deja rastro: ni borrador, ni archivo, ni
+    registro.
+
+    Es la **misma** extracción literal que se guarda al crear el aporte, no
+    una aproximación aparte: si aquí aparece un componente, es el que
+    quedará escrito.
+    """
+    bom, modes = await _published_context(knowledge, asset_record)
+    answers = _initial_checklist(
+        {item.key: item.answer for item in payload.checklist},
+    )
+    fields = _initial_normalizations(
+        payload.text,
+        asset=asset_record,
+        bom=bom,
+        modes=modes,
+        checklist=answers,
+    )
+    views = [
+        NormalizationView(
+            key=field.key,
+            label=field.label,
+            detected=field.detected,
+            value=field.value,
+            kind=field.kind,
+            matched_in_bom=field.matched_in_bom,
+            edited=False,
+        )
+        for field in fields
+    ]
+    # `equipo` sale siempre del alcance, así que no cuenta como hallazgo: si
+    # contara, la pantalla se abriría diciendo que entendió algo sin haber
+    # leído nada.
+    has_findings = any(field.detected for field in fields if field.key not in {"equipo", "resumen"})
+    return UnderstandingResponse(has_findings=has_findings, normalizations=views)
+
+
 @router.post("", response_model=ContributionView, status_code=status.HTTP_201_CREATED)
 async def create_contribution(
     request: Request,
     title: str = Form(default="", max_length=_MAX_TITLE),
+    text: str = Form(default="", max_length=20000),
+    checklist: str = Form(default=""),
     audio: UploadFile | None = File(default=None),
     audio_duration_seconds: float = Form(default=0.0),
     attachments: list[UploadFile] = File(default=[]),
@@ -587,7 +750,7 @@ async def create_contribution(
 
     stored_audio: ContributionAudio | None = None
     transcript_text = ""
-    is_simulated = True
+    source = TranscriptSource.NONE
     engine: str | None = None
 
     if audio is not None and audio.filename:
@@ -615,8 +778,19 @@ async def create_contribution(
                     code="transcription_unavailable",
                 ) from None
             transcript_text = result.text
-            is_simulated = result.is_simulated
+            source = (
+                TranscriptSource.SIMULATED if result.is_simulated else TranscriptSource.RECOGNISED
+            )
             engine = result.engine
+
+    # Lo que escribió la persona manda sobre cualquier marcador. Si además
+    # grabó, el audio queda como evidencia y así se dice: no se ha
+    # transcrito, y el texto es suyo, no de una máquina.
+    written = normalize_text(text)
+    if written:
+        transcript_text = written
+        source = TranscriptSource.WRITTEN
+        engine = None
 
     stored_attachments: list[ContributionAttachment] = []
     budget = settings.contribution_max_attachment_bytes
@@ -646,12 +820,15 @@ async def create_contribution(
     # indistinguibles. Cuando el que llega es un marcador, ELSA compone uno
     # con lo que el aporte ya contiene; recién creado eso todavía es poco, y
     # el rótulo numerado es el fallback honesto.
-    checklist = _initial_checklist()
+    answers = _initial_checklist(_parse_checklist(checklist))
     normalizations = _initial_normalizations(
-        transcript_text if not is_simulated else "",
+        # Un marcador de transcripción no es contenido: extraer de él
+        # produciría hallazgos que nadie ha dicho.
+        transcript_text if source is not TranscriptSource.SIMULATED else "",
         asset=asset_record,
         bom=bom,
         modes=modes,
+        checklist=answers,
     )
     generated = is_placeholder_title(title)
     if generated:
@@ -661,7 +838,7 @@ async def create_contribution(
             asset_code=asset_record.code,
         )
         resolved_title = derive_title(
-            normalizations=normalizations, checklist=checklist
+            normalizations=normalizations, checklist=answers
         ) or neutral_title(len(previous) + 1)
     else:
         resolved_title = normalize_text(title) or ""
@@ -674,12 +851,12 @@ async def create_contribution(
         title=resolved_title,
         title_is_generated=generated,
         transcript_text=transcript_text,
-        transcript_is_simulated=is_simulated,
+        transcript_source=source,
         transcript_engine=engine,
         audio=stored_audio,
         attachments=stored_attachments,
         normalizations=normalizations,
-        checklist=checklist,
+        checklist=answers,
     )
     _logger.info(
         "contribution drafted",
@@ -749,15 +926,35 @@ async def update_contribution(
     normalizations: list[Normalization] | None = None
     transcript_edited: bool | None = None
     text = record.transcript_text
+    transcript_source: TranscriptSource | None = None
     if payload.transcript_text is not None:
         text = payload.transcript_text
         transcript_edited = True
+        # Escribir encima del marcador convierte el texto en suyo. El audio,
+        # en cambio, sigue sin transcribirse, y eso lo dice
+        # `audio_was_not_transcribed`, no esta bandera.
+        transcript_source = (
+            TranscriptSource.WRITTEN if normalize_text(text) else TranscriptSource.NONE
+        )
 
-    if payload.transcript_text is not None or payload.normalizations is not None:
+    if (
+        payload.transcript_text is not None
+        or payload.normalizations is not None
+        or payload.checklist is not None
+    ):
         bom, modes = await _published_context(knowledge, asset_record)
+        # La guía alimenta la extracción igual que el relato, así que cambiar
+        # una respuesta tiene que volver a mirarla.
+        source_checklist = _merged_checklist(record, payload.checklist)
         fresh = {
             item.key: item
-            for item in _initial_normalizations(text, asset=asset_record, bom=bom, modes=modes)
+            for item in _initial_normalizations(
+                text if _has_content(record, transcript_source) else "",
+                asset=asset_record,
+                bom=bom,
+                modes=modes,
+                checklist=source_checklist,
+            )
         }
         overrides = {item.key: item.value for item in (payload.normalizations or [])}
         merged: list[Normalization] = []
@@ -782,20 +979,7 @@ async def update_contribution(
             )
         normalizations = merged
 
-    checklist: list[ChecklistAnswer] | None = None
-    if payload.checklist is not None:
-        answers = {item.key: item for item in payload.checklist}
-        checklist = [
-            ChecklistAnswer(
-                key=item.key,
-                question=item.question,
-                answer=(
-                    normalize_text(answers[item.key].answer) if item.key in answers else item.answer
-                ),
-                checked=answers[item.key].checked if item.key in answers else item.checked,
-            )
-            for item in record.checklist
-        ]
+    checklist = None if payload.checklist is None else _merged_checklist(record, payload.checklist)
 
     # El título solo se recompone si lo compuso ELSA. Uno escrito por una
     # persona se respeta aunque después llegue mejor información: decidir por
@@ -813,6 +997,7 @@ async def update_contribution(
             title=title,
             title_is_generated=title_is_generated,
             transcript_text=payload.transcript_text,
+            transcript_source=transcript_source,
             transcript_edited=transcript_edited,
             normalizations=normalizations,
             checklist=checklist,

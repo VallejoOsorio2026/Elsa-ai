@@ -26,6 +26,7 @@ from elsa.ports.contributions import (
     ContributionRecord,
     ContributionState,
     Normalization,
+    TranscriptSource,
 )
 
 
@@ -81,7 +82,7 @@ class InMemoryContributionsRepository:
         author_name: str | None,
         title: str,
         transcript_text: str,
-        transcript_is_simulated: bool,
+        transcript_source: TranscriptSource,
         transcript_engine: str | None,
         audio: ContributionAudio | None,
         title_is_generated: bool = False,
@@ -101,7 +102,7 @@ class InMemoryContributionsRepository:
             state=ContributionState.DRAFT,
             created_at=datetime.now(tz=UTC),
             transcript_text=transcript_text,
-            transcript_is_simulated=transcript_is_simulated,
+            transcript_source=transcript_source,
             transcript_engine=transcript_engine,
             audio=audio,
             attachments=tuple(attachments),
@@ -119,6 +120,7 @@ class InMemoryContributionsRepository:
         title: str | None = None,
         title_is_generated: bool | None = None,
         transcript_text: str | None = None,
+        transcript_source: TranscriptSource | None = None,
         transcript_edited: bool | None = None,
         normalizations: Sequence[Normalization] | None = None,
         checklist: Sequence[ChecklistAnswer] | None = None,
@@ -137,6 +139,9 @@ class InMemoryContributionsRepository:
                 ),
                 transcript_text=(
                     current.transcript_text if transcript_text is None else transcript_text
+                ),
+                transcript_source=(
+                    current.transcript_source if transcript_source is None else transcript_source
                 ),
                 transcript_edited=(
                     current.transcript_edited if transcript_edited is None else transcript_edited

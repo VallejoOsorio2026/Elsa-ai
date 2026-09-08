@@ -17,6 +17,7 @@ from elsa.ports.contributions import (
     ContributionRecord,
     ContributionsRepositoryPort,
     ContributionState,
+    TranscriptSource,
 )
 
 pytestmark = pytest.mark.anyio
@@ -38,7 +39,7 @@ async def _draft(repo: InMemoryContributionsRepository, **overrides: object) -> 
         "author_name": "Autor",
         "title": "Ruido en la prensa",
         "transcript_text": "hay un ruido",
-        "transcript_is_simulated": True,
+        "transcript_source": TranscriptSource.SIMULATED,
         "transcript_engine": "simulated",
         "audio": None,
     }
@@ -222,3 +223,53 @@ async def test_a_blank_answer_does_not_count(repo: InMemoryContributionsReposito
         ],
     )
     assert "que_paso" in check.missing
+
+
+# -- Origen del texto ---------------------------------------------------
+
+
+async def test_a_placeholder_is_the_only_thing_that_counts_as_simulated(
+    repo: InMemoryContributionsRepository,
+) -> None:
+    record = await _draft(repo, transcript_source=TranscriptSource.SIMULATED)
+    assert record.transcript_is_simulated is True
+
+    written = await _draft(repo, transcript_source=TranscriptSource.WRITTEN)
+    assert written.transcript_is_simulated is False
+
+
+async def test_an_untranscribed_voice_note_is_reported_even_if_the_text_is_written(
+    repo: InMemoryContributionsRepository,
+) -> None:
+    """Escribir el relato no convierte el audio en transcrito.
+
+    Son dos hechos distintos, y la revisión necesita los dos: el texto lo
+    escribió una persona, y nadie ha comprobado que el audio diga eso.
+    """
+    record = await _draft(
+        repo,
+        transcript_source=TranscriptSource.WRITTEN,
+        audio=ContributionAudio(storage_key="k", byte_size=10, duration_seconds=5.0),
+    )
+    assert record.transcript_is_simulated is False
+    assert record.audio_was_not_transcribed is True
+
+
+async def test_without_audio_there_is_nothing_untranscribed(
+    repo: InMemoryContributionsRepository,
+) -> None:
+    record = await _draft(repo, transcript_source=TranscriptSource.WRITTEN, audio=None)
+    assert record.audio_was_not_transcribed is False
+
+
+async def test_editing_the_text_changes_its_source(
+    repo: InMemoryContributionsRepository,
+) -> None:
+    record = await _draft(repo, transcript_source=TranscriptSource.SIMULATED)
+    updated = await repo.update_draft(
+        record.id,
+        transcript_text="Lo que dije fue que el rodamiento hace ruido",
+        transcript_source=TranscriptSource.WRITTEN,
+    )
+    assert updated.transcript_source is TranscriptSource.WRITTEN
+    assert updated.transcript_is_simulated is False
