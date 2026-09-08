@@ -159,6 +159,7 @@ uv run pre-commit install
 | [`docs/contributing.md`](docs/contributing.md) | Convención de commits y flujo de trabajo |
 | [`docs/demo-runbook.md`](docs/demo-runbook.md) | Cómo levantar y enseñar el piloto, y qué falta para HTTPS |
 | [`docs/brand/`](docs/brand/) | Identidad visual PAPELSA: guía de marca, design tokens y reglas de interfaz |
+| [`docs/brand/UI_BACKLOG_CLAUDE_DESIGN.md`](docs/brand/UI_BACKLOG_CLAUDE_DESIGN.md) | Pendientes visuales reservados para el futuro ELSA Design System |
 | [`docs/adr/`](docs/adr/) | Decisiones arquitectónicas registradas (ADR) |
 
 ## Estructura del repositorio

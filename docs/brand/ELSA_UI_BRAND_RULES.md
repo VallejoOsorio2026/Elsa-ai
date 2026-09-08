@@ -7,6 +7,7 @@ marcada como decisión de producto.
 - Norma de marca: [`PAPELSA_BRAND_GUIDE.md`](PAPELSA_BRAND_GUIDE.md)
 - Valores en código: [`DESIGN_TOKENS.md`](DESIGN_TOKENS.md)
 - Assets: [`../../assets/brand/`](../../assets/brand/)
+- Pendientes de diseño: [`UI_BACKLOG_CLAUDE_DESIGN.md`](UI_BACKLOG_CLAUDE_DESIGN.md)
 
 Regla de precedencia: **ante cualquier conflicto, manda el Manual de Marca.** Si
 una necesidad de interfaz sólo puede resolverse contradiciendo el manual, no se
@@ -354,3 +355,17 @@ Antes de dar por buena una pantalla:
 - [ ] `Tab` recorre el flujo en orden y `Shift+Tab` lo mismo a la inversa (§7).
 - [ ] Ningún control alcanzable con `Tab` es invisible.
 - [ ] Sin slogan.
+
+---
+
+## 10. Lo que este documento todavía no resuelve
+
+Estas reglas dicen **cómo aplicar la marca**, no **cómo se ve cada componente**.
+El sistema visual —variantes de botón, estados, iconografía, densidad, estados
+vacíos y catálogo de componentes— está pendiente y se aborda en una fase
+posterior con Claude Design.
+
+El inventario de ese trabajo, con lo que existe hoy y lo que falta en cada
+punto, está en [`UI_BACKLOG_CLAUDE_DESIGN.md`](UI_BACKLOG_CLAUDE_DESIGN.md).
+No se aborda nada de allí sin autorización: no es deuda pendiente de tapar,
+es una fase con alcance propio.
