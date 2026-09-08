@@ -147,8 +147,8 @@ descuidado no las rompa en silencio.
 
 ### 4.1 Pasos en Render
 
-1. Empujar la rama `claude/bloque-3-papelsa-brand-mf5nfm` (ya está en
-   `origin`).
+1. Tener en `main` lo que se va a enseñar: el blueprint despliega desde
+   `main`, no desde ninguna rama de trabajo.
 2. En <https://dashboard.render.com>, crear cuenta o entrar, y autorizar el
    acceso a GitHub para el repositorio `VallejoOsorio2026/Elsa-ai`. Basta con
    dar acceso a ese repositorio; no hace falta a toda la organización.
@@ -172,7 +172,7 @@ Sin blueprint, en **New → Web Service**, con estos valores exactos:
 | Campo | Valor |
 |---|---|
 | Repository | `VallejoOsorio2026/Elsa-ai` |
-| Branch | `claude/bloque-3-papelsa-brand-mf5nfm` |
+| Branch | `main` |
 | Language / Runtime | Python 3 |
 | Build Command | `pip install uv && uv sync --frozen --no-dev` |
 | Start Command | `.venv/bin/uvicorn elsa.main:create_app --factory --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips '*'` |

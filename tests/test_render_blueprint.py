@@ -140,9 +140,15 @@ def test_the_health_check_is_liveness_not_readiness(service: dict[str, Any]) -> 
     assert str(service["healthCheckPath"]).endswith("/live")
 
 
-def test_the_demo_deploys_the_pilot_branch(service: dict[str, Any]) -> None:
-    """`main` todavía no tiene la interfaz: desplegarla daría una API pelada."""
-    assert service["branch"] not in {None, "", "main"}
+def test_the_demo_deploys_the_branch_that_carries_the_interface(
+    service: dict[str, Any],
+) -> None:
+    """Antes era la rama del piloto, porque `main` no tenía todavía la
+    interfaz y desplegarla habría dado una API pelada. Esa rama ya se fusionó,
+    y una rama fusionada no vuelve a moverse: apuntar ahí serviría para
+    siempre la misma copia congelada.
+    """
+    assert service["branch"] == "main"
 
 
 def test_the_declared_origin_is_https_and_explicit(service: dict[str, Any]) -> None:

@@ -22,7 +22,12 @@ services:
     runtime: python
     plan: free
     region: oregon
-    branch: claude/bloque-3-papelsa-brand-mf5nfm
+
+    # La rama del piloto se fusionó a `main`, así que la demostración se
+    # despliega desde `main`. Dejarla apuntando a la rama fusionada haría
+    # que el servicio siguiera sirviendo una copia congelada, sorda a todo
+    # lo que entre después.
+    branch: main
 
     # `uv` es el gestor de dependencias del proyecto (CLAUDE.md §3) y aquí se
     # respeta: `--frozen` instala exactamente lo que fija uv.lock, sin
