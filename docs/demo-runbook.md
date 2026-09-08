@@ -7,6 +7,13 @@ exactamente para tenerla en una URL HTTPS pública.
 > el BOM, el AMEF y los códigos de material están inventados. Nada procede de
 > la Planta Molino Barbosa.
 
+**Tampella es dato de la demostración, no un supuesto del sistema.** Vive
+únicamente en `src/elsa/demo/seed.py`, que solo se ejecuta con
+`ELSA_DEMO_SEED` en DEV y sobre almacenes en memoria. La interfaz no lo
+conoce: pregunta a `GET /api/v1/assets` qué equipos autoriza el modelo de
+permisos y actúa según la respuesta —si hay uno, lo toma; si hay varios, pide
+elegir y recuerda la elección; si no hay ninguno, lo dice—.
+
 ---
 
 ## 1. La ruta más corta: en el propio equipo
@@ -39,6 +46,9 @@ comportarse igual (usan las mismas API estándar), pero no se han verificado.
 ### Qué se puede enseñar
 
 Entrando como cada una de las cuatro personas de la pantalla de acceso:
+
+Con un único equipo autorizado —el caso de la demostración— el selector no
+aparece: se elige solo, porque no hay nada que preguntar.
 
 | Persona | Consultar | Aportar | Revisar |
 |---|---|---|---|

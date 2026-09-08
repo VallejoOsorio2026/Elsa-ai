@@ -12,10 +12,15 @@ import { api, getToken, setToken } from './api.js';
 export const state = {
   context: null,
   me: null,
+  /** Equipos que el backend autoriza a esta persona. */
+  assets: [],
   scope: null,
   asset: null,
   capability: null,
 };
+
+/** Dónde se recuerda el último equipo elegido, por persona. */
+const SCOPE_KEY = 'elsa.scope';
 
 const listeners = new Set();
 
@@ -44,27 +49,82 @@ export async function loadIdentity() {
     }
     throw error;
   }
-  state.scope = pickScope(state.me);
   return true;
 }
 
 /**
- * Alcance de trabajo del piloto.
+ * Equipos autorizados, según el backend.
  *
- * El piloto está limitado al equipo Tampella (CLAUDE.md §1), así que se
- * elige el primer alcance que lo cubra. Un alcance de dominio completo
- * (equipment nulo) también lo cubre.
+ * El alcance **no se supone**: se pregunta. La interfaz no sabe qué equipos
+ * existen ni cuáles puede ver esta persona hasta que el servidor se lo dice,
+ * y ese cruce lo hace el modelo de permisos, no un valor escrito en el
+ * cliente.
  */
-export function pickScope(me) {
-  if (!me || !me.scopes || me.scopes.length === 0) return null;
-  const preferred = me.scopes.find((scope) => scope.equipment === 'tampella');
-  const domainWide = me.scopes.find((scope) => !scope.equipment);
-  const chosen = preferred || domainWide || me.scopes[0];
-  return {
-    domain: chosen.domain,
-    asset: chosen.equipment || 'tampella',
-    domainWide: !chosen.equipment,
-  };
+export async function loadAssets() {
+  try {
+    state.assets = await api.request('/assets');
+  } catch {
+    state.assets = [];
+  }
+  return state.assets;
+}
+
+function rememberedCode() {
+  if (!state.me) return null;
+  try {
+    return sessionStorage.getItem(`${SCOPE_KEY}.${state.me.external_user_id}`);
+  } catch {
+    return null;
+  }
+}
+
+function remember(code) {
+  if (!state.me) return;
+  try {
+    sessionStorage.setItem(`${SCOPE_KEY}.${state.me.external_user_id}`, code);
+  } catch {
+    /* Almacenamiento bloqueado: la elección dura lo que dure la página. */
+  }
+}
+
+/**
+ * Fija el alcance de trabajo a partir de lo que el backend autorizó.
+ *
+ * - Ningún equipo: no hay alcance, y la interfaz lo dice.
+ * - Uno solo: se elige solo, porque no hay nada que preguntar.
+ * - Varios: se recupera el último elegido si sigue autorizado; si no, hay
+ *   que escoger. Recordar una elección **no** la autoriza: siempre se valida
+ *   contra la lista que acaba de dar el servidor.
+ */
+export function resolveScope() {
+  const assets = state.assets;
+  if (assets.length === 0) {
+    state.scope = null;
+    return null;
+  }
+  if (assets.length === 1) return applyScope(assets[0]);
+
+  const remembered = assets.find((asset) => asset.code === rememberedCode());
+  if (remembered) return applyScope(remembered);
+
+  state.scope = null;
+  return null;
+}
+
+function applyScope(asset) {
+  state.scope = { domain: asset.domain, asset: asset.code, name: asset.name };
+  return state.scope;
+}
+
+/** Cambia de equipo entre los autorizados y recarga su contexto. */
+export async function selectAsset(code) {
+  const asset = state.assets.find((item) => item.code === code);
+  if (!asset) return false;
+  applyScope(asset);
+  remember(asset.code);
+  await loadAsset();
+  await loadCapability();
+  return true;
 }
 
 /**
@@ -133,6 +193,7 @@ export async function switchDemoIdentity(token) {
 
   setToken(token);
   state.me = null;
+  state.assets = [];
   state.scope = null;
   state.asset = null;
   state.capability = null;
@@ -141,14 +202,20 @@ export async function switchDemoIdentity(token) {
     setToken(null);
     return false;
   }
-  await loadAsset();
-  await loadCapability();
+  // Otra persona, otros permisos: los equipos se vuelven a preguntar.
+  await loadAssets();
+  resolveScope();
+  if (state.scope) {
+    await loadAsset();
+    await loadCapability();
+  }
   return true;
 }
 
 export function signOut() {
   setToken(null);
   state.me = null;
+  state.assets = [];
   state.scope = null;
   state.asset = null;
   state.capability = null;

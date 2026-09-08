@@ -14,9 +14,12 @@ import { getToken, setToken } from './api.js';
 import {
   activeDemoIdentity,
   loadAsset,
+  loadAssets,
   loadCapability,
   loadContext,
   loadIdentity,
+  resolveScope,
+  selectAsset,
   signOut,
   state,
   subscribe,
@@ -292,10 +295,7 @@ export function buildContextBar() {
   const scope = state.scope;
   const asset = state.asset;
   const item = (term, value) =>
-    el('div', { class: 'context-item' }, [
-      el('dt', { text: term }),
-      el('dd', { text: value }),
-    ]);
+    el('div', { class: 'context-item' }, [el('dt', { text: term }), el('dd', { text: value })]);
 
   // La API devuelve su etiqueta de fuente en inglés; la interfaz habla
   // español, así que el rótulo se compone aquí con los datos, no con texto
@@ -305,10 +305,76 @@ export function buildContextBar() {
     published = `BOM publicado · ${asset.components} componentes en ${asset.subsystems} subsistemas`;
   }
 
+  const equipment =
+    state.assets.length > 1
+      ? el('div', { class: 'context-item' }, [
+          el('dt', {}, [el('label', { for: 'equipo-activo', text: 'Equipo' })]),
+          el('dd', {}, [buildAssetPicker()]),
+        ])
+      : item('Equipo', asset ? asset.name : scope?.name || scope?.asset || '—');
+
   return el('dl', { class: 'context-bar' }, [
-    item('Equipo', asset ? asset.name : scope?.asset || '—'),
+    equipment,
     item('Dominio', scope?.domain || '—'),
     item('Conocimiento vigente', published),
+  ]);
+}
+
+/** Selector de equipo, solo entre los que el backend autorizó. */
+function buildAssetPicker() {
+  const select = el('select', {
+    id: 'equipo-activo',
+    onChange: async (event) => {
+      const code = event.target.value;
+      if (await selectAsset(code)) {
+        announce(`Ahora trabajas sobre ${state.scope.name}.`);
+        render();
+      }
+    },
+  });
+  for (const asset of state.assets) {
+    const option = el('option', { value: asset.code, text: asset.name });
+    if (asset.code === state.scope?.asset) option.selected = true;
+    select.append(option);
+  }
+  return select;
+}
+
+/**
+ * Pantalla de elección cuando hay varios equipos y ninguno elegido.
+ *
+ * No se escoge uno por la interfaz: cuál es «el» equipo de alguien con varios
+ * alcances no lo puede decidir el cliente.
+ */
+function buildAssetChoice() {
+  return el('div', { class: 'card stack' }, [
+    el('h2', { text: 'Elige el equipo' }),
+    el('p', {
+      class: 'muted',
+      text: 'Tienes alcance sobre varios equipos. Elige sobre cuál vas a trabajar; se recordará mientras dure la sesión.',
+    }),
+    el(
+      'ul',
+      { class: 'identity-list' },
+      state.assets.map((asset) =>
+        el('li', {}, [
+          el(
+            'button',
+            {
+              class: 'identity-btn',
+              type: 'button',
+              onClick: async () => {
+                if (await selectAsset(asset.code)) render();
+              },
+            },
+            [
+              el('strong', { text: asset.name }),
+              el('span', { class: 'muted', text: `Dominio: ${asset.domain}` }),
+            ],
+          ),
+        ]),
+      ),
+    ),
   ]);
 }
 
@@ -353,11 +419,14 @@ export function render() {
 
   if (!state.scope) {
     outlet.append(
-      notice(
-        'warn',
-        'Tu cuenta está activa pero todavía no tiene ningún equipo asignado. ' +
-          'Un administrador de ELSA debe concederte alcance antes de que puedas consultar nada.',
-      ),
+      state.assets.length > 1
+        ? buildAssetChoice()
+        : notice(
+            'warn',
+            'Tu cuenta está activa pero todavía no tiene ningún equipo asignado. ' +
+              'Un administrador de ELSA debe concederte alcance antes de que puedas ' +
+              'consultar nada.',
+          ),
     );
     return;
   }
@@ -396,8 +465,12 @@ async function boot() {
     }
     if (!valid) setToken(null);
     else {
-      await loadAsset();
-      await loadCapability();
+      await loadAssets();
+      resolveScope();
+      if (state.scope) {
+        await loadAsset();
+        await loadCapability();
+      }
     }
   }
 

@@ -334,6 +334,19 @@ la **declaración** de los adjuntos —para poder aplicar los límites en el
 servidor— pero no los archivos, así que no hay camino por el que puedan
 almacenarse.
 
+### El activo lo deciden los permisos
+
+La interfaz no sabe sobre qué equipo trabaja hasta que el backend se lo dice.
+`GET /api/v1/assets` cruza el catálogo de activos con los permisos de quien
+pregunta y devuelve solo los autorizados; el cliente toma el único que haya,
+o pide elegir entre varios y recuerda la elección **validándola** contra esa
+lista en cada arranque. Recordar no autoriza.
+
+Tampella es dato de la demostración —vive en `elsa.demo.seed`— y no aparece
+en ninguna lógica reutilizable. Un valor de equipo escrito en el cliente
+funciona mientras haya un solo equipo y es falso en cuanto haya dos, una
+segunda planta o un usuario con otro alcance.
+
 ### Lo simulado se declara
 
 Dos capacidades del piloto no existen todavía, y ninguna se disfraza:

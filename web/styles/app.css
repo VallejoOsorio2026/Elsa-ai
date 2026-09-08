@@ -1057,3 +1057,13 @@
 }
 
 .governance-arrow { color: var(--elsa-texto-secundario); }
+
+/* El equipo puede ser un selector cuando hay varios autorizados. */
+.context-item select {
+  min-height: 40px;
+  padding: var(--elsa-espacio-1) var(--elsa-espacio-2);
+  font-weight: 600;
+  max-width: 100%;
+}
+
+.context-item dt label { margin: 0; font: inherit; }

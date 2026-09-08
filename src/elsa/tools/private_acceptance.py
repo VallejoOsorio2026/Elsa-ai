@@ -79,7 +79,12 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     # aceptación que se salta media prueba no es una aceptación.
     parser.add_argument("--sap", required=True, type=Path, help="Ruta del HTM exportado de SAP")
     parser.add_argument("--out", type=Path, default=_DEFAULT_OUT, help="Ruta del reporte")
-    parser.add_argument("--asset-code", default="tampella")
+    # Obligatoria: el activo lo nombra quien ejecuta la prueba. Un valor por
+    # defecto convertía a Tampella en el equipo que la herramienta da por
+    # supuesto, y esta herramienta va a servir para cualquier otro.
+    parser.add_argument(
+        "--asset-code", required=True, help="Codigo del activo, p. ej. el que use la planta"
+    )
     parser.add_argument("--asset-name", default="Activo tecnico")
     parser.add_argument("--domain", default="mantenimiento")
     parser.add_argument(

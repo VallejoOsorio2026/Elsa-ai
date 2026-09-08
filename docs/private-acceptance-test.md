@@ -38,6 +38,7 @@ git status --short              # debe estar vacío ANTES
 uv run python -m elsa.tools.private_acceptance \
     --engineering "<RUTA LOCAL DEL XLSX>" \
     --sap         "<RUTA LOCAL DEL HTM>" \
+    --asset-code  "<CODIGO DEL ACTIVO>" \
     --artifact-root "<RUTA FUERA DEL REPOSITORIO>/artifacts" \
     --out           "<RUTA FUERA DEL REPOSITORIO>/reporte.json"
 
@@ -45,7 +46,8 @@ echo $?                         # 0 = aceptación correcta
 git status --short              # debe seguir vacío DESPUÉS
 ```
 
-Las rutas se pasan como argumentos. **No se copia nada al repositorio** y el
+El activo se nombra con `--asset-code` y es obligatorio: la herramienta no
+supone ningún equipo concreto. Las rutas se pasan como argumentos. **No se copia nada al repositorio** y el
 reporte se escribe donde indique `--out`; si se omite, va a `acceptance/`,
 que está en `.gitignore`.
 
