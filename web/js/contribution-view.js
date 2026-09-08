@@ -14,6 +14,18 @@ import { fetchBlob } from './api.js';
 import { state } from './state.js';
 import { el, formatBytes, formatDate, formatSeconds, notice } from './ui.js';
 
+/**
+ * El principio que gobierna todo el Centro de Revisión.
+ *
+ * Se declara una sola vez y se repite literalmente allí donde alguien está a
+ * punto de aprobar algo. Que un aporte quede validado y que el equipo tenga
+ * ese conocimiento publicado son dos hechos distintos, y confundirlos es lo
+ * que haría que alguien operara un equipo con algo que nadie ha publicado.
+ */
+export const PUBLISH_RULE =
+  'Aprobar valida el aporte, pero no indica que sea publicado. La publicación es una ' +
+  'decisión posterior e independiente.';
+
 export const STATE_LABEL = {
   draft: 'Borrador',
   pending: 'Pendiente de revisión',
@@ -33,6 +45,59 @@ export function stateTag(contribution) {
     class: `tag ${STATE_CLASS[contribution.state] || 'tag-draft'}`,
     text: STATE_LABEL[contribution.state] || contribution.state,
   });
+}
+
+/**
+ * El camino de un aporte hasta ser conocimiento del equipo, en tres pasos.
+ *
+ * Dibujarlo evita la lectura de que aprobar «ya está»: el tercer paso queda
+ * a la vista, sin alcanzar, con su nombre propio.
+ */
+export function knowledgeJourney(contribution) {
+  const state = contribution.state;
+  const validated = state === 'approved';
+  const rejected = state === 'rejected';
+  const received = state !== 'draft';
+
+  const steps = [
+    {
+      label: 'Aporte recibido',
+      detail: received ? 'Enviado a revisión' : 'Todavía en preparación',
+      status: received ? 'done' : 'pending',
+    },
+    {
+      label: 'Aporte validado',
+      detail: rejected
+        ? 'Rechazado por revisión'
+        : validated
+          ? 'Un revisor lo dio por válido'
+          : 'Esperando a un revisor',
+      status: rejected ? 'rejected' : validated ? 'done' : received ? 'current' : 'pending',
+    },
+    {
+      label: 'Conocimiento publicado',
+      detail: 'Decisión posterior e independiente. No ocurre al aprobar.',
+      status: 'pending',
+    },
+  ];
+
+  return el('div', { class: 'journey' }, [
+    el('h3', { class: 'journey-title', text: 'Del aporte al conocimiento' }),
+    el(
+      'ol',
+      { class: 'journey-steps' },
+      steps.map((step, index) =>
+        el('li', { class: `journey-step is-${step.status}` }, [
+          el('span', { class: 'journey-index', 'aria-hidden': 'true', text: String(index + 1) }),
+          el('span', { class: 'journey-body' }, [
+            el('span', { class: 'journey-label', text: step.label }),
+            el('span', { class: 'journey-detail', text: step.detail }),
+          ]),
+        ]),
+      ),
+    ),
+    el('p', { class: 'journey-rule', text: PUBLISH_RULE }),
+  ]);
 }
 
 /**
@@ -71,6 +136,15 @@ function buildAudio(contribution) {
         `Duración ${formatSeconds(contribution.audio.duration_seconds)} · ` +
         `${formatBytes(contribution.audio.byte_size)}. Grabación real.`,
     }),
+    contribution.audio_was_not_transcribed
+      ? notice(
+          'warn',
+          'Nadie ha transcrito este audio: no hay motor de voz a texto conectado. El texto ' +
+            'del aporte lo escribió una persona, así que no des por hecho que dice lo mismo ' +
+            'que se oye aquí. Escúchalo antes de decidir.',
+          'Sin transcribir',
+        )
+      : null,
     player,
   ]);
 }
@@ -141,18 +215,13 @@ export function contributionDetail(contribution, { actions = null } = {}) {
       contribution.state === 'pending'
         ? notice(
             'info',
-            'Este aporte está pendiente. No forma parte del conocimiento publicado del ' +
+            'Recibido y esperando revisión. No forma parte del conocimiento publicado del ' +
               'equipo y no aparece en las consultas.',
             'Pendiente',
           )
         : null,
       contribution.state === 'approved'
-        ? notice(
-            'success',
-            'Aprobado como válido. Aprobar no lo publica: se incorporará al conocimiento ' +
-              'vigente cuando se publique una versión que lo recoja.',
-            'Aprobado',
-          )
+        ? notice('success', `Validado por revisión. ${PUBLISH_RULE}`, 'Aprobado')
         : null,
       contribution.state === 'rejected'
         ? notice(
@@ -162,6 +231,8 @@ export function contributionDetail(contribution, { actions = null } = {}) {
           )
         : null,
     ]),
+
+    el('div', { class: 'card' }, [knowledgeJourney(contribution)]),
 
     contribution.audio ? buildAudio(contribution) : null,
 

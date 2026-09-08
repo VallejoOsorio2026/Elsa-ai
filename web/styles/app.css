@@ -796,3 +796,104 @@
 }
 
 .decision-head h3 { margin: 0; font-size: var(--elsa-texto-lg); }
+
+/* --- Del aporte al conocimiento --------------------------------------- */
+
+.journey-title {
+  font-size: var(--elsa-texto-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--elsa-texto-secundario);
+  margin-bottom: var(--elsa-espacio-3);
+}
+
+.journey-steps {
+  list-style: none;
+  margin: 0 0 var(--elsa-espacio-3);
+  padding: 0;
+  display: grid;
+  gap: var(--elsa-espacio-2);
+}
+
+@media (min-width: 768px) {
+  .journey-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.journey-step {
+  display: flex;
+  gap: var(--elsa-espacio-2);
+  align-items: flex-start;
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-3);
+  border-radius: var(--elsa-radio-md);
+  border: 1px solid var(--elsa-borde-suave);
+  background: var(--elsa-superficie);
+  min-width: 0;
+}
+
+.journey-index {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--elsa-radio-completo);
+  display: grid;
+  place-items: center;
+  font-size: var(--elsa-texto-xs);
+  font-weight: 700;
+  background: var(--papelsa-blanco);
+  border: 1px solid var(--elsa-borde);
+}
+
+.journey-body { display: grid; gap: 2px; min-width: 0; }
+.journey-label { font-weight: 700; font-size: var(--elsa-texto-sm); }
+.journey-detail { font-size: var(--elsa-texto-xs); color: var(--elsa-texto-secundario); }
+
+/* El estado se dice con palabras; el color solo acompaña. */
+.journey-step.is-done { border-color: var(--elsa-exito); background: var(--elsa-exito-surface); }
+.journey-step.is-done .journey-index { border-color: var(--elsa-exito); color: var(--elsa-exito); }
+
+.journey-step.is-current { border-color: var(--elsa-advertencia); background: var(--elsa-advertencia-surface); }
+.journey-step.is-current .journey-index { border-color: var(--elsa-advertencia); color: var(--elsa-advertencia); }
+
+.journey-step.is-rejected { border-color: var(--elsa-error); background: var(--elsa-error-surface); }
+.journey-step.is-rejected .journey-index { border-color: var(--elsa-error); color: var(--elsa-error); }
+
+/* El tercer paso queda deliberadamente apagado: está a la vista y sin
+ * alcanzar, que es exactamente su situación. */
+.journey-step.is-pending { border-style: dashed; background: none; }
+.journey-step.is-pending .journey-label { color: var(--elsa-texto-secundario); }
+
+.journey-rule {
+  margin: 0;
+  padding: var(--elsa-espacio-3);
+  border-left: 4px solid var(--elsa-acento);
+  background: var(--elsa-info-surface);
+  font-size: var(--elsa-texto-sm);
+  border-radius: 0 var(--elsa-radio-md) var(--elsa-radio-md) 0;
+}
+
+.governance-note p { margin: 0 0 var(--elsa-espacio-2); }
+.governance-note p:last-child { margin-bottom: 0; }
+
+.governance-states {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  font-size: var(--elsa-texto-xs);
+}
+
+.governance-state {
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-completo);
+  padding: 2px var(--elsa-espacio-2);
+  background: var(--papelsa-blanco);
+  font-weight: 700;
+}
+
+.governance-state.is-later {
+  border-style: dashed;
+  background: none;
+  color: var(--elsa-texto-secundario);
+}
+
+.governance-arrow { color: var(--elsa-texto-secundario); }

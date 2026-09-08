@@ -13,7 +13,7 @@
 import { api } from '../api.js';
 import { state } from '../state.js';
 import { announce, clear, el, formatDate, notice } from '../ui.js';
-import { contributionCard, contributionDetail } from '../contribution-view.js';
+import { PUBLISH_RULE, contributionCard, contributionDetail } from '../contribution-view.js';
 
 let opened = null;
 let tab = 'pending';
@@ -80,10 +80,21 @@ function paint(host, lists) {
         buildTab('pending', `Pendientes (${lists.pending.length})`, host, lists),
         buildTab('decided', `Ya decididos (${lists.decided.length})`, host, lists),
       ]),
-      el('p', { class: 'governance-note' }, [
-        el('strong', { text: 'Aprobar no publica. ' }),
-        'Marca el aporte como válido y lo deja listo; el conocimiento vigente del equipo ' +
-          'solo cambia al publicar una versión.',
+      el('div', { class: 'governance-note' }, [
+        el('p', {}, [el('strong', { text: 'Aprobar no publica. ' }), PUBLISH_RULE]),
+        el('p', { class: 'governance-states' }, [
+          el('span', { class: 'governance-state', text: 'Aporte recibido' }),
+          el('span', { class: 'governance-arrow', 'aria-hidden': 'true', text: '→' }),
+          el('span', { class: 'governance-state', text: 'Aporte validado' }),
+          el('span', { class: 'governance-arrow', 'aria-hidden': 'true', text: '→' }),
+          el('span', { class: 'governance-state is-later', text: 'Conocimiento publicado' }),
+        ]),
+        el('p', {
+          class: 'muted',
+          text:
+            'Lo que decides aquí es el segundo paso. El tercero es una decisión de gobierno ' +
+            'del conocimiento, con su propia autoridad, y no ocurre por aprobar.',
+        }),
       ]),
     ]),
   );
@@ -226,12 +237,9 @@ function buildDetail(host, lists) {
             onClick: () => decide(true),
           }),
         ]),
-        el('p', {
-          class: 'muted',
-          text:
-            'Aprobar marca el aporte como válido. No lo publica: el conocimiento vigente ' +
-            'del equipo solo cambia al publicar una versión.',
-        }),
+        // El principio se repite aquí, literalmente, porque es aquí donde
+        // alguien está a punto de pulsar «Aprobar».
+        notice('info', PUBLISH_RULE, 'Aprobar no es publicar'),
       ]);
 
   return el('div', { class: 'stack' }, [
