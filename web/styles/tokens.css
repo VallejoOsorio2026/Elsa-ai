@@ -1,0 +1,104 @@
+/* Design tokens de ELSA.
+ *
+ * Traducción literal de docs/brand/DESIGN_TOKENS.md. Este archivo no
+ * inventa ningún valor: si algo hay que cambiar, se cambia primero en la
+ * documentación y luego aquí.
+ *
+ *   --papelsa-*  identidad corporativa. No se tocan.
+ *   --elsa-*     decisiones de producto de ELSA.
+ */
+
+:root {
+  /* --- Marca: Manual de Marca PAPELSA, p. 14 ------------------------ */
+  --papelsa-verde: #a9c23f;        /* Pantone 2300 C */
+  --papelsa-petroleo: #006975;     /* Pantone 2238 C */
+  --papelsa-azul-gris: #4f868e;    /* Pantone 5483 C — color del slogan */
+  --papelsa-gris-oscuro: #333333;  /* Pantone 447 C */
+  --papelsa-gris-medio: #6d6d6d;   /* Pantone 4292 C */
+  --papelsa-gris-claro: #bcbcbc;   /* Pantone Gris Frío 4 C */
+  --papelsa-blanco: #ffffff;
+
+  /* --- Geometría del logotipo: manual, pp. 9-13 --------------------- */
+  --papelsa-logo-proporcion: 5.12;
+  --papelsa-logo-ancho-minimo: 80px;
+  --papelsa-logo-area-seguridad: 0.2222;  /* 2X sobre 9X de alto */
+
+  /* --- Tipografía --------------------------------------------------- */
+  --papelsa-fuente-marca: "Comfortaa", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Futura es comercial y no se autohospeda hasta confirmar licencia web
+   * (ELSA_UI_BRAND_RULES.md §3.3). Hasta entonces, pila del sistema. */
+  --papelsa-fuente-soporte: "Futura", "Futura PT", system-ui, -apple-system, "Segoe UI",
+    "Helvetica Neue", Arial, sans-serif;
+
+  --elsa-fuente-titulo: var(--papelsa-fuente-marca);
+  --elsa-fuente-cuerpo: var(--papelsa-fuente-soporte);
+  --elsa-fuente-dato: ui-monospace, "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+
+  --elsa-texto-xs: 0.75rem;
+  --elsa-texto-sm: 0.875rem;
+  --elsa-texto-md: 1rem;
+  --elsa-texto-lg: 1.25rem;
+  --elsa-texto-xl: 1.5rem;
+  --elsa-texto-2xl: 2rem;
+  --elsa-interlineado-ajustado: 1.25;
+  --elsa-interlineado-normal: 1.5;
+
+  /* --- Color funcional de interfaz ---------------------------------- */
+  --elsa-texto: var(--papelsa-gris-oscuro);
+  --elsa-texto-secundario: var(--papelsa-gris-medio);
+  --elsa-texto-inverso: var(--papelsa-blanco);
+  --elsa-fondo: var(--papelsa-blanco);
+  --elsa-superficie: #f5f6f3;
+  --elsa-superficie-alta: var(--papelsa-blanco);
+  --elsa-borde: var(--papelsa-gris-claro);
+  --elsa-borde-suave: #e4e6e2;
+  --elsa-acento: var(--papelsa-petroleo);
+  --elsa-acento-grafico: var(--papelsa-verde);
+  --elsa-foco: var(--papelsa-petroleo);
+  --elsa-foco-inverso: var(--papelsa-blanco);
+
+  /* --- Color semántico (decisión de producto, aprobado provisional) -- */
+  --elsa-error: #b3261e;
+  --elsa-error-surface: #fdecea;
+  --elsa-advertencia: #8a5a00;
+  --elsa-advertencia-surface: #fff6e5;
+  --elsa-exito: #1b6b3a;
+  --elsa-exito-surface: #e9f4ee;
+  --elsa-info: var(--papelsa-petroleo);
+  --elsa-info-surface: #e6f0f1;
+
+  /* --- Espaciado ---------------------------------------------------- */
+  --elsa-espacio-1: 0.25rem;
+  --elsa-espacio-2: 0.5rem;
+  --elsa-espacio-3: 0.75rem;
+  --elsa-espacio-4: 1rem;
+  --elsa-espacio-6: 1.5rem;
+  --elsa-espacio-8: 2rem;
+  --elsa-espacio-12: 3rem;
+
+  /* --- Radio -------------------------------------------------------- */
+  --elsa-radio-sm: 4px;
+  --elsa-radio-md: 8px;
+  --elsa-radio-lg: 16px;
+  --elsa-radio-completo: 9999px;
+
+  /* --- Medidas del armazón ------------------------------------------ */
+  --elsa-sidebar-ancho: 264px;
+  --elsa-topbar-alto: 60px;
+  --elsa-contenido-max: 1100px;
+}
+
+/* A partir de 1366 px el armazón respira: la barra lateral crece y el
+ * contenido admite más ancho sin perder la medida de lectura. */
+@media (min-width: 1366px) {
+  :root {
+    --elsa-sidebar-ancho: 288px;
+    --elsa-contenido-max: 1240px;
+  }
+}
+
+@media (min-width: 1920px) {
+  :root {
+    --elsa-contenido-max: 1360px;
+  }
+}

@@ -6,6 +6,10 @@ EXPECTED_DEPENDENCIES = {
     "database",
     "auth",
     "artifact_storage",
+    # El motor de voz a texto está conectado pero es simulado: aparece como
+    # `degraded`, no como ausente. Ocultarlo dejaría la salud diciendo que
+    # todo lo conectado funciona de verdad.
+    "transcription",
     "llm",
     "embeddings",
     "ocr",

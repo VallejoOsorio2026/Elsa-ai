@@ -94,6 +94,34 @@ nunca en PostgreSQL ni en Git. Ver `docs/private-storage.md`.
 Se aplican **antes** de interpretar el archivo. El límite de expansión no
 puede ser menor que el de subida; la configuración lo rechaza al arrancar.
 
+## Interfaz web y demostración (Bloque 3)
+
+| Variable | Obligatoria | Por defecto | Descripción |
+|---|---|---|---|
+| `ELSA_WEB_UI_ENABLED` | no | `true` | Sirve la interfaz estática del piloto en `/app`, con redirección desde la raíz. Ponerla en `false` deja solo la API. |
+| `ELSA_DEMO_SEED` | no | `false` | Siembra cuatro personas y un BOM **sintéticos** al arrancar. Solo válido en DEV; además la siembra se niega a escribir sobre cualquier almacén que no sea el de memoria. |
+
+Los datos de la siembra no proceden de la planta. La doble salvaguarda
+—ambiente y tipo de almacén— existe porque unos datos de demostración dentro
+de una base real serían indistinguibles de datos reales al día siguiente.
+
+## Límites de aportes y adjuntos
+
+| Variable | Obligatoria | Por defecto | Descripción |
+|---|---|---|---|
+| `ELSA_CONTRIBUTION_MAX_ATTACHMENTS` | no | `5` | Adjuntos por aporte o por mensaje de chat. |
+| `ELSA_CONTRIBUTION_MAX_ATTACHMENT_BYTES` | no | `52428800` (50 MiB) | Tamaño sumado máximo de los adjuntos. |
+| `ELSA_CONTRIBUTION_MAX_AUDIO_SECONDS` | no | `300` (5 min) | Duración máxima de una nota de voz. |
+
+`/api/v1/session/context` publica estos tres valores para que el navegador
+pueda avisar antes de que alguien pierda trabajo. Quien los **aplica** es el
+backend, en cada petición: un cliente modificado choca igual.
+
+Salvedad conocida: el número y el tamaño de los adjuntos se comprueban leyendo
+los bytes recibidos, pero la **duración** del audio la declara el navegador.
+Verificarla exigiría decodificar el archivo en el servidor, con la dependencia
+de medios que eso arrastra. Lo que sí se comprueba de verdad es el tamaño.
+
 ## Solo para tests
 
 | Variable | Descripción |

@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ELSA — Asistente de mantenimiento</title>
+  <meta name="description" content="Asistente corporativo para los ingenieros de mantenimiento de la Planta Molino Barbosa.">
+  <meta name="color-scheme" content="light">
+  <link rel="icon" href="/brand/papelsa-simbolo-color.svg" type="image/svg+xml">
+  <!--
+    Comfortaa se distribuye bajo SIL Open Font License. Futura es comercial y
+    no se carga hasta confirmar su licencia web: el cuerpo cae en la pila del
+    sistema, como decide docs/brand/ELSA_UI_BRAND_RULES.md §3.3.
+    Sin conexión, la interfaz degrada a la pila del sistema y sigue siendo
+    plenamente usable.
+  -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;700&display=swap">
+  <link rel="stylesheet" href="/app/styles/tokens.css">
+  <link rel="stylesheet" href="/app/styles/base.css">
+  <link rel="stylesheet" href="/app/styles/app.css">
+</head>
+<body>
+  <a class="skip-link" href="#contenido">Saltar al contenido</a>
+  <div id="root">
+    <div class="empty"><span class="spinner" role="status" aria-label="Cargando"></span></div>
+  </div>
+  <div id="live" class="visually-hidden" role="status" aria-live="polite"></div>
+  <script type="module" src="/app/js/main.js"></script>
+</body>
+</html>

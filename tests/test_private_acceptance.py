@@ -44,6 +44,9 @@ def _run(sources: dict[str, Path], **overrides: Path) -> int:
             str(paths["out"]),
             "--artifact-root",
             str(paths["out"].parent / "artifacts"),
+            # El activo es obligatorio: la herramienta no supone ninguno.
+            "--asset-code",
+            "activo-de-prueba",
         ]
     )
 
@@ -125,6 +128,21 @@ def test_any_error_prevents_a_successful_exit(sources: dict[str, Path], tmp_path
     assert _report(sources)["errors"] != []
 
 
+def test_the_asset_must_be_named(sources: dict[str, Path]) -> None:
+    """La herramienta no supone ningún equipo: hay que decírselo."""
+    with pytest.raises(SystemExit):
+        main(
+            [
+                "--engineering",
+                str(sources["engineering"]),
+                "--sap",
+                str(sources["sap"]),
+                "--out",
+                str(sources["out"]),
+            ]
+        )
+
+
 def test_the_sap_source_is_obligatory(sources: dict[str, Path]) -> None:
     """Omitirla terminaba en 0 y daba media prueba por aprobada."""
     with pytest.raises(SystemExit) as raised:
@@ -132,6 +150,8 @@ def test_the_sap_source_is_obligatory(sources: dict[str, Path]) -> None:
             [
                 "--engineering",
                 str(sources["engineering"]),
+                "--asset-code",
+                "activo-de-prueba",
                 "--out",
                 str(sources["out"]),
             ]

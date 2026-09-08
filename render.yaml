@@ -1,0 +1,80 @@
+# Blueprint de Render para la DEMOSTRACIÓN del Bloque 3.
+#
+# Qué despliega: la interfaz del piloto con datos SINTÉTICOS. No conecta
+# Supabase, no toca ninguna base de datos y no contiene ningún secreto.
+#
+# Por qué DEV y no TEST: la demostración se sostiene sobre los adaptadores en
+# memoria —identidades fake, permisos y conocimiento en memoria— y la
+# configuración de ELSA solo los permite en DEV. Poner TEST aquí no haría el
+# despliegue "más serio": haría que la aplicación se negara a arrancar por
+# falta de Supabase y PostgreSQL reales.
+#
+# Consecuencia de eso, y hay que saberla antes de enseñarla: **todo el estado
+# vive en memoria**. Un reinicio del servicio —o el apagado por inactividad
+# del plan gratuito— borra los aportes creados durante la demostración y
+# vuelve a sembrar el estado inicial.
+#
+# Instrucciones completas en docs/demo-runbook.md.
+
+services:
+  - type: web
+    name: elsa-demo
+    runtime: python
+    plan: free
+    region: oregon
+    branch: claude/bloque-3-papelsa-brand-mf5nfm
+
+    # `uv` es el gestor de dependencias del proyecto (CLAUDE.md §3) y aquí se
+    # respeta: `--frozen` instala exactamente lo que fija uv.lock, sin
+    # resolver de nuevo. `--no-dev` deja fuera pytest, mypy y ruff, que no
+    # pintan nada en un servidor.
+    buildCommand: pip install uv && uv sync --frozen --no-dev
+
+    # Se invoca el uvicorn del entorno que creó el build, en vez de `uv run`:
+    # el arranque no depende entonces de que `uv` siga estando disponible ni
+    # de qué opciones acepte su versión.
+    #
+    # `--host 0.0.0.0` porque el proceso tiene que aceptar la conexión del
+    # proxy de Render, que no llega por la loopback. `$PORT` lo asigna Render
+    # y no es negociable.
+    #
+    # `--forwarded-allow-ips '*'` es lo que hace que uvicorn crea las
+    # cabeceras `X-Forwarded-*` del proxy de Render. Sin ello uvicorn solo
+    # confía en 127.0.0.1, se cree en texto plano, y las redirecciones
+    # absolutas que genera StaticFiles saldrían como `http://` — lo que en un
+    # navegador rompe el contexto seguro y, con él, el micrófono. El comodín
+    # es seguro aquí porque solo el proxy de Render alcanza este puerto, y
+    # porque ELSA no toma ninguna decisión de seguridad a partir de la IP: el
+    # control de abuso cuenta por usuario autenticado.
+    startCommand: >-
+      .venv/bin/uvicorn elsa.main:create_app --factory
+      --host 0.0.0.0 --port $PORT
+      --proxy-headers --forwarded-allow-ips '*'
+
+    # Liveness, no readiness. `/health/ready` informa `degraded` a propósito
+    # en esta demostración (los adaptadores son fake y el motor de voz es
+    # simulado); usarlo como sonda haría que Render reiniciara un servicio
+    # que está funcionando exactamente como se espera.
+    healthCheckPath: /api/v1/health/live
+
+    envVars:
+      # Ninguna de estas es un secreto. Ver docs/environment-variables.md.
+      - key: ELSA_ENV
+        value: DEV
+
+      # Siembra las cuatro personas y el BOM sintéticos. Nada procede de la
+      # planta. La siembra además se niega a escribir sobre cualquier almacén
+      # que no sea el de memoria.
+      - key: ELSA_DEMO_SEED
+        value: "true"
+
+      # Obligatoria: el backend no arranca sin orígenes declarados y no
+      # admite comodines. En la práctica no interviene en la demostración,
+      # porque la interfaz y la API se sirven desde el mismo origen.
+      #
+      # Si Render asigna una URL distinta de la de abajo —ocurre si el nombre
+      # `elsa-demo` ya está tomado— corrige el valor en el panel. La
+      # demostración funciona igual; lo que quedaría mal declarado es qué
+      # otros orígenes podrían llamar a la API.
+      - key: ELSA_CORS_ORIGINS
+        value: https://elsa-demo.onrender.com

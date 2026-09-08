@@ -22,6 +22,7 @@ from elsa.adapters.fake_auth import (
 from elsa.adapters.fake_materials_identity import FakeMaterialsIdentityAdapter
 from elsa.adapters.memory_abuse_guard import InMemoryAbuseGuard
 from elsa.adapters.memory_artifact_storage import InMemoryArtifactStorage
+from elsa.adapters.memory_contributions import InMemoryContributionsRepository
 from elsa.adapters.memory_knowledge import InMemoryKnowledgeRepository
 from elsa.adapters.memory_permissions import InMemoryPermissionsRepository
 from elsa.config import AuthProvider, Environment, PermissionsBackend, Settings
@@ -119,6 +120,11 @@ def artifact_storage() -> InMemoryArtifactStorage:
 
 
 @pytest.fixture
+def contributions() -> InMemoryContributionsRepository:
+    return InMemoryContributionsRepository()
+
+
+@pytest.fixture
 def container(
     settings: Settings,
     auth_adapter: FakeAuthAdapter,
@@ -127,6 +133,7 @@ def container(
     abuse_guard: InMemoryAbuseGuard,
     knowledge: InMemoryKnowledgeRepository,
     artifact_storage: InMemoryArtifactStorage,
+    contributions: InMemoryContributionsRepository,
 ) -> Container:
     return Container(
         settings,
@@ -136,6 +143,7 @@ def container(
         abuse_guard=abuse_guard,
         knowledge=knowledge,
         artifact_storage=artifact_storage,
+        contributions=contributions,
     )
 
 

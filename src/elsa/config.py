@@ -187,6 +187,35 @@ class Settings(BaseSettings):
     """Número máximo de entradas dentro del paquete XLSX."""
 
     # ---------------------------------------------------------------
+    # Interfaz web y demostración (Bloque 3)
+    # ---------------------------------------------------------------
+
+    web_ui_enabled: bool = True
+    """Sirve la interfaz web estática desde el propio backend.
+
+    El piloto no tiene proceso de compilación: son archivos estáticos que
+    FastAPI publica en la raíz. Se puede apagar para exponer solo la API.
+    """
+
+    demo_seed: bool = False
+    """Siembra datos **sintéticos** al arrancar. Solo válido en DEV.
+
+    Los datos no proceden de la planta. La siembra además se niega a
+    escribir sobre cualquier almacén que no sea el de memoria: datos de
+    demostración dentro de una base real serían indistinguibles de datos
+    reales al día siguiente.
+    """
+
+    contribution_max_attachments: int = 5
+    """Máximo de adjuntos por aporte o por mensaje de chat."""
+
+    contribution_max_attachment_bytes: int = 50 * 1024 * 1024
+    """Tamaño máximo sumado de los adjuntos de un aporte o mensaje."""
+
+    contribution_max_audio_seconds: int = 300
+    """Duración máxima de una nota de voz. El navegador además se autodetiene."""
+
+    # ---------------------------------------------------------------
     # Control de abuso
     # ---------------------------------------------------------------
 
@@ -312,6 +341,9 @@ class Settings(BaseSettings):
         "ingestion_max_upload_bytes",
         "ingestion_max_uncompressed_bytes",
         "ingestion_max_archive_entries",
+        "contribution_max_attachments",
+        "contribution_max_attachment_bytes",
+        "contribution_max_audio_seconds",
     )
     @classmethod
     def _positive(cls, value: int) -> int:
@@ -340,6 +372,9 @@ class Settings(BaseSettings):
 
         if self.debug and not is_dev:
             raise ValueError("debug mode is only allowed in the DEV environment")
+
+        if self.demo_seed and not is_dev:
+            raise ValueError("the synthetic demo seed is only allowed in the DEV environment")
 
         if self.auth_provider is AuthProvider.FAKE and not is_dev:
             raise ValueError(

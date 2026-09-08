@@ -25,6 +25,11 @@ dev = [
     "mypy>=1.11",
     "ruff>=0.8",
     "pre-commit>=4.0",
+    # Solo para el test que fija el blueprint de despliegue (render.yaml).
+    # Ya entraba de forma transitiva con pre-commit; se declara para no
+    # depender de eso.
+    "pyyaml>=6.0",
+    "types-pyyaml>=6.0",
 ]
 
 [build-system]
@@ -55,9 +60,12 @@ select = [
 extend-immutable-calls = [
     "fastapi.Body",
     "fastapi.Depends",
+    "fastapi.File",
+    "fastapi.Form",
     "fastapi.Header",
     "fastapi.Path",
     "fastapi.Query",
+    "elsa.api.deps.RequireContributor",
     "elsa.api.deps.RequireReviewer",
     "elsa.api.deps.RequireScope",
 ]

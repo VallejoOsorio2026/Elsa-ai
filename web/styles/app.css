@@ -1,0 +1,1069 @@
+/* Armazón de ELSA: acceso, barra lateral, barra superior y contexto técnico. */
+
+/* --- Pantalla de acceso --------------------------------------------- */
+
+.login {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--elsa-superficie);
+}
+
+.login-header {
+  background: var(--papelsa-blanco);
+  border-bottom: 1px solid var(--elsa-borde-suave);
+  display: flex;
+  align-items: center;
+  padding: var(--elsa-espacio-3) var(--elsa-espacio-4);
+}
+
+.login-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: var(--elsa-espacio-6) var(--elsa-espacio-4) var(--elsa-espacio-12);
+}
+
+.login-panel { width: 100%; max-width: 520px; }
+
+.login-title { margin-bottom: var(--elsa-espacio-2); }
+
+/* ELSA y PAPELSA conviven separadas: nunca se funden en una sola pieza
+ * gráfica (ELSA_UI_BRAND_RULES.md §1). */
+.product-name {
+  font-family: var(--elsa-fuente-titulo);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.identity-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--elsa-espacio-3);
+}
+
+.identity-btn {
+  width: 100%;
+  text-align: left;
+  display: grid;
+  gap: var(--elsa-espacio-1);
+  padding: var(--elsa-espacio-3) var(--elsa-espacio-4);
+  background: var(--papelsa-blanco);
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-md);
+  cursor: pointer;
+  font: inherit;
+  min-height: 44px;
+}
+
+.identity-btn:hover { border-color: var(--elsa-acento); }
+.identity-btn strong { font-size: var(--elsa-texto-md); }
+
+@media (min-width: 768px) {
+  .login-main { align-items: center; padding-top: var(--elsa-espacio-12); }
+}
+
+/* --- Armazón de la aplicación --------------------------------------- */
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: var(--elsa-topbar-alto) 1fr;
+}
+
+/* A partir de 1024 px la barra lateral es una columna fija del armazón.
+ * Las áreas nombradas se declaran aquí y solo aquí: referenciarlas en
+ * anchos menores, donde la plantilla no las define, crea pistas implícitas
+ * y abre un hueco vacío sobre la barra superior. */
+@media (min-width: 1024px) {
+  .shell {
+    grid-template-columns: var(--elsa-sidebar-ancho) 1fr;
+    grid-template-rows: var(--elsa-topbar-alto) 1fr;
+    grid-template-areas:
+      "sidebar topbar"
+      "sidebar main";
+  }
+
+  .shell > .sidebar { grid-area: sidebar; }
+  .shell > .topbar { grid-area: topbar; }
+  .shell > .main { grid-area: main; }
+}
+
+/* --- Barra superior -------------------------------------------------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: var(--elsa-espacio-3);
+  padding: 0 var(--elsa-espacio-3);
+  background: var(--papelsa-blanco);
+  border-bottom: 1px solid var(--elsa-borde-suave);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.topbar-title {
+  font-family: var(--elsa-fuente-titulo);
+  font-weight: 700;
+  font-size: var(--elsa-texto-md);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Sin esto un elemento flexible no encoge por debajo de su contenido, y
+   * con `nowrap` su contenido es el título entero: los puntos suspensivos no
+   * llegan a aplicarse nunca y la barra empuja la página a scroll lateral en
+   * pantallas estrechas. */
+  min-width: 0;
+}
+
+.topbar-spacer { margin-left: auto; }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-md);
+  background: var(--papelsa-blanco);
+  cursor: pointer;
+  font-size: var(--elsa-texto-lg);
+  color: var(--elsa-texto);
+  flex: none;
+}
+
+@media (min-width: 1024px) {
+  .topbar { padding: 0 var(--elsa-espacio-6); }
+  .nav-toggle { display: none; }
+}
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  font-size: var(--elsa-texto-sm);
+  max-width: 46vw;
+}
+
+/* Bajo 768 px solo cabe el avatar; el nombre y el rol se leen al abrir el
+ * menú. Nunca se oculta quién está dentro: el avatar sigue ahí y el menú
+ * lo dice con todas las letras. */
+.identity-current { display: none; }
+
+@media (min-width: 768px) {
+  .identity-current { display: flex; }
+}
+
+/* --- Identidad de demostración ---------------------------------------- */
+
+/* Un hijo posicionado en absoluto de un `<details>` cerrado sigue ocupando
+ * caja en Chromium, y con `right: 0` eso alarga el área desplazable. Se
+ * oculta explícitamente. */
+.identity-menu { position: relative; }
+
+.identity-menu:not([open]) .identity-panel { display: none; }
+
+.identity-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-completo);
+  padding: var(--elsa-espacio-1) var(--elsa-espacio-2);
+  min-height: 44px;
+}
+
+.identity-menu > summary::-webkit-details-marker { display: none; }
+.identity-menu[open] > summary { border-color: var(--elsa-acento); }
+
+.identity-current {
+  flex-direction: column;
+  line-height: 1.15;
+  min-width: 0;
+}
+
+.identity-name {
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.identity-role {
+  font-size: var(--elsa-texto-xs);
+  color: var(--elsa-texto-secundario);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.identity-caret { color: var(--elsa-texto-secundario); }
+
+.identity-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + var(--elsa-espacio-2));
+  width: min(92vw, 320px);
+  max-width: calc(100vw - 2 * var(--elsa-espacio-3));
+  background: var(--papelsa-blanco);
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-md);
+  box-shadow: 0 8px 24px rgba(51, 51, 51, 0.18);
+  padding: var(--elsa-espacio-3);
+  z-index: 50;
+}
+
+.identity-hint {
+  margin: 0 0 var(--elsa-espacio-2);
+  font-size: var(--elsa-texto-xs);
+  color: var(--elsa-texto-secundario);
+}
+
+.identity-options { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--elsa-espacio-1); }
+
+.identity-option {
+  width: 100%;
+  min-height: 44px;
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-3);
+  border: 1px solid transparent;
+  border-radius: var(--elsa-radio-md);
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.identity-option:hover { background: var(--elsa-superficie); }
+
+.identity-option[aria-current="true"] {
+  border-color: var(--elsa-acento);
+  background: var(--elsa-info-surface);
+}
+
+.identity-option .tag { justify-self: start; }
+
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--elsa-radio-completo);
+  background: var(--elsa-acento);
+  color: var(--elsa-texto-inverso);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: var(--elsa-texto-xs);
+  flex: none;
+}
+
+/* --- Barra lateral --------------------------------------------------- */
+
+/* Bajo 1024 px es un cajón: fuera de pantalla hasta que se abre.
+ *
+ * `visibility: hidden` no es decorativo: sin él los enlaces del cajón siguen
+ * siendo alcanzables con Tab aunque estén fuera de la pantalla, y quien
+ * navega con teclado tabula sobre cuatro controles que no ve. */
+.sidebar {
+  position: fixed;
+  visibility: hidden;
+  inset: 0 auto 0 0;
+  width: min(88vw, 300px);
+  transform: translateX(-100%);
+  transition: transform 0.2s ease;
+  background: var(--papelsa-petroleo);
+  color: var(--elsa-texto-inverso);
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.sidebar.is-open { transform: translateX(0); visibility: visible; }
+
+.sidebar-brand {
+  padding: var(--elsa-espacio-4) var(--elsa-espacio-4) var(--elsa-espacio-2);
+}
+
+.sidebar-product {
+  padding: 0 var(--elsa-espacio-4) var(--elsa-espacio-4);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.sidebar-product .product-name { font-size: var(--elsa-texto-lg); }
+.sidebar-product p { color: rgba(255, 255, 255, 0.85); font-size: var(--elsa-texto-xs); margin: 0; }
+
+.nav { list-style: none; margin: 0; padding: var(--elsa-espacio-3); display: grid; gap: var(--elsa-espacio-1); flex: 1; }
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: var(--elsa-espacio-3);
+  min-height: 44px;
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-3);
+  border-radius: var(--elsa-radio-md);
+  color: var(--elsa-texto-inverso);
+  text-decoration: none;
+  font-size: var(--elsa-texto-sm);
+  font-weight: 600;
+  background: none;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.nav-link:hover { background: rgba(255, 255, 255, 0.12); }
+
+.nav-link[aria-current="page"] {
+  background: var(--papelsa-blanco);
+  color: var(--papelsa-petroleo);
+}
+
+.nav-icon { flex: none; width: 20px; text-align: center; }
+
+.nav-badge {
+  margin-left: auto;
+  background: var(--elsa-acento-grafico);
+  color: var(--papelsa-gris-oscuro);
+  border-radius: var(--elsa-radio-completo);
+  padding: 0 var(--elsa-espacio-2);
+  font-size: var(--elsa-texto-xs);
+  font-weight: 700;
+}
+
+.sidebar-footer {
+  padding: var(--elsa-espacio-4);
+  border-top: 1px solid rgba(255, 255, 255, 0.25);
+  font-size: var(--elsa-texto-xs);
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(51, 51, 51, 0.5);
+  z-index: 30;
+}
+
+@media (min-width: 1024px) {
+  .sidebar { position: sticky; top: 0; height: 100vh; width: auto; transform: none; visibility: visible; }
+  .scrim { display: none; }
+}
+
+/* --- Contenido ------------------------------------------------------- */
+
+.main {
+  padding: var(--elsa-espacio-4) var(--elsa-espacio-3) var(--elsa-espacio-12);
+  min-width: 0;
+}
+
+@media (min-width: 768px) {
+  .main { padding: var(--elsa-espacio-6); }
+}
+
+.content { max-width: var(--elsa-contenido-max); margin: 0 auto; }
+
+.page-head { margin-bottom: var(--elsa-espacio-4); }
+.page-head p { margin: 0; }
+
+/* --- Contexto técnico ------------------------------------------------ */
+
+/* Siempre visible: quien consulta tiene que saber de qué equipo habla ELSA
+ * y con qué versión publicada, sin tener que preguntarlo. */
+.context-bar {
+  display: grid;
+  gap: var(--elsa-espacio-3);
+  padding: var(--elsa-espacio-3) var(--elsa-espacio-4);
+  background: var(--elsa-superficie);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-md);
+  margin-bottom: var(--elsa-espacio-4);
+  font-size: var(--elsa-texto-sm);
+}
+
+@media (min-width: 768px) {
+  .context-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+}
+
+.context-item { min-width: 0; }
+.context-item dt { font-size: var(--elsa-texto-xs); color: var(--elsa-texto-secundario); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.context-item dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+
+.demo-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--elsa-espacio-2);
+  align-items: center;
+  background: var(--elsa-advertencia-surface);
+  color: var(--elsa-advertencia);
+  border-bottom: 1px solid var(--elsa-advertencia);
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-4);
+  font-size: var(--elsa-texto-xs);
+  font-weight: 600;
+}
+
+/* --- Estados vacíos y carga ------------------------------------------ */
+
+.empty {
+  text-align: center;
+  padding: var(--elsa-espacio-8) var(--elsa-espacio-4);
+  color: var(--elsa-texto-secundario);
+}
+
+.spinner {
+  width: 22px;
+  height: 22px;
+  border: 3px solid var(--elsa-borde);
+  border-top-color: var(--elsa-acento);
+  border-radius: var(--elsa-radio-completo);
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* --- Chat ------------------------------------------------------------ */
+
+.chat {
+  display: grid;
+  gap: var(--elsa-espacio-4);
+  min-width: 0;
+}
+
+/* `min-width: 0` en la rejilla y en cada mensaje: sin eso, un elemento de
+ * grid se niega a encoger por debajo de su contenido y una tabla ancha
+ * empuja toda la página a scroll horizontal en 320 px. */
+.chat-log {
+  display: grid;
+  gap: var(--elsa-espacio-4);
+  min-height: 200px;
+  min-width: 0;
+}
+
+.chat-log > * { min-width: 0; }
+
+.msg {
+  min-width: 0;
+  padding: var(--elsa-espacio-3) var(--elsa-espacio-4);
+  border-radius: var(--elsa-radio-lg);
+  max-width: 100%;
+}
+
+.msg p:last-child { margin-bottom: 0; }
+
+.msg-user {
+  background: var(--elsa-acento);
+  color: var(--elsa-texto-inverso);
+  justify-self: end;
+  max-width: min(100%, 46ch);
+  border-bottom-right-radius: var(--elsa-radio-sm);
+}
+
+.msg-assistant {
+  background: var(--elsa-superficie);
+  border: 1px solid var(--elsa-borde-suave);
+  border-bottom-left-radius: var(--elsa-radio-sm);
+}
+
+.answer-origin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+}
+
+.evidence { margin-top: var(--elsa-espacio-3); min-width: 0; }
+.evidence h3 { font-size: var(--elsa-texto-sm); text-transform: uppercase; letter-spacing: 0.04em; color: var(--elsa-texto-secundario); }
+
+.fmea-card {
+  background: var(--papelsa-blanco);
+  border: 1px solid var(--elsa-borde-suave);
+  border-left: 4px solid var(--elsa-acento-grafico);
+  border-radius: var(--elsa-radio-md);
+  padding: var(--elsa-espacio-3);
+  font-size: var(--elsa-texto-sm);
+}
+
+.fmea-card p { margin-bottom: var(--elsa-espacio-1); }
+.fmea-head { display: flex; flex-wrap: wrap; gap: var(--elsa-espacio-2); align-items: center; justify-content: space-between; }
+
+/* --- Compositor ------------------------------------------------------ */
+
+.composer {
+  position: sticky;
+  bottom: 0;
+  background: var(--elsa-fondo);
+  padding-top: var(--elsa-espacio-2);
+  padding-bottom: var(--elsa-espacio-3);
+  display: grid;
+  gap: var(--elsa-espacio-2);
+}
+
+.composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--elsa-espacio-2);
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-lg);
+  padding: var(--elsa-espacio-2);
+  background: var(--papelsa-blanco);
+}
+
+.composer-row textarea {
+  border: 0;
+  min-height: 44px;
+  padding: var(--elsa-espacio-2);
+  flex: 1;
+  resize: none;
+}
+
+.composer-row textarea:focus-visible { outline-offset: -2px; }
+
+.chip-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--elsa-espacio-2);
+  align-items: center;
+  font-size: var(--elsa-texto-xs);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--elsa-espacio-1);
+  background: var(--elsa-superficie);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-completo);
+  padding: var(--elsa-espacio-1) var(--elsa-espacio-3);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.msg-user .chip { background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.4); color: inherit; }
+
+.chip-remove {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  padding: 0 2px;
+  min-width: 24px;
+  min-height: 24px;
+}
+
+/* --- Grabadora -------------------------------------------------------- */
+
+.recorder { display: grid; gap: var(--elsa-espacio-4); }
+
+.recorder-dial {
+  display: grid;
+  justify-items: center;
+  gap: var(--elsa-espacio-1);
+  padding: var(--elsa-espacio-6) var(--elsa-espacio-4);
+  background: var(--elsa-superficie);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-lg);
+}
+
+/* El punto de grabación pulsa, pero el estado también está escrito: el
+ * color y el movimiento nunca son el único portador del significado. */
+.recorder-dial.is-live { border-color: var(--elsa-error); }
+
+.recorder-dial.is-live::before {
+  content: '';
+  width: 14px;
+  height: 14px;
+  border-radius: var(--elsa-radio-completo);
+  background: var(--elsa-error);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse { 50% { opacity: 0.25; } }
+
+.recorder-time {
+  font-family: var(--elsa-fuente-dato);
+  font-size: var(--elsa-texto-2xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.recorder-remaining { font-size: var(--elsa-texto-sm); color: var(--elsa-texto-secundario); }
+.recorder-remaining.is-warning { color: var(--elsa-advertencia); font-weight: 700; }
+
+.recorder-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--elsa-espacio-2);
+}
+
+.recorder-actions .btn { flex: 1 1 140px; }
+
+.btn-record { min-height: 56px; font-size: var(--elsa-texto-md); }
+
+.recorder-audio { width: 100%; }
+
+/* --- Aporte: bloques progresivos --------------------------------------- */
+
+.contribute { max-width: 760px; }
+
+/* Cada bloque se anuncia con su letra y su título. La secuencia
+ * A → B → C → D → E se lee de un vistazo sin convertirla en un asistente de
+ * «Siguiente»: todo está en una sola pantalla, solo que lo derivado aparece
+ * después de lo que lo alimenta. */
+.step-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--elsa-espacio-3);
+}
+
+.step-badge {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--elsa-radio-completo);
+  display: grid;
+  place-items: center;
+  background: var(--elsa-acento);
+  color: var(--elsa-texto-inverso);
+  font-weight: 700;
+  font-size: var(--elsa-texto-sm);
+}
+
+.step-body { flex: 1; min-width: 0; }
+.step-body p { margin: 0; }
+.step-title { margin: 0; font-size: var(--elsa-texto-lg); }
+
+.block-essential.is-collapsed { background: var(--elsa-superficie); }
+
+/* --- Capturar: escribir y grabar, al mismo nivel ----------------------- */
+
+.method-tabs {
+  display: grid;
+  gap: var(--elsa-espacio-2);
+}
+
+@media (min-width: 480px) {
+  .method-tabs { grid-template-columns: 1fr 1fr; }
+}
+
+.method-tab {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: var(--elsa-espacio-3);
+  min-height: 44px;
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-md);
+  background: var(--papelsa-blanco);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.method-tab[aria-pressed="true"] {
+  border-color: var(--elsa-acento);
+  background: var(--elsa-info-surface);
+  box-shadow: inset 0 0 0 1px var(--elsa-acento);
+}
+
+.method-tab:disabled { opacity: 0.6; cursor: not-allowed; }
+.method-label { font-weight: 700; }
+
+.method-body { display: grid; gap: var(--elsa-espacio-3); }
+
+.audio-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-3);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-md);
+  background: var(--elsa-superficie);
+  font-size: var(--elsa-texto-sm);
+}
+
+.btn-small { min-height: 32px; padding: var(--elsa-espacio-1) var(--elsa-espacio-3); font-size: var(--elsa-texto-xs); }
+
+/* --- Preguntas -------------------------------------------------------- */
+
+.question {
+  padding: var(--elsa-espacio-3);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-md);
+  background: var(--elsa-superficie);
+}
+
+.question p { margin-bottom: var(--elsa-espacio-2); }
+
+/* --- Lo que ELSA entendió --------------------------------------------- */
+
+/* Se lee como una respuesta, no como otro formulario: fondo propio, y solo
+ * las fichas que tienen algo dentro. */
+.block-understanding { border-left: 4px solid var(--elsa-acento-grafico); }
+
+.finding {
+  padding: var(--elsa-espacio-3);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-md);
+  background: var(--papelsa-blanco);
+}
+
+.finding.is-known { border-left: 3px solid var(--elsa-exito); }
+
+.finding-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  margin-bottom: var(--elsa-espacio-1);
+}
+
+.finding-label {
+  font-size: var(--elsa-texto-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--elsa-texto-secundario);
+}
+
+.finding-head .btn { margin-left: auto; }
+.finding-value { font-weight: 600; overflow-wrap: anywhere; }
+.finding-input { width: 100%; }
+
+/* --- Más contexto ------------------------------------------------------ */
+
+.block-context > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--elsa-espacio-3);
+  cursor: pointer;
+  min-height: 44px;
+  list-style: none;
+}
+
+.block-context > summary::-webkit-details-marker { display: none; }
+.block-context > summary .step-title { flex: 1; }
+.block-context > *:not(summary) { margin-top: var(--elsa-espacio-3); }
+
+/* --- Resumen ----------------------------------------------------------- */
+
+.summary-list { margin: 0; display: grid; gap: var(--elsa-espacio-2); }
+
+.summary-list dt {
+  font-size: var(--elsa-texto-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--elsa-texto-secundario);
+}
+
+.summary-list dd { margin: 0 0 var(--elsa-espacio-2); overflow-wrap: anywhere; }
+.summary-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--elsa-espacio-2);
+}
+
+.actions .btn { flex: 1 1 180px; }
+
+@media (min-width: 768px) {
+  .actions { justify-content: flex-end; }
+  .actions .btn { flex: 0 0 auto; }
+}
+
+.transcript summary {
+  cursor: pointer;
+  font-family: var(--elsa-fuente-titulo);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  min-height: 44px;
+}
+
+.transcript > *:not(summary) { margin-top: var(--elsa-espacio-3); }
+
+.norm-field, .check-field {
+  padding: var(--elsa-espacio-3);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-md);
+  background: var(--elsa-superficie);
+}
+
+.norm-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  margin-bottom: var(--elsa-espacio-1);
+}
+
+.norm-head label { margin: 0; }
+
+.check-field.is-pending { border-left: 4px solid var(--elsa-advertencia); }
+.check-field p { margin-bottom: var(--elsa-espacio-2); }
+.required { color: var(--elsa-advertencia); font-weight: 700; }
+
+/* --- Listados de aportes ---------------------------------------------- */
+
+.card-list { display: grid; gap: var(--elsa-espacio-3); }
+
+.contribution-card {
+  display: grid;
+  gap: var(--elsa-espacio-1);
+  padding: var(--elsa-espacio-4);
+  background: var(--elsa-superficie-alta);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-lg);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+}
+
+.contribution-card.is-clickable { cursor: pointer; }
+.contribution-card.is-clickable:hover { border-color: var(--elsa-acento); }
+.contribution-card p { margin: 0; }
+
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--elsa-espacio-2);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.card-head h2 { margin: 0; }
+
+.detail-list { margin: 0; display: grid; gap: var(--elsa-espacio-2); }
+
+.detail-list dt {
+  font-size: var(--elsa-texto-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--elsa-texto-secundario);
+  font-weight: 700;
+  display: flex;
+  gap: var(--elsa-espacio-2);
+  align-items: center;
+}
+
+.detail-list dd { margin: 0 0 var(--elsa-espacio-2); overflow-wrap: anywhere; }
+
+.transcript-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* --- Pestañas --------------------------------------------------------- */
+
+.tabs {
+  display: flex;
+  gap: var(--elsa-espacio-2);
+  border-bottom: 1px solid var(--elsa-borde-suave);
+  overflow-x: auto;
+}
+
+.tab {
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  font-size: var(--elsa-texto-sm);
+  padding: var(--elsa-espacio-3) var(--elsa-espacio-2);
+  min-height: 44px;
+  cursor: pointer;
+  color: var(--elsa-texto-secundario);
+  border-bottom: 3px solid transparent;
+  white-space: nowrap;
+}
+
+.tab[aria-selected="true"] {
+  color: var(--elsa-acento);
+  border-bottom-color: var(--elsa-acento);
+}
+
+/* Estado de la grabadora, escrito. El pulso y el color acompañan; la
+ * palabra es la que informa. */
+.recorder-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  font-size: var(--elsa-texto-sm);
+  font-weight: 700;
+  color: var(--elsa-texto-secundario);
+  min-height: 24px;
+}
+
+.recorder-dial.is-live .recorder-status { color: var(--elsa-error); }
+
+.spinner-sm { width: 14px; height: 14px; border-width: 2px; }
+
+/* --- Centro de Revisión: pestañas y regla de gobierno ------------------ */
+
+/* Las pestañas y la regla forman un solo bloque. El límite entre validar y
+ * publicar se lee donde se decide, no en un subtítulo suelto. */
+.review-head {
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-md);
+  background: var(--elsa-superficie);
+  overflow: hidden;
+}
+
+.review-head .tabs {
+  border-bottom: 1px solid var(--elsa-borde-suave);
+  padding: 0 var(--elsa-espacio-3);
+  background: var(--papelsa-blanco);
+}
+
+.governance-note {
+  margin: 0;
+  padding: var(--elsa-espacio-3) var(--elsa-espacio-4);
+  font-size: var(--elsa-texto-sm);
+  color: var(--elsa-texto-secundario);
+}
+
+.governance-note strong { color: var(--elsa-texto); }
+
+/* --- Bloque de decisión ----------------------------------------------- */
+
+.decision-block { border-top: 4px solid var(--elsa-acento); }
+
+/* Revisar algo ya decidido no es decidir por primera vez, y se ve distinto
+ * antes de que nadie pulse nada. */
+.decision-block.is-revision {
+  border-top-color: var(--elsa-advertencia);
+  background: var(--elsa-advertencia-surface);
+}
+
+.decision-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+}
+
+.decision-head h3 { margin: 0; font-size: var(--elsa-texto-lg); }
+
+/* --- Del aporte al conocimiento --------------------------------------- */
+
+.journey-title {
+  font-size: var(--elsa-texto-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--elsa-texto-secundario);
+  margin-bottom: var(--elsa-espacio-3);
+}
+
+.journey-steps {
+  list-style: none;
+  margin: 0 0 var(--elsa-espacio-3);
+  padding: 0;
+  display: grid;
+  gap: var(--elsa-espacio-2);
+}
+
+@media (min-width: 768px) {
+  .journey-steps { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.journey-step {
+  display: flex;
+  gap: var(--elsa-espacio-2);
+  align-items: flex-start;
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-3);
+  border-radius: var(--elsa-radio-md);
+  border: 1px solid var(--elsa-borde-suave);
+  background: var(--elsa-superficie);
+  min-width: 0;
+}
+
+.journey-index {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--elsa-radio-completo);
+  display: grid;
+  place-items: center;
+  font-size: var(--elsa-texto-xs);
+  font-weight: 700;
+  background: var(--papelsa-blanco);
+  border: 1px solid var(--elsa-borde);
+}
+
+.journey-body { display: grid; gap: 2px; min-width: 0; }
+.journey-label { font-weight: 700; font-size: var(--elsa-texto-sm); }
+.journey-detail { font-size: var(--elsa-texto-xs); color: var(--elsa-texto-secundario); }
+
+/* El estado se dice con palabras; el color solo acompaña. */
+.journey-step.is-done { border-color: var(--elsa-exito); background: var(--elsa-exito-surface); }
+.journey-step.is-done .journey-index { border-color: var(--elsa-exito); color: var(--elsa-exito); }
+
+.journey-step.is-current { border-color: var(--elsa-advertencia); background: var(--elsa-advertencia-surface); }
+.journey-step.is-current .journey-index { border-color: var(--elsa-advertencia); color: var(--elsa-advertencia); }
+
+.journey-step.is-rejected { border-color: var(--elsa-error); background: var(--elsa-error-surface); }
+.journey-step.is-rejected .journey-index { border-color: var(--elsa-error); color: var(--elsa-error); }
+
+/* El tercer paso queda deliberadamente apagado: está a la vista y sin
+ * alcanzar, que es exactamente su situación. */
+.journey-step.is-pending { border-style: dashed; background: none; }
+.journey-step.is-pending .journey-label { color: var(--elsa-texto-secundario); }
+
+.journey-rule {
+  margin: 0;
+  padding: var(--elsa-espacio-3);
+  border-left: 4px solid var(--elsa-acento);
+  background: var(--elsa-info-surface);
+  font-size: var(--elsa-texto-sm);
+  border-radius: 0 var(--elsa-radio-md) var(--elsa-radio-md) 0;
+}
+
+.governance-note p { margin: 0 0 var(--elsa-espacio-2); }
+.governance-note p:last-child { margin-bottom: 0; }
+
+.governance-states {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  font-size: var(--elsa-texto-xs);
+}
+
+.governance-state {
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-completo);
+  padding: 2px var(--elsa-espacio-2);
+  background: var(--papelsa-blanco);
+  font-weight: 700;
+}
+
+.governance-state.is-later {
+  border-style: dashed;
+  background: none;
+  color: var(--elsa-texto-secundario);
+}
+
+.governance-arrow { color: var(--elsa-texto-secundario); }
+
+/* El equipo puede ser un selector cuando hay varios autorizados. */
+.context-item select {
+  min-height: 40px;
+  padding: var(--elsa-espacio-1) var(--elsa-espacio-2);
+  font-weight: 600;
+  max-width: 100%;
+}
+
+.context-item dt label { margin: 0; font: inherit; }
