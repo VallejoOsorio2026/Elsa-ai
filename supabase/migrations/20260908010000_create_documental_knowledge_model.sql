@@ -468,7 +468,20 @@ create trigger trg_document_events_append_only
 -- recuperacion pueda filtrar por permiso en el mismo `where`, y no
 -- recuperar primero y ocultar despues.
 -- ============================================================
-create or replace view elsa.document_chunk_provenance as
+--
+-- `security_invoker = true` NO es opcional aquí. Una vista de PostgreSQL se
+-- ejecuta por defecto con los privilegios de su propietario, de modo que
+-- **ignora la RLS de las tablas que consulta**. Sin esta opción, conceder
+-- lectura sobre esta vista a cualquier rol le entregaría el corpus
+-- documental entero sin filtrar una sola fila, y la RLS de las seis tablas
+-- —que cualquiera daría por hecho que lo protege— no se aplicaría.
+--
+-- Con la opción activada, la vista se evalúa con los privilegios y la RLS
+-- de quien la consulta. El backend, que usa credencial de servicio con
+-- BYPASSRLS, la sigue viendo entera (ADR 0002).
+create or replace view elsa.document_chunk_provenance
+  with (security_invoker = true)
+as
 select
   chunk.id                as chunk_id,
   chunk.ordinal           as chunk_ordinal,
@@ -564,6 +577,7 @@ alter table elsa.admin_audit_log
 do $$
 declare
   table_name text;
+  role_name text;
 begin
   foreach table_name in array array[
     'documents',
@@ -574,6 +588,26 @@ begin
     'document_version_events'
   ] loop
     execute format('alter table elsa.%I enable row level security', table_name);
+  end loop;
+
+  -- Se vuelve a revocar, igual que hizo el Bloque 2 sobre lo del Bloque 1.
+  -- Un REVOKE es una operación puntual, no una regla permanente: cada
+  -- migración que añade objetos al esquema tiene que volver a cerrarlos, o
+  -- el cierre solo cubre lo que existía cuando se ejecutó.
+  --
+  -- `all tables` incluye las vistas, así que `document_chunk_provenance`
+  -- queda cubierta por la misma sentencia.
+  --
+  -- Se aplican solo si los roles de Supabase existen, para que estas
+  -- migraciones también corran sobre un PostgreSQL limpio (tests).
+  foreach role_name in array array['anon', 'authenticated'] loop
+    if exists (select 1 from pg_roles where rolname = role_name) then
+      execute format('revoke all on schema elsa from %I', role_name);
+      execute format('revoke all on all tables in schema elsa from %I', role_name);
+      execute format('revoke all on all functions in schema elsa from %I', role_name);
+      execute format(
+        'alter default privileges in schema elsa revoke all on tables from %I', role_name);
+    end if;
   end loop;
 end;
 $$;

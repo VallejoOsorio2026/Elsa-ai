@@ -255,6 +255,21 @@ Expone `scope_domain` y `scope_equipment` —el alcance que hay que autorizar—
 para que la consulta de recuperación pueda filtrar por permiso en el mismo
 `where`, y no recuperar primero para ocultar después.
 
+Se declara **`with (security_invoker = true)`**, y no es opcional. Una vista
+de PostgreSQL se ejecuta por defecto con los privilegios de su propietario,
+de modo que **ignora la RLS de las tablas que consulta**. Sin esa opción,
+conceder lectura sobre esta vista a cualquier rol le entregaría el corpus
+documental entero sin filtrar una sola fila, mientras la misma consulta
+contra `document_chunks` devolvía cero filas. Con la opción activada, la
+vista se evalúa con los privilegios y la RLS de quien la consulta; el
+backend, que usa credencial de servicio con `BYPASSRLS`, la sigue viendo
+entera.
+
+La regresión está cubierta por dos pruebas en
+`tests/test_migrations_documents.py`: una comprueba la opción y otra que un
+rol con `SELECT` sobre **todas** las tablas base sigue obteniendo cero filas
+por la vista.
+
 ---
 
 ## 8. Autorización, antes de recuperar

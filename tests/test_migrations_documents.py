@@ -559,3 +559,141 @@ async def test_the_provenance_view_exposes_the_scope_to_authorise(
         ("mantenimiento", "equipo-a"),
         ("mantenimiento", None),
     ]
+
+
+# ---------------------------------------------------------------------
+# Superficie de exposición
+#
+# ELSA es backend-only: la autorización la aplica FastAPI con credencial de
+# servicio (ADR 0002), y ningún rol del navegador debe llegar al esquema.
+# Estas pruebas son la regresión de un fallo real encontrado en la auditoría
+# previa a aplicar la migración: la vista de procedencia se creó sin
+# `security_invoker`, y una vista de PostgreSQL se ejecuta por defecto con
+# los privilegios de su propietario, de modo que **ignora la RLS de las
+# tablas que consulta**. Un rol con lectura sobre la vista obtenía el corpus
+# documental entero mientras la misma consulta contra la tabla devolvía cero
+# filas.
+# ---------------------------------------------------------------------
+
+
+async def seed_one_chunk(connection: asyncpg.Connection) -> None:
+    """Un chunk sintético completo, para poder contar filas visibles."""
+    document_id = await make_document(connection, asset="equipo-sim")
+    version_id = await make_version(
+        connection, document_id, number=1, digest=HASH_A, state="published"
+    )
+    await connection.execute(
+        "insert into elsa.document_chunks "
+        "(version_id, ordinal, structural_key, content, content_sha256, kind) "
+        "values ($1, 0, '1#0000', 'contenido sintetico', $2, 'prose')",
+        version_id,
+        HASH_B,
+    )
+
+
+async def test_the_provenance_view_applies_row_level_security(
+    connection: asyncpg.Connection,
+) -> None:
+    """Sin `security_invoker`, la vista entrega lo que la RLS niega."""
+    option = await connection.fetchval(
+        "select c.reloptions from pg_class c "
+        "join pg_namespace n on n.oid = c.relnamespace "
+        "where n.nspname = 'elsa' and c.relname = 'document_chunk_provenance'"
+    )
+
+    assert option is not None, "the view declares no options at all"
+    assert "security_invoker=true" in option
+
+
+async def test_a_role_cannot_read_through_the_view_what_rls_denies(
+    connection: asyncpg.Connection,
+) -> None:
+    """La prueba funcional del mismo fallo, no solo la declarativa.
+
+    Se le concede al rol lectura sobre **todas** las tablas base, para que lo
+    único que pueda detenerlo sea la RLS y no la falta de privilegios.
+    """
+    await seed_one_chunk(connection)
+    try:
+        await connection.execute("create role elsa_rls_probe nologin")
+    except asyncpg.PostgresError:
+        pytest.skip("creating a role requires privileges this connection lacks")
+
+    try:
+        await connection.execute("grant usage on schema elsa to elsa_rls_probe")
+        await connection.execute("grant select on all tables in schema elsa to elsa_rls_probe")
+
+        await connection.execute("set role elsa_rls_probe")
+        through_table = await connection.fetchval("select count(*) from elsa.document_chunks")
+        through_view = await connection.fetchval(
+            "select count(*) from elsa.document_chunk_provenance"
+        )
+        await connection.execute("reset role")
+
+        assert through_table == 0
+        assert through_view == 0, "the view handed out rows that RLS denies on the table"
+
+        # Control: la credencial propietaria —la del backend— sí las ve.
+        assert await connection.fetchval("select count(*) from elsa.document_chunk_provenance") == 1
+    finally:
+        await connection.execute("reset role")
+        await connection.execute("drop owned by elsa_rls_probe")
+        await connection.execute("drop role if exists elsa_rls_probe")
+
+
+async def test_the_migration_revokes_the_schema_from_the_browser_roles(
+    connection: asyncpg.Connection,
+) -> None:
+    """`anon` y `authenticated` no tocan `elsa`, ni sus tablas ni su vista.
+
+    Un REVOKE es una operación puntual, no una regla permanente: cada
+    migración que añade objetos tiene que volver a cerrarlos. Esta prueba
+    falla si una migración futura añade una tabla y se olvida de hacerlo.
+    """
+    created: list[str] = []
+    for role in ("anon", "authenticated"):
+        exists = await connection.fetchval("select 1 from pg_roles where rolname = $1", role)
+        if not exists:
+            await connection.execute(f"create role {role} nologin")
+            created.append(role)
+
+    try:
+        # Escenario hostil: alguien concedió acceso antes de migrar.
+        await connection.execute("grant usage on schema elsa to anon, authenticated")
+        await connection.execute("grant select on all tables in schema elsa to anon, authenticated")
+
+        # La migración vuelve a cerrar la superficie al aplicarse.
+        for migration in db.migration_files():
+            await connection.execute(migration.read_text(encoding="utf-8"))
+
+        for role in ("anon", "authenticated"):
+            assert not await connection.fetchval(
+                "select has_schema_privilege($1, 'elsa', 'USAGE')", role
+            ), f"{role} still has USAGE on the elsa schema"
+
+        privileges = await connection.fetchval(
+            "select count(*) from information_schema.table_privileges "
+            "where table_schema = 'elsa' and grantee in ('anon', 'authenticated')"
+        )
+        assert privileges == 0
+    finally:
+        for role in created:
+            await connection.execute(f"drop owned by {role}")
+            await connection.execute(f"drop role if exists {role}")
+
+
+async def test_the_documental_tables_have_no_policies(
+    connection: asyncpg.Connection,
+) -> None:
+    """RLS habilitado **y sin políticas**: cero filas para quien no la salta.
+
+    Una política permisiva añadida por descuido abriría justo lo que el
+    esquema pretende cerrar.
+    """
+    policies = await connection.fetch(
+        "select tablename, policyname from pg_policies "
+        "where schemaname = 'elsa' and tablename = any($1::text[])",
+        sorted(DOCUMENT_TABLES),
+    )
+
+    assert list(policies) == []

@@ -88,8 +88,17 @@ cualquier rol sin `BYPASSRLS` obtiene cero filas aunque llegue a conectarse.
 La autorización real la aplica FastAPI con credencial de servicio
 ([ADR 0002](adr/0002-identidad-de-materiales-autorizacion-en-backend.md)).
 
-La vista `document_chunk_provenance` hereda la protección de las tablas que
-consulta.
+La vista `document_chunk_provenance` se declara con
+`security_invoker = true`, de modo que se evalúa con los privilegios y la RLS
+de quien la consulta. **Sin esa opción una vista ignora la RLS de sus tablas
+base**: fue un hallazgo real de la auditoría previa a aplicar esta migración,
+y está cubierto por pruebas de regresión.
+
+La migración vuelve a revocar `anon` y `authenticated` sobre el esquema, sus
+tablas y sus funciones, igual que hicieron los Bloques 1 y 2. Un `REVOKE` es
+una operación puntual, no una regla permanente: cada migración que añade
+objetos tiene que volver a cerrarlos, o el cierre solo cubre lo que existía
+cuando se ejecutó.
 
 ---
 
@@ -103,8 +112,13 @@ Contra PostgreSQL 16 local, en este orden:
 3. Se ejecuta `supabase/rollback/20260908010000_rollback.sql`. Correcto: las
    seis tablas y la vista desaparecen; el Bloque 2 queda intacto.
 4. Se vuelve a aplicar la migración sobre la base revertida. Correcto.
-5. `uv run pytest tests/test_migrations.py tests/test_migrations_documents.py`
-   con `ELSA_TEST_DATABASE_URL` apuntando a esa base: **39 pruebas en
+5. Sobre una base que **imita a Supabase** —con los roles `anon`,
+   `authenticated` y `service_role` creados, y con privilegios concedidos
+   antes de migrar— se comprueba que tras aplicar la migración ninguno de
+   los dos primeros conserva `USAGE` sobre `elsa` ni privilegio alguno sobre
+   sus tablas.
+6. `uv run pytest tests/test_migrations.py tests/test_migrations_documents.py`
+   con `ELSA_TEST_DATABASE_URL` apuntando a esa base: **43 pruebas en
    verde**.
 
 ---
