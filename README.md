@@ -153,6 +153,10 @@ uv run pre-commit install
 | [`docs/development.md`](docs/development.md) | Desarrollo local, tests y flujo de migraciones |
 | [`docs/security.md`](docs/security.md) | Política de secretos, logs, CORS y fuentes de entrada |
 | [`docs/ingestion-contract.md`](docs/ingestion-contract.md) | Qué acepta la ingesta y qué no hace nunca |
+| [`docs/knowledge-architecture.md`](docs/knowledge-architecture.md) | Conocimiento estructurado y documental: qué se chunkea y qué no |
+| [`docs/document-model.md`](docs/document-model.md) | Contrato de documento, versión, sección y chunk |
+| [`docs/document-chunking.md`](docs/document-chunking.md) | Estrategia de chunking, con un ejemplo completo |
+| [`docs/document-acceptance.md`](docs/document-acceptance.md) | Prueba de aceptación determinística de la ingesta documental |
 | [`docs/private-storage.md`](docs/private-storage.md) | Almacenamiento privado de archivos originales y planos |
 | [`docs/private-acceptance-test.md`](docs/private-acceptance-test.md) | Prueba local con archivos reales, sin tocar Git |
 | [`docs/environment-variables.md`](docs/environment-variables.md) | Referencia de variables de entorno |
