@@ -28,6 +28,21 @@ export function el(tag, props = {}, children = []) {
   return node;
 }
 
+/**
+ * Añade hijos a un nodo descartando los que no existen.
+ *
+ * `Node.append(null)` no ignora el valor: inserta el texto «null». Los
+ * bloques que solo aparecen a veces devuelven `null` a propósito, así que
+ * pasan por aquí en vez de por `append` directamente.
+ */
+export function mount(node, ...children) {
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child);
+  }
+  return node;
+}
+
 export function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
   return node;

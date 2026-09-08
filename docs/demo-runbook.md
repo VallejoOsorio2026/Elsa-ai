@@ -55,10 +55,16 @@ permisos. Que el Centro de Revisión aparezca al pasar a la revisora y
 desaparezca al volver al ingeniero es la respuesta del backend, no un
 interruptor de la interfaz.
 
-Recorrido completo: consultar el equipo → grabar una nota de voz → revisar
-«Esto es lo que entendí» → responder la guía → enviar → cambiar a la revisora
-desde el chip → aprobar o rechazar. Que el ingeniero **no** vea el Centro de
-Revisión es parte de lo que se enseña, no una carencia.
+Recorrido completo: consultar el equipo → abrir «Agregar conocimiento» →
+escribirlo o grabarlo → responder las dos preguntas obligatorias → ver lo que
+ELSA reconoció → enviar → cambiar a la revisora desde el chip → aprobar o
+rechazar. Que el ingeniero **no** vea el Centro de Revisión es parte de lo que
+se enseña, no una carencia.
+
+La pantalla de aporte abre en **Escribir**, con **Grabar audio** al lado y al
+mismo nivel: aportar conocimiento no es solo hablar. Si se graba, la nota de
+voz queda como evidencia y la interfaz dice en todas partes que **nadie la ha
+transcrito**.
 
 ---
 
@@ -258,6 +264,8 @@ Decirlo antes de enseñarla evita que alguien se lleve una idea equivocada:
   observación de la guía. Son cadenas que ya estaban en el aporte; si no hay
   ninguna, queda un rótulo numerado.
 - **No hay RAG, ni documentos, ni planos, ni búsqueda semántica.**
-- **Aprobar un aporte no lo publica.** Queda marcado como válido; el
-  conocimiento vigente del equipo solo cambia al publicar una versión.
+- **Aprobar un aporte no lo publica.** Aprobar valida el aporte, pero no
+  indica que sea publicado: la publicación es una decisión posterior e
+  independiente. La interfaz dibuja los tres estados —aporte recibido, aporte
+  validado, conocimiento publicado— con el tercero sin alcanzar.
 - **Los aportes no persisten** entre reinicios (§3).

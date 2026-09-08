@@ -48,7 +48,7 @@ const ROUTES = [
     icon: '🎙',
     title: 'Agregar conocimiento',
     subtitle:
-      'Cuéntalo con tu voz. Revisas lo que ELSA entendió y lo envías a revisión: nada se ' +
+      'Escríbelo o grábalo, revisa lo que ELSA entendió y envíalo a revisión: nada se ' +
       'publica solo.',
     render: renderContribute,
     visible: (current) => Boolean(current.capability?.can_contribute),

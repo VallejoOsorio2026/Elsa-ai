@@ -609,9 +609,164 @@
 
 .recorder-audio { width: 100%; }
 
-/* --- Aporte ----------------------------------------------------------- */
+/* --- Aporte: bloques progresivos --------------------------------------- */
 
-.contribute { max-width: 720px; }
+.contribute { max-width: 760px; }
+
+/* Cada bloque se anuncia con su letra y su título. La secuencia
+ * A → B → C → D → E se lee de un vistazo sin convertirla en un asistente de
+ * «Siguiente»: todo está en una sola pantalla, solo que lo derivado aparece
+ * después de lo que lo alimenta. */
+.step-head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--elsa-espacio-3);
+}
+
+.step-badge {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--elsa-radio-completo);
+  display: grid;
+  place-items: center;
+  background: var(--elsa-acento);
+  color: var(--elsa-texto-inverso);
+  font-weight: 700;
+  font-size: var(--elsa-texto-sm);
+}
+
+.step-body { flex: 1; min-width: 0; }
+.step-body p { margin: 0; }
+.step-title { margin: 0; font-size: var(--elsa-texto-lg); }
+
+.block-essential.is-collapsed { background: var(--elsa-superficie); }
+
+/* --- Capturar: escribir y grabar, al mismo nivel ----------------------- */
+
+.method-tabs {
+  display: grid;
+  gap: var(--elsa-espacio-2);
+}
+
+@media (min-width: 480px) {
+  .method-tabs { grid-template-columns: 1fr 1fr; }
+}
+
+.method-tab {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  padding: var(--elsa-espacio-3);
+  min-height: 44px;
+  border: 1px solid var(--elsa-borde);
+  border-radius: var(--elsa-radio-md);
+  background: var(--papelsa-blanco);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.method-tab[aria-selected="true"] {
+  border-color: var(--elsa-acento);
+  background: var(--elsa-info-surface);
+  box-shadow: inset 0 0 0 1px var(--elsa-acento);
+}
+
+.method-tab:disabled { opacity: 0.6; cursor: not-allowed; }
+.method-label { font-weight: 700; }
+
+.method-body { display: grid; gap: var(--elsa-espacio-3); }
+
+.audio-chip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-3);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-md);
+  background: var(--elsa-superficie);
+  font-size: var(--elsa-texto-sm);
+}
+
+.btn-small { min-height: 32px; padding: var(--elsa-espacio-1) var(--elsa-espacio-3); font-size: var(--elsa-texto-xs); }
+
+/* --- Preguntas -------------------------------------------------------- */
+
+.question {
+  padding: var(--elsa-espacio-3);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-md);
+  background: var(--elsa-superficie);
+}
+
+.question p { margin-bottom: var(--elsa-espacio-2); }
+
+/* --- Lo que ELSA entendió --------------------------------------------- */
+
+/* Se lee como una respuesta, no como otro formulario: fondo propio, y solo
+ * las fichas que tienen algo dentro. */
+.block-understanding { border-left: 4px solid var(--elsa-acento-grafico); }
+
+.finding {
+  padding: var(--elsa-espacio-3);
+  border: 1px solid var(--elsa-borde-suave);
+  border-radius: var(--elsa-radio-md);
+  background: var(--papelsa-blanco);
+}
+
+.finding.is-known { border-left: 3px solid var(--elsa-exito); }
+
+.finding-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--elsa-espacio-2);
+  margin-bottom: var(--elsa-espacio-1);
+}
+
+.finding-label {
+  font-size: var(--elsa-texto-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--elsa-texto-secundario);
+}
+
+.finding-head .btn { margin-left: auto; }
+.finding-value { font-weight: 600; overflow-wrap: anywhere; }
+.finding-input { width: 100%; }
+
+/* --- Más contexto ------------------------------------------------------ */
+
+.block-context > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--elsa-espacio-3);
+  cursor: pointer;
+  min-height: 44px;
+  list-style: none;
+}
+
+.block-context > summary::-webkit-details-marker { display: none; }
+.block-context > summary .step-title { flex: 1; }
+.block-context > *:not(summary) { margin-top: var(--elsa-espacio-3); }
+
+/* --- Resumen ----------------------------------------------------------- */
+
+.summary-list { margin: 0; display: grid; gap: var(--elsa-espacio-2); }
+
+.summary-list dt {
+  font-size: var(--elsa-texto-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--elsa-texto-secundario);
+}
+
+.summary-list dd { margin: 0 0 var(--elsa-espacio-2); overflow-wrap: anywhere; }
+.summary-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .actions {
   display: flex;
