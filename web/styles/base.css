@@ -84,6 +84,26 @@ img, svg { max-width: 100%; }
 
 [hidden] { display: none !important; }
 
+/* Enlace de salto: fuera de la vista hasta que recibe el foco, y entonces
+ * bien visible. Uno que permanece invisible al enfocarlo es peor que no
+ * tenerlo: manda a quien navega con teclado a un control que no puede ver. */
+.skip-link {
+  position: absolute;
+  left: var(--elsa-espacio-2);
+  top: -60px;
+  z-index: 100;
+  padding: var(--elsa-espacio-2) var(--elsa-espacio-4);
+  background: var(--papelsa-blanco);
+  color: var(--elsa-acento);
+  border: 2px solid var(--elsa-acento);
+  border-radius: var(--elsa-radio-md);
+  font-weight: 700;
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus { top: var(--elsa-espacio-2); }
+
 .stack > * + * { margin-top: var(--elsa-espacio-4); }
 .stack-sm > * + * { margin-top: var(--elsa-espacio-2); }
 

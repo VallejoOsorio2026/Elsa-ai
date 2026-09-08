@@ -99,10 +99,12 @@ let sidebarOpen = false;
 function setSidebar(open) {
   sidebarOpen = open;
   render();
-  if (open) {
-    const first = document.querySelector('.sidebar .nav-link');
-    if (first) first.focus();
-  }
+  // El foco acompaña al cajón: al abrirlo va al primer enlace, y al cerrarlo
+  // vuelve al botón que lo abrió, no al principio de la página.
+  const target = open
+    ? document.querySelector('.sidebar .nav-link')
+    : document.querySelector('.nav-toggle');
+  if (target) target.focus();
 }
 
 function buildSidebar(route) {

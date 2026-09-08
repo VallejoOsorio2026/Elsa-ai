@@ -244,7 +244,82 @@ Reglas de obligado cumplimiento:
 El contraste **no** se aplica al interior del logotipo: la relación entre sus dos
 colores es parte de la marca y no se altera para mejorar un ratio.
 
-## 7. Assets del repositorio
+## 7. Navegación por teclado
+
+Estas reglas son parte del Design System de ELSA: toda pantalla nueva las
+cumple. Hay gente que trabaja con guantes, con el ratón inutilizable, o
+sencillamente más rápido con el teclado.
+
+### 7.1 El orden lo da el DOM, no `tabindex`
+
+El orden de tabulación es el orden del documento, y el documento se escribe en
+el orden del flujo. En «Agregar conocimiento» eso significa:
+
+```
+A Capturar → B Esencial → C Entender → D Contexto → E Revisar
+```
+
+Dentro de cada bloque, lo obligatorio antes que lo opcional, y las acciones
+después de los campos que las habilitan. Un `tabindex` positivo desplaza un
+control fuera de ese orden y crea una secuencia que nadie puede predecir: **no
+se usa nunca**. Solo se admite `tabindex="-1"` para sacar del recorrido algo
+que no debe recibir foco.
+
+Reordenar visualmente con CSS —`order`, `grid-area`, `flex-direction`— no
+cambia el orden de tabulación. Cuando el orden visual y el del DOM difieran,
+manda el del DOM: si eso resulta confuso, lo que hay que cambiar es el HTML.
+
+### 7.2 Tab y Shift+Tab, y nada más
+
+- `Tab` avanza al siguiente control; `Shift+Tab` retrocede al anterior.
+- El recorrido hacia atrás es **exactamente** el inverso del de ida.
+- `Enter` y `Espacio` activan botones; `Enter` envía un formulario.
+- `Escape` cierra lo que se haya abierto encima (menú de identidad, cajón).
+
+**No se inventan atajos.** Nada de teclas propietarias, ni de `Shift` a solas
+con significado, ni de secuencias que haya que aprender. Un patrón ARIA que
+exija teclas de flecha —`role="tablist"`, por ejemplo— solo se adopta si se
+implementa entero; mientras tanto se usan controles corrientes. Por eso los
+selectores de «Escribir / Grabar audio» son botones con `aria-pressed` y no
+pestañas: se alcanzan con `Tab` y se activan con `Enter`, sin nada que saber.
+
+### 7.3 Lo que no se ve no se tabula
+
+Un control alcanzable con `Tab` pero invisible manda a quien navega con
+teclado a un sitio que no puede ver. Se evita así:
+
+- Lo que está oculto va con `hidden` o `visibility: hidden`, **no** con
+  `transform` ni con `opacity: 0`, que dejan el elemento en el recorrido.
+- El cajón lateral por debajo de 1024 px está oculto de verdad mientras está
+  cerrado.
+- Un `<details>` cerrado no expone su contenido.
+- El enlace «Saltar al contenido» es la excepción deliberada: está fuera de la
+  vista hasta que recibe el foco, y entonces **aparece**.
+
+### 7.4 El foco se conserva y se lleva
+
+- **Escribir nunca se interrumpe.** Actualizar un bloque derivado no puede
+  quitar el foco ni mover el cursor. La regla operativa es no redibujar el
+  bloque donde está el cursor; cuando un redibujado es inevitable, se
+  restituyen foco y posición del cursor.
+- **Mover el foco acompaña a la acción.** Al abrir el cajón, el foco va a su
+  primer enlace; al cerrarlo, vuelve al botón que lo abrió. Nunca se queda
+  huérfano en el `body`.
+- **El foco siempre se ve**: `:focus-visible` con un contorno de 3 px y
+  contraste ≥ 3:1. No se elimina un `outline` sin sustituirlo.
+
+### 7.5 Qué se comprueba
+
+En cada pantalla, y en los seis anchos de referencia:
+
+- [ ] `Tab` desde el principio recorre el flujo en orden, sin saltos.
+- [ ] `Shift+Tab` recorre exactamente lo mismo a la inversa.
+- [ ] Ningún control del recorrido es invisible.
+- [ ] El foco es visible en todos ellos.
+- [ ] Escribir con pausas no pierde el foco ni mueve el cursor.
+- [ ] No hay ningún `tabindex` positivo.
+
+## 8. Assets del repositorio
 
 En [`assets/brand/`](../../assets/brand/):
 
@@ -262,7 +337,7 @@ trazos, así que no depende de tener Comfortaa instalada).
 Ver [`assets/brand/README.md`](../../assets/brand/README.md) para el detalle de
 procedencia y verificación.
 
-## 8. Lista de verificación
+## 9. Lista de verificación
 
 Antes de dar por buena una pantalla:
 
@@ -276,4 +351,6 @@ Antes de dar por buena una pantalla:
 - [ ] Todo texto cumple su umbral de contraste; nada marcado ✗ se usa como texto.
 - [ ] Ningún estado se comunica sólo con color.
 - [ ] El foco es visible en todos los elementos interactivos.
+- [ ] `Tab` recorre el flujo en orden y `Shift+Tab` lo mismo a la inversa (§7).
+- [ ] Ningún control alcanzable con `Tab` es invisible.
 - [ ] Sin slogan.
