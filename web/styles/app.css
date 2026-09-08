@@ -672,7 +672,7 @@
   cursor: pointer;
 }
 
-.method-tab[aria-selected="true"] {
+.method-tab[aria-pressed="true"] {
   border-color: var(--elsa-acento);
   background: var(--elsa-info-surface);
   box-shadow: inset 0 0 0 1px var(--elsa-acento);

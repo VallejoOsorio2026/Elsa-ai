@@ -1,5 +1,6 @@
 """La interfaz se sirve desde el backend sin exponer el repositorio."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -136,3 +137,37 @@ def test_a_missing_interface_is_reported_not_guessed(
         # La API sigue en pie aunque la interfaz no esté.
         assert client.get("/api/v1/health/live").status_code == 200
         assert client.get("/app/").status_code == 404
+
+
+def test_no_visual_state_hangs_on_an_attribute_the_interface_never_sets() -> None:
+    """Un selector de estado desactualizado no rompe nada: simplemente deja de
+    aplicar, y la pantalla pierde el estado visual sin que nadie se entere.
+
+    Pasó de verdad: al cambiar `aria-selected` por `aria-pressed` en los
+    botones de método, la regla de CSS quedó apuntando al atributo viejo y el
+    método activo dejó de distinguirse del inactivo.
+
+    Por eso la comprobación empareja **clase con atributo**: que alguien más,
+    en otra pantalla, emita ese atributo no salva a esta.
+    """
+    root = web_root()
+    assert root is not None
+    scripts = {path: path.read_text(encoding="utf-8") for path in sorted(root.rglob("*.js"))}
+    styles = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted((root / "styles").glob("*.css"))
+    )
+
+    pairs = set(re.findall(r'\.([a-z][a-z0-9-]*)\[(aria-[a-z]+)\s*=\s*"[^"]*"\]', styles))
+    assert pairs, "se esperaba al menos un estado visual atado a ARIA"
+
+    for css_class, attribute in sorted(pairs):
+        builders = [
+            source
+            for source in scripts.values()
+            if re.search(rf"""class:\s*['"][^'"]*\b{re.escape(css_class)}\b""", source)
+        ]
+        assert builders, f".{css_class} tiene estado visual pero nadie construye la clase"
+        assert any(attribute in source for source in builders), (
+            f".{css_class} se pinta con [{attribute}], "
+            f"pero quien construye la clase no emite ese atributo"
+        )
