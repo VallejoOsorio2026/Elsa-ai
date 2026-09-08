@@ -94,6 +94,24 @@ nunca en PostgreSQL ni en Git. Ver `docs/private-storage.md`.
 Se aplican **antes** de interpretar el archivo. El límite de expansión no
 puede ser menor que el de subida; la configuración lo rechaza al arrancar.
 
+## Chunking documental (Bloque 4.1)
+
+| Variable | Obligatoria | Por defecto | Descripción |
+|---|---|---|---|
+| `ELSA_DOCUMENT_CHUNK_PROFILE` | no | `structural-v1` | Nombre del perfil, registrado en cada versión |
+| `ELSA_DOCUMENT_CHUNK_TARGET_TOKENS` | no | `350` | Tamaño al que apunta un chunk |
+| `ELSA_DOCUMENT_CHUNK_MAX_TOKENS` | no | `700` | Techo duro; por encima la prosa se parte por frases |
+| `ELSA_DOCUMENT_CHUNK_MIN_TOKENS` | no | `60` | Por debajo, el chunk se fusiona con el anterior de su sección |
+| `ELSA_DOCUMENT_CHUNK_OVERLAP_TOKENS` | no | `50` | Solape, solo en cortes por tamaño; `0` lo desactiva |
+| `ELSA_DOCUMENT_CHUNK_CHARS_PER_TOKEN` | no | `4` | Divisor de la estimación de tokens |
+
+El techo no puede ser menor que el objetivo, y ni el mínimo ni el solape
+pueden alcanzarlo; la configuración lo rechaza al arrancar. Los valores
+efectivos se guardan **con cada versión** del documento: dos versiones
+chunkeadas con límites distintos no son comparables, y sin ese registro no
+podría saberse si una diferencia entre versiones viene del documento o de un
+cambio de configuración. Ver [`docs/document-chunking.md`](document-chunking.md).
+
 ## Interfaz web y demostración (Bloque 3)
 
 | Variable | Obligatoria | Por defecto | Descripción |
