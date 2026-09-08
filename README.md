@@ -177,8 +177,9 @@ src/elsa/
   core/            # lógica de dominio pura: autorización, salud, emparejamiento,
                    #   versionado, reconciliación y reglas de revisión
   ingestion/       # parsers de XLSX y HTM, independientes de FastAPI
+  documents/       # conocimiento documental: seccionado, chunking y validación
   services/        # orquestación de casos de uso (ingesta, reconciliación)
-  tools/           # utilidades de línea de comandos (aceptación privada)
+  tools/           # utilidades de línea de comandos (pruebas de aceptación)
   container.py     # composición: qué adaptador implementa cada puerto
   demo/            # siembra de datos sintéticos para la demostración
   web.py           # publica la interfaz estática y los assets de marca
