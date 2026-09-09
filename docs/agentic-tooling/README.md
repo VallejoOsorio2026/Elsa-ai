@@ -125,11 +125,23 @@ Evaluación de los candidatos externos: [`EXTERNAL_TOOLS_EVALUATION.md`](EXTERNA
 | «Consulta el sistema Z» | MCP | Solo si la CLI no llega |
 | «Esto solo aplica a ficheros de tipo T» | `.claude/rules/` con `paths:` | Se carga solo al tocar esos ficheros |
 
-La última fila es un mecanismo oficial que **ELSA todavía no usa**. Se deja
-apuntado porque es la salida natural si el contrato vuelve a crecer: una regla
-que solo importa dentro de `supabase/migrations/` puede vivir en
-`.claude/rules/migrations.md` con `paths: ["supabase/**"]` y no ocupar contexto
-el resto del tiempo.
+La última fila es un mecanismo oficial que **ELSA todavía no usa, y no debe
+usar todavía**. Se deja apuntado porque es la salida natural si el contrato
+vuelve a crecer: una regla que solo importa dentro de `supabase/migrations/`
+podría vivir en `.claude/rules/migrations.md` con `paths: ["supabase/**"]` y no
+ocupar contexto el resto del tiempo.
+
+**Condición para implementarlo.** No se hace por elegancia. Se hace solo si se
+observa un problema real y concreto, de uno de estos dos tipos:
+
+- *Activación:* una Skill no se dispara cuando debía, o se dispara cuando no
+  debía, de forma repetida — y la causa es que la regla debería estar cargada
+  al tocar cierto tipo de fichero, no al invocar una Skill.
+- *Contexto:* el contrato vuelve a acercarse a las 200 líneas porque hay reglas
+  que solo importan en una parte del repositorio.
+
+Sin una de las dos observaciones, añadir un tercer mecanismo es complejidad sin
+beneficio y contradice la regla 23 del contrato.
 
 ---
 

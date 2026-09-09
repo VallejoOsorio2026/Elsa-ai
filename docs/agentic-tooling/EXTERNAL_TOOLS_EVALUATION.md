@@ -23,7 +23,7 @@ decisión de instalar algo, cuando llegue, se tome con datos y no por impulso.
 | Candidato | Mantenedor | Coste de contexto | Veredicto |
 |---|---|---|---|
 | `skill-creator` | Anthropic | Nulo si no se invoca | **NOW** |
-| Vercel `find-skills` | Vercel Labs | Bajo, permanente | **NO** |
+| Vercel `find-skills` | Vercel Labs | Bajo, permanente si se deja puesto | **LATER — uso puntual** |
 | Supabase MCP | Supabase | Alto (muchas herramientas) | **LATER** |
 | GitHub MCP | GitHub | Medio-alto, acotable por *toolsets* | **LATER** |
 | Playwright: CLI/Skill frente a MCP | Microsoft | MCP alto (40+ herramientas) | **LATER**, y como CLI |
@@ -68,17 +68,33 @@ cuando el usuario pregunta «¿hay una skill para X?». Se instala con
 procedimientos son específicos del proyecto y ya están escritos. El ecosistema
 que indexa es de terceros sin relación con PAPELSA.
 
-**Coste de contexto.** Bajo pero permanente, y con una tendencia mala: su
-propósito es proponer instalar más Skills, que es exactamente lo que este
-trabajo intenta evitar.
+**Coste de contexto.** Bajo por sí mismo, pero permanente si se deja instalado,
+y con una tendencia mala: su propósito es proponer instalar más Skills, que es
+exactamente lo que este trabajo intenta evitar.
 
 **Riesgo.** Instala código de terceros a partir de una búsqueda. El criterio de
 calidad que documenta es el número de instalaciones, que no es una garantía de
-seguridad. Introduce una vía por la que instrucciones escritas por
-desconocidos acaban en el contexto de un proyecto que se entrega a un cliente.
+seguridad. Sería una vía por la que instrucciones escritas por desconocidos
+acaban en el contexto de un proyecto que se entrega a un cliente.
 
-**Veredicto: NO.** Contradice el principio de este trabajo. Si algún día hace
-falta una capacidad concreta, se busca y se evalúa a mano, una vez.
+**Veredicto: LATER — uso puntual bajo demanda, nunca instalación permanente.**
+
+La distinción importa. Como **capacidad instalada** que vigila cada pregunta y
+sugiere Skills nuevas, contradice el principio de este trabajo: rechazado.
+Como **consulta puntual** —«¿existe ya algo publicado que resuelva X?» antes de
+escribir una Skill desde cero— es legítimo y puede ahorrar trabajo.
+
+Condiciones para ese uso puntual:
+
+1. Lo pide una persona, para una necesidad concreta y nombrada.
+2. Se usa para **buscar y leer**, no para instalar automáticamente lo que
+   devuelva.
+3. Cualquier Skill candidata pasa antes por su propia ficha en este documento,
+   como cualquier otra herramienta externa.
+4. Se desinstala al terminar la consulta. No se queda cargado «por si acaso»
+   (regla 6 de la política MCP, que aplica igual a Skills de terceros).
+
+Mientras tanto, no está instalado.
 
 - <https://github.com/vercel-labs/skills>
 - <https://vercel.com/docs/agent-resources/skills>
@@ -244,6 +260,13 @@ Lo único con veredicto **NOW** es `skill-creator`, que es de Anthropic, no
 necesita red ni credenciales y sirve para mantener lo que acabamos de
 construir. Todo lo demás toca datos de PAPELSA o cuesta contexto permanente sin
 resolver un problema que tengamos hoy.
+
+El único **NO** que queda es Context7, y también es reevaluable: si el stack
+incorpora una librería que se mueva deprisa y el asistente se equivoque de
+forma medible, vuelve a la mesa. `find-skills` pasó a **LATER** porque la
+consulta puntual y la instalación permanente no son la misma decisión. Lo que
+sí es firme es que **nada se queda instalado de forma permanente sin una ficha
+que lo justifique**.
 
 Reevaluar cuando: se enlace el proyecto Supabase remoto (Supabase MCP), el
 ciclo de PR se vuelva frecuente (GitHub MCP), se automatice la aceptación de

@@ -132,10 +132,12 @@ Los dos últimos son **líneas de comentario**: cero cambios de comportamiento.
 
 ## 4. Lo que deliberadamente no se hizo
 
-- **No se creó `.claude/rules/`.** Es un mecanismo oficial y encaja bien con
+- **No se creó `.claude/rules/`.** Es un mecanismo oficial y encajaría con
   ELSA (reglas de migraciones que solo se cargan al tocar `supabase/**`), pero
-  no estaba en el alcance de este trabajo. Queda propuesto en
-  [`README.md`](README.md) §3.
+  no estaba en el alcance de este trabajo y hoy no resuelve ningún problema
+  observado. Queda propuesto en [`README.md`](README.md) §3, **condicionado a
+  observar un problema real** de activación de Skills o de crecimiento del
+  contrato. Añadirlo antes sería construir por anticipación (regla 23).
 - **No se instaló ninguna herramienta externa.** Ver
   [`EXTERNAL_TOOLS_EVALUATION.md`](EXTERNAL_TOOLS_EVALUATION.md).
 - **No se creó `.mcp.json`.** Ver [`MCP_POLICY.md`](MCP_POLICY.md).
