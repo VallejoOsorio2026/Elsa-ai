@@ -1,6 +1,6 @@
 """Puerto de voz a texto.
 
-El motor de transcripción es una dependencia reemplazable (CLAUDE.md §5): un
+El motor de transcripción es una dependencia reemplazable (CLAUDE.md, regla 6): un
 servicio local, un modelo autohospedado o un proveedor externo. La lógica de
 ELSA no debe saber cuál está conectado.
 
