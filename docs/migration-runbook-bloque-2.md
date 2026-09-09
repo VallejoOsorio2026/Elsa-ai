@@ -97,7 +97,7 @@ sobre tablas y funciones del esquema `elsa` a los roles `anon` y
 Consecuencia práctica: **estas tablas no son accesibles desde PostgREST ni
 desde el cliente JavaScript de Supabase.** El único camino de lectura es
 FastAPI con credencial de servicio, que aplica la autorización propia de ELSA
-antes de recuperar conocimiento (ADR 0002, regla 4 del contrato).
+antes de recuperar conocimiento (ADR 0002, regla 3 del contrato).
 
 Esto es defensa en profundidad, no el mecanismo de autorización.
 
