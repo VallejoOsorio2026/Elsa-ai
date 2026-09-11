@@ -1,7 +1,11 @@
 # ADR 0013 — El vector vive aparte del chunk, y generar no activa
 
-- Estado: **propuesto** (pendiente de aprobación; no implementado)
+- Estado: **aceptado** (no implementado todavía)
 - Bloque: 4.2
+- Lo respaldan las decisiones **D2**, **D3** y **D5** del proyecto, registradas
+  en [`bloque-4-2-plan.md`](../bloque-4-2-plan.md) §4
+- Queda un detalle sin aprobación formal, y no bloquea: **D4** —búsqueda exacta
+  frente a índice HNSW en el piloto (§6)— se confirma al implementar 4.2.b
 
 ## Contexto
 
@@ -186,11 +190,66 @@ interno, y coseno se lee sin tener que recordar que están normalizados.
 | Un aporte pendiente | Regla 16: un aporte no es conocimiento |
 | Una transcripción simulada | No se ha oído nada; embeberla sería fabricar evidencia |
 
-Las versiones no publicadas **sí** pueden tener embeddings: la garantía de que
-no se recuperan la da el filtro por `state = 'published'` en la consulta, no
-la ausencia de vectores. Al contrario: exigir que solo lo publicado esté
-embebido obligaría a que publicar esperase a una corrida de CPU, y publicar
-tiene que ser atómico e inmediato (ADR 0012).
+#### Generar un embedding y poder recuperarlo son dos cosas distintas
+
+La política aprobada (decisión D5) separa las dos, porque confundirlas lleva a
+un diseño peor en las dos direcciones posibles:
+
+| Estado de la versión | ¿Se generan embeddings? | ¿Elegible en recuperación productiva? |
+|---|---|---|
+| `pending_validation` | **No**, normalmente no | No |
+| `rejected` | **No** | No |
+| `approved` | **Sí, permitido** antes de publicar, para poder validar el índice nuevo | **No** |
+| `published` | Sí | **Sí**, y solo esta |
+| `superseded` | No se generan nuevos | No, pero **se conservan** mientras sirvan para rollback o comparación |
+
+Por qué se permite embeber una versión `approved` antes de publicarla: publicar
+tiene que ser **atómico e inmediato** (ADR 0012), y si publicar tuviera que
+esperar a una corrida de CPU dejaría de serlo. Embeber antes es lo que permite
+además **validar el índice nuevo** antes de que nadie dependa de él.
+
+Por qué eso no abre una fuga: **la elegibilidad no la da la existencia del
+vector, la da la versión**. La consulta exige `state = 'published'` en el mismo
+`where` que el alcance, así que un vector de una versión `approved` existe y no
+se recupera.
+
+Y por eso **publicar cambia atómicamente qué embeddings son elegibles**, sin
+tocar una sola fila de embeddings: la elegibilidad se deriva por `join` de la
+versión, y publicar está protegido por `uq_published_document_version`. Si el
+estado de publicación se copiara dentro de la fila del embedding, publicar
+tendría que reescribir una fila por chunk y **dejaría de ser atómico**. Es el
+mismo argumento de §1, visto desde el otro lado.
+
+### 8. El motor de embeddings es un servicio reemplazable, y su ubicación queda diferida
+
+Decisión D2. Dos partes, y conviene no confundirlas: una está aprobada y la
+otra deliberadamente no.
+
+**Aprobado, y es una prohibición:** no se ejecutan modelos de embeddings dentro
+del servicio web de ELSA en el plan actual de Render (512 MB, CPU compartida,
+suspensión por inactividad). No caben, y competir por la CPU con las requests
+degradaría lo único que hoy funciona.
+
+**Aprobado:** FastAPI queda desacoplado del motor por puerto y adaptador. Es el
+ADR 0003 aplicado a esta dependencia. El adaptador puede ser un proceso local,
+un servicio privado por HTTP o un servidor dedicado: el negocio no lo sabe.
+
+**Diferida:** dónde vive ese servicio en el piloto. No se decide por anticipado
+porque depende de cuatro datos que todavía no existen: el modelo ganador, su
+consumo real de RAM/CPU/GPU, su latencia medida y las restricciones de
+infraestructura de PAPELSA. Decidirlo antes sería construir por anticipación
+(regla 23) sobre supuestos que la medición puede desmentir.
+
+**El requisito que esto impone al diseño, y que es verificable:** cambiar entre
+servicio local u on-premise, servidor dedicado u otro proveedor autorizado no
+puede exigir modificar **ni la lógica de recuperación ni el esquema
+documental**. Si un cambio de ubicación obligara a tocar `core/` o una
+migración, el diseño está mal y se corrige antes de seguir. No es una
+aspiración: es una prueba que se puede hacer.
+
+Consecuencia para 4.2.a: los candidatos se miden en un **entorno de banco
+independiente**, fuera del servicio web y fuera del camino de la request. Eso
+está permitido y es lo previsto.
 
 ## Consecuencias
 
@@ -208,10 +267,12 @@ tiene que ser atómico e inmediato (ADR 0012).
   usa hoy `postgres:16`, que no la trae: la migración de este bloque exige
   cambiar la imagen. Un test que se omita porque falta la extensión sería
   peor que un test que falle.
-- El vector de la consulta se calcula en cada pregunta. En el piloto no hay
-  dónde hacerlo (`render.yaml` usa el plan `free`, 512 MB): el puerto permite
-  que el adaptador sea un servicio privado, pero **dónde vive ese servicio es
-  una decisión abierta** que condiciona la elección del modelo.
+- El vector de la consulta se calcula en cada pregunta, y **no dentro del
+  servicio web** (§8). El puerto permite que el adaptador sea un servicio
+  privado; **dónde vive queda diferido** hasta tener modelo, consumo, latencia
+  y restricciones de infraestructura. Mientras esté diferido, ninguna pieza
+  puede darlo por supuesto: es la razón de que el requisito de §8 sea
+  verificable y no una intención.
 
 ## Alternativas descartadas
 

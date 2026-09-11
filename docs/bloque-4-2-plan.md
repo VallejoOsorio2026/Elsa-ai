@@ -1,11 +1,20 @@
 # Bloque 4.2 — Embeddings y almacenamiento vectorial (planificación)
 
+> **Planificación CERRADA.** Las decisiones del bloque están tomadas y
+> registradas en §4: **D1, D2, D3, D5, D8 y D10 aprobadas** (D2 con su ubicación
+> diferida a propósito); **D4, D6, D7, D9 y D11 abiertas y no bloqueantes**, cada
+> una con recomendación vigente y con el subbloque donde se cierra. El trabajo
+> autorizado a continuación es **4.1.b**, y en paralelo los dos hilos que no son
+> ingeniería: la validación de licencia de EmbeddingGemma y la reverificación de
+> las cifras marcadas ⚠.
+
 Documento de planificación. **No hay implementación de este bloque.** Producido
 con la Skill `elsa-block-planning`; no se escribe código hasta autorización
 explícita (regla 20 de `CLAUDE.md`).
 
 Base: `origin/main` en `4a1b82e` (Bloque 4.0/4.1 y ELSA Agentic Tooling v1
-integrados).
+integrados). Esquema documental aplicado y validado en el Supabase de ELSA
+(§0.1).
 
 ---
 
@@ -93,8 +102,10 @@ por inactividad. Ninguno de los candidatos (300–600 M de parámetros) cabe ah�
 junto al proceso de FastAPI. La instrucción pide evaluar «ejecución local» y
 «RAM/VRAM/CPU»; el resultado de esa evaluación es que **el escenario de
 despliegue actual no admite ningún modelo local**. No es un impedimento para
-planificar, pero condiciona qué modelo puede elegirse, así que se decide antes
-de implementar (decisión D2).
+planificar. **Resuelto en parte por la decisión D2** (§4): está aprobado que el
+motor no se ejecute ahí y que FastAPI quede desacoplado por puerto; la ubicación
+definitiva queda **diferida**, y la cierran las mediciones de RAM y latencia del
+banco.
 
 ### 0.4 El CI no tiene pgvector
 
@@ -230,7 +241,10 @@ Lista cerrada. Todo verificable por comando.
    versión no publicada = 0, determinismo, truncamiento declarado.
 9. **Informe de resultados** con la salida real pegada, y **ADR 0014** con el
    modelo elegido y por qué (se escribe *después* de medir, no antes).
-10. **ADR 0013 aprobado o corregido** (hoy propuesto).
+10. **Confirmación de D4, D6, D7 y D11** con lo que muestre el banco, registrada
+    en ADR 0014. ADR 0013 ya está **aceptado**: si una medición contradijera
+    alguna de sus decisiones, se abre un ADR nuevo, no se reescribe el anterior
+    (regla 25).
 11. Documentación: `docs/embeddings-model-evaluation.md` actualizado con las
     cifras verificadas contra las tarjetas de los modelos, y
     `docs/environment-variables.md` con la configuración nueva.
@@ -258,28 +272,164 @@ Explícito. Aquí va todo lo que quedará «casi listo».
 
 ---
 
-## 4. Decisiones que hay que tomar
+## 4. Registro de decisiones
 
-Las marcadas **A** requieren aprobación antes de escribir una línea de código.
+Las decisiones de este bloque están **tomadas y registradas** salvo donde se
+indica. Una decisión aprobada no se reabre sin un ADR nuevo (regla 25).
 
-| # | Decisión | Opciones | Recomendación | ADR |
-|---|---|---|---|---|
-| **D1 A** | Política de licencia para el modelo entregado a PAPELSA | (a) solo OSI permisiva (MIT/Apache-2.0); (b) se acepta *Gemma Terms of Use* con revisión de uso corporativo | Los tres candidatos se **miden** igualmente; lo que D1 decide es si EmbeddingGemma puede ser **elegido**. Arrancar esta revisión en paralelo con 4.1.b, porque su latencia no la controlamos | 0014 |
-| **D2 A** | Dónde se calcula el vector de la consulta en el piloto | (a) servicio privado aparte (2 vCPU / 4 GB) detrás del puerto; (b) subir el plan de Render; (c) 4.3 arranca sin canal denso | **(a)**: es lo único compatible con el puerto y con no tocar el plan actual | 0013 |
-| **D3 A** | Dónde vive el vector | (a) tabla `document_chunk_embeddings`; (b) columna en `document_chunks` | **(a)**, ADR 0013 §1 | 0013 |
-| **D4** | Tipo, métrica e índice | (a) `vector(N)` normalizado, coseno, búsqueda **exacta** en el piloto; (b) HNSW desde el principio | **(a)**, ADR 0013 §6. Los filtros de autorización y publicación son obligatorios en los dos casos; lo que evita (a) es la pérdida de recall que un índice aproximado introduce bajo filtros selectivos, antes de tener con qué medirla | 0013 |
-| **D5** | Qué versiones se embeben | (a) `approved` y `published`; (b) solo `published` | **(a)**: publicar tiene que seguir siendo atómico; la seguridad la da el filtro de la consulta | 0013 |
-| **D6** | El texto embebido lleva contexto (título + rastro de títulos) | (a) sí, plantilla versionada; (b) solo el contenido | **(a)**: sin contexto, «apriete a 45 Nm» es irrecuperable | 0013 |
-| **D7** | Se embeben los chunks de tipo `table` | (a) sí; (b) no | **(a)**: una tabla de pares de apriete es justo lo que se pregunta. Se confirma con el eje de códigos del banco | 0014 |
-| **D8 A** | Corte del bloque y orden | (a) **4.1.b → 4.2.a → 4.2.b**; (b) 4.2.a → 4.1.b → 4.2.b; (c) un solo bloque grande | **(a)**, justificado en §1: 4.1.b es el camino crítico, vale por sí misma y su prerrequisito ya está satisfecho. (b) también funciona —4.1.b y 4.2.a son independientes— pero deja a 4.2.b esperando la pieza grande | — |
-| **D9** | Imagen de PostgreSQL del CI | (a) `pgvector/pgvector:pg16`; (b) instalar la extensión en el paso de CI | **(a)** al llegar 4.2.b, no antes | — |
-| **D10 A** | Confirmar que 4.2 **no** toca ningún Supabase remoto | — | Confirmado por la instrucción; se deja escrito | — |
-| **D11** | Runtime del adaptador real | (a) ONNX Runtime; (b) PyTorch + sentence-transformers | **(a)**: PyTorch son ~2 GB de dependencia para un clon limpio. En ambos casos, grupo opcional y pesos **fuera de Git** | 0014 |
+| # | Decisión | Estado | ADR |
+|---|---|---|---|
+| **D1** | EmbeddingGemma como candidato | **Aprobada con condición** | 0014 |
+| **D2** | Dónde se ejecuta el motor de embeddings | **Aprobada en lo arquitectónico · ubicación DIFERIDA** | 0013 §8 |
+| **D3** | Dónde vive el vector | **Aprobada** | 0013 §1 |
+| **D4** | Tipo, métrica e índice | Abierta, no bloqueante | 0013 §6 |
+| **D5** | Qué versiones se embeben | **Aprobada con política** | 0013 §5 y §7 |
+| **D6** | Contexto en el texto embebido | Abierta, no bloqueante | 0013 §4 |
+| **D7** | Embeber chunks de tipo `table` | Abierta, no bloqueante | 0014 |
+| **D8** | Corte del bloque y orden | **Aprobada** | — |
+| **D9** | Imagen de PostgreSQL del CI | Abierta, se decide al llegar 4.2.b | — |
+| **D10** | Supabase remoto | **Aprobada con aclaración** | — |
+| **D11** | Runtime del adaptador real | Abierta, no bloqueante | 0014 |
 
-**ADR nuevos que exige el bloque:**
-`docs/adr/0013-arquitectura-de-almacenamiento-vectorial.md` (escrito, estado
-propuesto) y `docs/adr/0014-eleccion-del-modelo-de-embeddings.md`, que **no se
-escribe hasta tener mediciones** (regla 21).
+---
+
+### D1 — EmbeddingGemma: aprobada **para el banco**, no para producción
+
+**Aprobado** entrar al banco de pruebas como tercer candidato.
+
+**No puede ser elegido para producción** mientras no se valide formalmente que
+sus términos de licencia y de uso son aceptables para un despliegue corporativo
+de PAPELSA.
+
+Consecuencias operativas:
+
+- **No bloquea 4.1.b ni el banco de 4.2.a.** Se mide con los otros dos y en las
+  mismas condiciones.
+- La validación de licencia es un hilo **paralelo**, no una tarea del camino
+  crítico. Su latencia no la controlamos porque no es trabajo de ingeniería.
+- Si el banco lo señalara como mejor candidato y la validación no estuviera
+  resuelta, **el resultado se reporta y no se elige**: se elige el mejor de los
+  habilitados, y el dato de EmbeddingGemma queda registrado por si la
+  validación llega después. Medir no habilita, igual que aprobar no publica.
+
+### D2 — El motor de embeddings no vive dentro del servicio web
+
+**Aprobado, y es una prohibición explícita:** no se ejecutan modelos de
+embeddings dentro del servicio Render Free actual de ELSA.
+
+**Aprobado** que la arquitectura desacople FastAPI del motor de embeddings
+mediante puerto y adaptador. Es la aplicación directa del ADR 0003 a esta
+dependencia: el negocio importa el puerto, nunca el motor.
+
+**Permitido para 4.2.a:** ejecutar los candidatos en un **entorno de banco
+independiente**, fuera del servicio web y fuera del camino de la request.
+
+**DIFERIDA** la ubicación definitiva del servicio de inferencia del piloto.
+Se decidirá cuando se conozcan las cuatro cosas de las que depende, y no antes:
+
+1. el modelo ganador;
+2. su consumo real de RAM, CPU y GPU;
+3. su latencia medida;
+4. las restricciones de infraestructura de PAPELSA.
+
+**Requisito que la arquitectura objetivo tiene que cumplir.** Debe poder
+cambiarse entre servicio local u on-premise, servidor dedicado u otro proveedor
+autorizado **sin modificar la lógica de recuperación ni el esquema documental**.
+Ese requisito es verificable, no una aspiración: si cambiar de ubicación
+obligara a tocar `core/` o una migración, el diseño está mal y hay que
+corregirlo antes de seguir.
+
+### D3 — Tabla separada, con convivencia de modelos
+
+**Aprobado:** el vector vive en `elsa.document_chunk_embeddings`, **no** en una
+columna de `document_chunks`.
+
+**Requisito aprobado junto con la decisión:** debe permitir la convivencia de
+más de un modelo o versión de embedding **durante migraciones y rollback**. Es
+exactamente lo que una columna única no puede hacer, y la razón principal de la
+tabla aparte (ADR 0013 §1 y §5).
+
+### D5 — Política de qué se embebe y qué es elegible para recuperar
+
+**Aprobada** con esta política, que distingue dos cosas que no son la misma:
+**generar** un embedding y que ese embedding sea **elegible para recuperación
+productiva**.
+
+| Estado de la versión | ¿Se generan embeddings? | ¿Elegible en recuperación productiva? |
+|---|---|---|
+| `pending_validation` (borrador, sin validar) | **No**, normalmente no | No |
+| `rejected` | **No** | No |
+| `approved` | **Sí, permitido** antes de publicar, para poder validar el índice nuevo | **No** |
+| `published` | Sí | **Sí**, y solo esta |
+| `superseded` | No se generan nuevos | No, pero **se conservan** mientras sirvan para rollback o comparación |
+
+> Nota de vocabulario: el esquema no tiene un estado `draft`. Su equivalente es
+> `pending_validation`, que es donde nace una versión tras la ingesta
+> (ADR 0012). La política se aplica sobre los estados que existen.
+
+**Cambiar la versión publicada cambia atómicamente qué embeddings son elegibles.**
+Y esto se cumple **por construcción, no por convención**: la elegibilidad se
+deriva de la versión mediante el `join`, así que publicar —que es atómico y está
+protegido por `uq_published_document_version`— cambia de golpe qué embeddings
+entran. Es la razón exacta por la que el estado de publicación **no** se copia
+en la fila del embedding: si se copiara, publicar tendría que reescribir una
+fila por chunk y dejaría de ser atómico.
+
+**Los embeddings anteriores se conservan** mientras sean necesarios para
+rollback o comparación. Retirarlos es una decisión posterior y explícita, nunca
+un efecto colateral de activar un modelo nuevo (ADR 0013 §5).
+
+**La autorización productiva exige siempre la cadena completa:**
+
+```
+dominio autorizado → activo autorizado → versión publicada → chunk permitido
+```
+
+### D8 — Corte y orden, aprobados formalmente
+
+1. **4.1.b** — Adaptador PostgreSQL del repositorio documental.
+2. **4.2.a** — Banco de pruebas ELSA y selección del modelo.
+3. **4.2.b** — Persistencia vectorial, registro de modelos y corridas de embedding.
+
+Justificación de las dependencias en §1.
+
+### D10 — Supabase remoto: compuerta explícita
+
+**Aprobado con esta aclaración, que es más estricta que la regla 15:**
+
+- **4.1.b y 4.2.a no modifican el Supabase remoto.** Ninguna de las dos tiene
+  motivo para tocarlo: el esquema documental ya está aplicado (§0.1) y el banco
+  trabaja fuera de la base.
+- En **4.2.b** la migración vectorial se diseña y se prueba **localmente**,
+  contra PostgreSQL efímero.
+- **Ninguna migración del Bloque 4.2 se aplica al Supabase real sin una
+  compuerta explícita de aceptación y autorización del responsable**, en la
+  conversación en que se aplique y solo para la migración prevista.
+- **Que el destino final sea Supabase no autoriza modificaciones remotas
+  durante el desarrollo.** Es la trampa que esta aclaración cierra: «al final va
+  a acabar ahí» no es una autorización.
+
+### Decisiones que siguen abiertas
+
+Ninguna bloquea el arranque de 4.1.b ni de 4.2.a. Cada una lleva su
+recomendación vigente y se cierra donde corresponda.
+
+| # | Decisión | Recomendación vigente | Se cierra en |
+|---|---|---|---|
+| **D4** | Tipo, métrica e índice | `vector(N)` normalizado, coseno y búsqueda **exacta** en el piloto. Los filtros son obligatorios en los dos casos; lo que evita la búsqueda exacta es la pérdida de recall que un índice aproximado introduce bajo filtros selectivos, antes de tener con qué medirla (ADR 0013 §6) | 4.2.b |
+| **D6** | Contexto en el texto embebido | Sí, con plantilla versionada: sin contexto, «apriete a 45 Nm» es irrecuperable | 4.2.a |
+| **D7** | Embeber chunks de tipo `table` | Sí: una tabla de pares de apriete es justo lo que se pregunta. Lo confirma el eje de códigos del banco | 4.2.a |
+| **D9** | Imagen de PostgreSQL del CI | `pgvector/pgvector:pg16`, al llegar 4.2.b y no antes | 4.2.b |
+| **D11** | Runtime del adaptador real | ONNX Runtime: PyTorch son ~2 GB de dependencia para un clon limpio. En ambos casos, grupo opcional y pesos **fuera de Git** | 4.2.a |
+
+---
+
+### ADR que exige el bloque
+
+| ADR | Estado | Qué registra |
+|---|---|---|
+| [0013](adr/0013-arquitectura-de-almacenamiento-vectorial.md) | **Aceptado** | Arquitectura vectorial: tabla aparte, registro de modelos, «generar no activa», filtros obligatorios, motor reemplazable. Lo respaldan D2, D3 y D5 |
+| `0014-eleccion-del-modelo-de-embeddings.md` | Pendiente | El modelo elegido y por qué. **No se escribe hasta tener mediciones** (regla 21). Recogerá D1, D7 y D11 |
 
 ---
 
@@ -312,7 +462,7 @@ Con mitigación concreta.
 | # | Riesgo | Mitigación |
 |---|---|---|
 | R1 | Se elige por tableros públicos y el modelo rinde mal en español técnico de planta | Criterio de decisión escrito **antes** de medir (`embeddings-model-evaluation.md` §3) y conjunto dorado propio. El puerto permite cambiar de modelo sin tocar el negocio |
-| R2 | El modelo elegido no cabe donde va a correr | D2 se decide antes de implementar; «cabe en el escenario acordado» es un **filtro duro**, no un criterio ponderado |
+| R2 | El modelo elegido no cabe donde acabe corriendo, y la ubicación está diferida (D2) | Lo que el diferimiento **no** aplaza es la medición: el banco reporta RAM pico y latencia por candidato, que son dos de los cuatro datos con los que se cierra D2. El filtro duro es «ejecutable, con huella declarada, en al menos uno de los escenarios viables (E1 o E2)», y el desacople por puerto (ADR 0013 §8) permite mover el motor sin tocar recuperación ni esquema |
 | R3 | **Calidad, no autorización.** Un índice ANN combinado con filtros selectivos (activo, versión publicada) deja menos candidatos útiles tras el filtrado: se entrega de menos, en silencio. Los permisos se siguen aplicando —el filtro es obligatorio y el índice no puede devolver lo que excluye— pero una respuesta pobre parece una respuesta | Búsqueda exacta en el piloto, que además es la verdad de referencia (ADR 0013 §6). Cuando el volumen justifique indexar: medir el recall con los **filtros reales** puestos, comparar contra la búsqueda exacta, y `hnsw.iterative_scan = strict_order` |
 | R4 | Alguien cierra el bloque creyendo que los códigos SAP ya se recuperan | El eje de códigos se mide y se reporta, y **no** puntúa la elección. ADR 0010 ya dice dónde se resuelven |
 | R5 | PyTorch u ONNX entran como dependencia dura y rompen el criterio del clon limpio | Grupo opcional en `pyproject.toml`; el CI corre con el fake; criterio de aceptación 1 |
@@ -357,7 +507,7 @@ descargables y ejecutables en local. Lo que sí cuesta:
 ## Ver también
 
 - [`embeddings-model-evaluation.md`](embeddings-model-evaluation.md) — candidatos, criterio de decisión, protocolo del banco y escenarios de hardware
-- [ADR 0013](adr/0013-arquitectura-de-almacenamiento-vectorial.md) — arquitectura vectorial propuesta
+- [ADR 0013](adr/0013-arquitectura-de-almacenamiento-vectorial.md) — arquitectura vectorial **aceptada**
 - [`knowledge-architecture.md`](knowledge-architecture.md) — las dos clases de conocimiento y la hoja de ruta 4.x
 - [`document-chunking.md`](document-chunking.md) — el chunk que se va a embeber
 - [`migration-runbook-bloque-4.md`](migration-runbook-bloque-4.md) — procedimiento de la migración documental. **Su aviso de «no aplicada» está desactualizado**: el estado real está en §0.1

@@ -98,12 +98,18 @@ Decisión provisional tomada: **tres candidatos entran a medirse.**
 |---|---|---|---|
 | 1 | **BGE-M3** | MIT sin ambigüedad para la entrega; ventana de 8192 tokens, que elimina el riesgo de truncamiento; y el único con **canal léxico propio** (denso + disperso + multi-vector en una pasada), justo el eje que la recuperación densa no cubre | — |
 | 2 | **Qwen3-Embedding-0.6B** | Apache-2.0; las puntuaciones multilingües públicas más altas de su tamaño; dimensión reducible y ventana de 32 k | — |
-| 3 | **EmbeddingGemma-300m** | Candidato **orientado a bajo consumo**: la mejor calidad por MB de los tres y el único que cabe con holgura en una huella pequeña. Es la respuesta si la RAM acaba siendo la restricción vinculante | **Sujeto a revisión de licencia y de uso corporativo** (decisión D1): los *Gemma Terms of Use* no son una licencia OSI ⚠ |
+| 3 | **EmbeddingGemma-300m** | Candidato **orientado a bajo consumo**: la mejor calidad por MB de los tres y el único que cabe con holgura en una huella pequeña. Es la respuesta si la RAM acaba siendo la restricción vinculante | **Aprobado para el banco; no elegible para producción** hasta que se valide formalmente que sus términos de licencia y uso son aceptables para un despliegue corporativo de PAPELSA (decisión D1). Los *Gemma Terms of Use* no son una licencia OSI ⚠ |
 
 **No se declara ganador.** La elección se hace con las mediciones del §7 sobre
 nuestro corpus, aplicando los filtros duros y el orden de preferencia del §3,
 ambos fijados antes de medir. Las razones de la tabla explican por qué cada uno
 merece el gasto de medirlo, no quién gana.
+
+**Medir no habilita.** Si EmbeddingGemma resultara el mejor y su validación de
+licencia no estuviera resuelta, el resultado se **reporta** y se elige el mejor
+de los habilitados; el dato queda registrado por si la validación llega después.
+Es el mismo principio que rige el resto del proyecto: cargar no publica,
+aprobar no publica, medir no habilita.
 
 Dos consecuencias operativas del corte en tres:
 
@@ -128,15 +134,20 @@ dimensiones y 8192 de ventana.
 ### Filtros duros (eliminan, no puntúan)
 
 1. **Licencia** apta para operación comercial interna y entrega a PAPELSA.
-   BGE-M3 (MIT) y Qwen3-Embedding (Apache-2.0) lo cumplen sin discusión.
-   EmbeddingGemma entra al banco **condicionado a la decisión D1**: los
-   *Gemma Terms of Use* no son una licencia OSI y traen política de uso
-   aceptable y condiciones de redistribución propias ⚠. Se mide igualmente,
-   porque tener el dato cuesta poco y no tenerlo deja sin respuesta la
-   pregunta «¿cuánto se pierde si la huella tiene que ser mínima?». Lo que no
-   se hará es elegirlo antes de que D1 esté resuelta.
-2. **Cabe en el escenario de producción acordado** (§6). Un modelo que no
-   puede ejecutarse donde se va a ejecutar no es candidato.
+   BGE-M3 (MIT) y Qwen3-Embedding (Apache-2.0) lo cumplen sin discusión y están
+   habilitados para producción. EmbeddingGemma está **aprobado para el banco y
+   no habilitado para producción** hasta que su validación formal concluya
+   (D1): los *Gemma Terms of Use* no son una licencia OSI y traen política de
+   uso aceptable y condiciones de redistribución propias ⚠. Se mide igualmente,
+   porque tener el dato cuesta poco y no tenerlo deja sin respuesta la pregunta
+   «¿cuánto se pierde si la huella tiene que ser mínima?».
+2. **Ejecutable con huella declarada** en al menos uno de los escenarios
+   viables del §6 (E1 o E2), con su RAM pico y su latencia **medidas**, no
+   estimadas. La ubicación definitiva del servicio está diferida (D2), así que
+   el filtro no puede ser «cabe en el escenario acordado»: todavía no hay uno.
+   Lo que sí se exige es que el candidato traiga esos números, porque son dos
+   de los cuatro datos con los que se cerrará D2. Un modelo cuya huella no se
+   pueda medir no es candidato.
 3. **Ventana real ≥ 1024 tokens** del tokenizador del propio modelo, medida
    sobre nuestro corpus, no estimada.
 4. **Determinismo**: el mismo texto produce el mismo vector entre procesos y
@@ -220,16 +231,26 @@ arquitectura futura prevé.
 
 | Escenario | Máquina | Qué hace | Viabilidad |
 |---|---|---|---|
-| **E0** | Render, plan `free`: 512 MB RAM, CPU compartida, se suspende por inactividad (`render.yaml`) | Servicio FastAPI actual | **No puede alojar ningún candidato.** 512 MB no dan para el proceso más un modelo de 300–600 M de parámetros, y el arranque en frío descargaría pesos en cada despertar |
+| **E0** | Render, plan `free`: 512 MB RAM, CPU compartida, se suspende por inactividad (`render.yaml`) | Servicio FastAPI actual | **Descartado por decisión aprobada (D2): no se ejecutan modelos aquí.** Además no cabrían: 512 MB no dan para el proceso más un modelo de 300–600 M de parámetros, y el arranque en frío descargaría pesos en cada despertar |
 | **E1** | Estación del ingeniero: 4–8 núcleos, 16 GB RAM, sin GPU | Ejecuta las **corridas de embedding** del corpus, por CLI, fuera del camino HTTP | Viable para los tres finalistas. Es donde se mide el rendimiento real |
 | **E2** | Contenedor/VPS privado: 2 vCPU, 4 GB RAM | Servicio privado de embeddings que atiende la **consulta** (1 texto corto por pregunta) | Viable. BGE-M3 cuantizado a int8 ronda 570 MB en disco ⚠; con runtime, del orden de 1 GB de RSS |
 
-**El punto que hay que decidir antes de implementar:** con E0 tal como está,
-*no hay donde embeber la pregunta del usuario en producción*. O el piloto
-suma E2 (un servicio privado detrás del puerto), o sube de plan, o la
-recuperación del Bloque 4.3 arranca sin canal denso. No es un problema del
-Bloque 4.2, pero **condiciona qué modelo puede elegirse**, así que se decide
-aquí.
+**Estado de esta cuestión (decisión D2, aprobada en parte y diferida en parte):**
+
+- **Aprobado:** el motor de embeddings **no** se ejecuta dentro del servicio web
+  (E0), y FastAPI queda desacoplado de él por puerto y adaptador.
+- **Permitido para 4.2.a:** medir los candidatos en un entorno de banco
+  independiente. E1 es ese entorno.
+- **Diferido:** dónde vive el servicio de inferencia del piloto —E2, un servidor
+  dedicado u otro proveedor autorizado— hasta conocer el modelo ganador, su
+  consumo real, su latencia medida y las restricciones de infraestructura de
+  PAPELSA.
+
+Que esté diferido **no** deja el diseño en el aire: el requisito es que cambiar
+de ubicación no obligue a modificar la lógica de recuperación ni el esquema
+documental (ADR 0013 §8). Lo que sí implica es que el banco tiene que reportar
+RAM pico y latencia por candidato, porque son dos de los cuatro datos con los
+que se cerrará la decisión.
 
 ### Arquitectura futura (no requisito del piloto)
 
@@ -348,7 +369,7 @@ fuentes secundarias porque el egreso a los sitios de origen estaba bloqueado.
 
 ## Ver también
 
-- [ADR 0013](adr/0013-arquitectura-de-almacenamiento-vectorial.md) — arquitectura vectorial propuesta
+- [ADR 0013](adr/0013-arquitectura-de-almacenamiento-vectorial.md) — arquitectura vectorial **aceptada**
 - [`bloque-4-2-plan.md`](bloque-4-2-plan.md) — alcance, exclusiones y criterios de aceptación del bloque
 - [ADR 0010](adr/0010-conocimiento-estructurado-vs-documental.md) — por qué los códigos no se embeben
 - [ADR 0011](adr/0011-chunking-estructural-deterministico.md) — qué se embebe, y por qué es determinista
