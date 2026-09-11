@@ -302,9 +302,87 @@ Se registran aquí porque quien continúe el proyecto tiene que conocerlas.
 | Sin OCR | Un documento escaneado no se ingiere | Cuando se decida entre Docling y PaddleOCR |
 | Estimación de tokens por caracteres | Los límites son aproximados | Con el tokenizador real del modelo de embeddings (4.2) |
 | `structural_key` posicional | Insertar un párrafo marca como modificados los chunks siguientes de esa sección | Es deliberado; la alternativa validaría de más |
-| Sin adaptador PostgreSQL del repositorio | El puerto solo tiene implementación en memoria | Cuando haya endpoints o recuperación que persistir |
 | Sin endpoints HTTP | La ingesta documental se ejerce por la herramienta de aceptación | Cuando el Centro de Control los necesite |
 | Una tabla dentro de un manual no se interpreta | Se conserva como texto, no como datos | No previsto: interpretarla duplicaría el BOM |
+
+---
+
+---
+
+## 10. Persistencia
+
+Hay dos adaptadores del puerto y **los dos se prueban con las mismas
+pruebas**: `tests/test_contract_documents.py` corre cada caso dos veces, una
+contra cada uno. Un doble que acepta lo que el almacén real rechaza deja
+pasar en los tests justo el fallo que importa.
+
+| Adaptador | Para qué | Persiste |
+|---|---|---|
+| `InMemoryDocumentRepository` | Desarrollo y pruebas que no necesitan persistencia. Solo DEV | No: se pierde todo al reiniciar |
+| `PostgresDocumentRepository` | Persistencia real sobre Supabase ELSA | Sí |
+
+Se elige por configuración, con el mismo selector que el conocimiento
+técnico y los permisos (`ELSA_PERMISSIONS_BACKEND`): los tres viven en la
+misma base y no tendría sentido que uno fuera a PostgreSQL y otro a memoria.
+
+### Qué tablas usa
+
+Las seis del modelo, más dos que ya existían: escribe en `documents`,
+`document_ingestion_runs`, `document_versions`, `document_sections`,
+`document_chunks` y `document_version_events`; inserta el metadato del
+original en `source_artifacts`; y **lee** `technical_assets` para resolver el
+activo de un documento. No toca ninguna tabla del conocimiento estructurado,
+y hay una prueba que lo comprueba.
+
+### Cómo se garantiza la atomicidad
+
+- **Una versión entra entera o no entra.** `store_version` escribe la
+  versión, sus secciones, sus chunks y el cierre de la ejecución de ingesta
+  dentro de una sola transacción. Si algo falla no queda ni la versión ni la
+  corrida cerrada: una versión con la mitad de sus chunks sería una mentira
+  sobre el documento, y la recuperación no tendría forma de notarlo.
+- **La numeración y la publicación se serializan en la base.** Las dos toman
+  `pg_advisory_xact_lock` sobre el documento, de modo que dos peticiones
+  simultáneas no se pisan aunque vengan de dos instancias del backend. Un
+  cerrojo en memoria de Python no protegería nada con más de un proceso. El
+  índice parcial `uq_published_document_version` es el respaldo.
+- **Publicar reemplaza en la misma transacción** en la que marca la anterior
+  como `superseded` y registra los dos eventos.
+- **Un fallo de infraestructura se traduce**, no se filtra: se convierte en
+  `KnowledgeUnavailableError` (503). Lo que el dominio sí distingue
+  —duplicado, no encontrado, no publicable— conserva su error propio.
+
+### La lectura por alcance filtra en SQL
+
+`list_published_chunks` pone el alcance en el `where`, no en Python. No es
+una optimización: es lo que hace que no exista un instante en el que el
+proceso tenga en memoria un chunk que la persona no puede leer.
+
+La procedencia se reconstruye con **joins explícitos**, no leyendo
+`document_chunk_provenance`. La vista no expone todas las columnas del chunk,
+así que no basta para reconstruir el registro del puerto; sigue existiendo
+para diagnóstico y consultas de operación.
+
+### Qué diferencia queda entre memoria y PostgreSQL
+
+| Diferencia | Por qué |
+|---|---|
+| El activo tiene que existir | En PostgreSQL es una fila real y la clave foránea compuesta impide atarlo a otro dominio; el adaptador lanza `AssetNotFoundError`. En memoria no hay catálogo de activos que consultar |
+| `DocumentRecord.asset_id` | En PostgreSQL es el identificador real del activo; en memoria es un valor derivado del código. Las pruebas de contrato asertan sobre `asset_code` y `scope`, que es lo que decide la autorización |
+| Clase del original (`source_artifacts.kind`) | Solo PostgreSQL la registra, derivada del tipo MIME |
+| Concurrencia entre procesos | Solo PostgreSQL la resuelve; memoria vive en un proceso |
+
+Todo lo demás —contrato, ciclo de vida, comparación entre versiones,
+procedencia, aislamiento y orden de recuperación— es idéntico, y las pruebas
+de contrato lo verifican en cada ejecución.
+
+### Qué falta para 4.2
+
+El esquema no tiene columna vectorial y este bloque no la añade. Con la
+persistencia ya en pie, 4.2 puede elegir el modelo de embeddings, añadir su
+migración con la dimensión que ese modelo imponga, y escribir los vectores de
+chunks que **ya existen en PostgreSQL**. Ver
+[`bloque-4-2-plan.md`](bloque-4-2-plan.md).
 
 ---
 

@@ -149,9 +149,10 @@ de las migraciones.
 | `20260906010000_…` | 2 | Conocimiento técnico: activos, componentes, BOM, SAP, AMEF, S/O/D, reconciliación y revisión |
 | `20260908010000_…` | 4 | Conocimiento documental: documentos, versiones, secciones y chunks |
 
-Las tres están probadas aplicándolas sobre un PostgreSQL limpio (ver arriba),
-pero **ninguna se ha aplicado a ningún proyecto Supabase remoto**: ese
-proyecto aún no está enlazado.
+Las tres están probadas aplicándolas sobre un PostgreSQL limpio (ver arriba).
+Las tres están además **aplicadas y validadas en el proyecto Supabase de
+ELSA**; la aplicación la hizo manualmente el responsable del proyecto, con
+las comprobaciones que recoge cada runbook.
 
 Los runbooks de aplicación están en
 [`migration-runbook-bloque-2.md`](migration-runbook-bloque-2.md) y

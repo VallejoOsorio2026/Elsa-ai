@@ -67,18 +67,19 @@ mezclar un chunk con la sección de otra versión.
 
 ### 0.1.1 Un documento del repositorio quedó desactualizado
 
-`docs/migration-runbook-bloque-4.md:7` sigue diciendo:
+Cuando se escribió esta planificación, `docs/migration-runbook-bloque-4.md:7`
+decía:
 
 > **Esta migración NO se ha aplicado a ningún proyecto Supabase.**
 
-Era cierto cuando se escribió y **ya no lo es**. Ese aviso no debe usarse como
-fuente del estado actual.
+Era cierto cuando se redactó y dejó de serlo al aplicarla. Ese aviso ya está
+corregido; no debe usarse ninguna versión antigua de él como fuente del estado
+actual.
 
-Corregirlo es un cambio de documentación ajeno a esta planificación, así que
-**no se mezcla aquí**: queda propuesto como unidad de trabajo aparte, que debe
-actualizar el aviso del runbook y registrar la aplicación confirmada con sus
-comprobaciones. Mientras eso no ocurra, el estado de referencia es §0.1 de este
-documento.
+Corregirlo era un cambio de documentación ajeno a esta planificación, así que
+no se mezcló aquí: quedó propuesto como unidad aparte. **Hecho en el Bloque
+4.1.b**, que actualizó el aviso del runbook con la aplicación confirmada y sus
+comprobaciones.
 
 ### 0.2 No existe adaptador PostgreSQL del repositorio documental
 
@@ -86,12 +87,14 @@ Comprobado en el código, que es la única fuente válida para esto:
 `DocumentRepositoryPort` solo tiene `memory_documents.py` (566 líneas) y no
 existe `postgres_documents.py`.
 
-**Esta es la única carencia dura que queda**, y es la importante: el esquema
-documental está aplicado en el remoto (§0.1), pero ELSA todavía no sabe
-escribir en él. Y no se pueden guardar vectores de chunks que no están en
-PostgreSQL. Construir el adaptador es un trabajo comparable al de un bloque
-entero: `postgres_knowledge.py`, su equivalente del Bloque 2, tiene 1362
-líneas.
+Era **la única carencia dura que quedaba**, y la importante: el esquema estaba
+aplicado en el remoto (§0.1) pero ELSA no sabía escribir en él, y no se pueden
+guardar vectores de chunks que no están en PostgreSQL.
+
+**Resuelto en el Bloque 4.1.b.** `src/elsa/adapters/postgres_documents.py`
+implementa el puerto completo, con una suite contractual que corre las mismas
+pruebas contra los dos adaptadores. Esta sección se conserva porque explica
+por qué 4.2 dependía de ello.
 
 Esto obliga a cortar el bloque (§1) y es la razón principal del corte.
 

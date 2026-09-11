@@ -4,9 +4,31 @@ Cómo aplicar `supabase/migrations/20260908010000_create_documental_knowledge_mo
 al proyecto Supabase de ELSA, qué comprobar antes y después, y cómo
 revertirlo.
 
-> **Esta migración NO se ha aplicado a ningún proyecto Supabase.** Se ha
-> verificado únicamente contra un PostgreSQL 16 local y efímero. Aplicarla
-> requiere autorización explícita del responsable del proyecto.
+> **Estado: aplicada.** La migración se aplicó al proyecto Supabase de ELSA
+> (`shiaxoyhallucehoygqt`) y se validó allí. La aplicó **manualmente el
+> responsable del proyecto**, no una sesión automatizada: el entorno de
+> trabajo de Claude Code no tiene CLI de Supabase, ni credenciales, y su
+> salida de red hacia Supabase está bloqueada por política de la
+> organización.
+>
+> Comprobaciones reportadas por el responsable tras aplicarla:
+>
+> | Comprobación | Resultado |
+> |---|---|
+> | Migraciones local = remoto | `20260905020000`, `20260906010000`, `20260908010000` |
+> | Tablas documentales con RLS | 6 / 6 |
+> | Políticas | 0 |
+> | `document_chunk_provenance` | `security_invoker=true` |
+> | `anon` / `authenticated` SELECT | false / false |
+> | `fk_chunk_section_same_version` | presente |
+> | `fk_document_asset` | presente |
+> | `uq_published_document_version` | presente |
+> | Columnas vector / embedding | 0 |
+> | Filas insertadas por la migración | 0 en las seis tablas |
+>
+> El resto de este runbook se conserva porque sigue siendo el procedimiento
+> válido para reaplicarla sobre otro proyecto, para un entorno nuevo o tras
+> una reversión.
 
 ---
 
@@ -208,8 +230,9 @@ No revierte el Bloque 2.
 - **Cargar documentos.** No hay endpoints HTTP de ingesta documental en este
   bloque; la ingesta se ejerce con
   [`document-acceptance.md`](document-acceptance.md), que trabaja en memoria.
-- **El adaptador PostgreSQL del repositorio documental.** El puerto solo
-  tiene implementación en memoria; el esquema está listo para cuando haga
-  falta persistir.
+- **El adaptador PostgreSQL del repositorio documental**, que ya existe
+  (`src/elsa/adapters/postgres_documents.py`, Bloque 4.1.b). Cómo usa estas
+  tablas y qué garantiza está en
+  [`document-model.md`](document-model.md) §10.
 - **Embeddings y pgvector.** No forman parte de esta migración
   ([ADR 0010](adr/0010-conocimiento-estructurado-vs-documental.md)).
