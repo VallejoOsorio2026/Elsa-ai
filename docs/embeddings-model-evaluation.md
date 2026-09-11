@@ -90,15 +90,51 @@ Sirven para decidir a quién se mide, no para decidir qué se usa.
 
 ---
 
+## 2.bis Los tres que pasan al banco de pruebas
+
+Decisión provisional tomada: **tres candidatos entran a medirse.**
+
+| # | Candidato | Por qué entra | Condición |
+|---|---|---|---|
+| 1 | **BGE-M3** | MIT sin ambigüedad para la entrega; ventana de 8192 tokens, que elimina el riesgo de truncamiento; y el único con **canal léxico propio** (denso + disperso + multi-vector en una pasada), justo el eje que la recuperación densa no cubre | — |
+| 2 | **Qwen3-Embedding-0.6B** | Apache-2.0; las puntuaciones multilingües públicas más altas de su tamaño; dimensión reducible y ventana de 32 k | — |
+| 3 | **EmbeddingGemma-300m** | Candidato **orientado a bajo consumo**: la mejor calidad por MB de los tres y el único que cabe con holgura en una huella pequeña. Es la respuesta si la RAM acaba siendo la restricción vinculante | **Sujeto a revisión de licencia y de uso corporativo** (decisión D1): los *Gemma Terms of Use* no son una licencia OSI ⚠ |
+
+**No se declara ganador.** La elección se hace con las mediciones del §7 sobre
+nuestro corpus, aplicando los filtros duros y el orden de preferencia del §3,
+ambos fijados antes de medir. Las razones de la tabla explican por qué cada uno
+merece el gasto de medirlo, no quién gana.
+
+Dos consecuencias operativas del corte en tres:
+
+- **Las dimensiones no coinciden** (1024, 1024 y 768). El banco trabaja fuera
+  de la base de datos precisamente por esto: medir tres espacios vectoriales no
+  puede exigir tres migraciones. La dimensión se fija en la migración de 4.2.b,
+  cuando ya haya un elegido.
+- **Si D1 se resuelve tarde, el banco arranca con dos.** EmbeddingGemma se
+  añade después sin rehacer nada: el protocolo y el conjunto dorado no dependen
+  de cuántos candidatos haya.
+
+Quedan fuera, y no es un olvido: `jina-embeddings-v3` por licencia no comercial,
+`multilingual-e5-large` y `gte-multilingual-base` por no aportar nada que los
+tres anteriores no cubran ya (§2). Si un candidato cae en el filtro duro de
+licencia, `gte-multilingual-base` es el suplente natural: Apache-2.0, 768
+dimensiones y 8192 de ventana.
+
+---
+
 ## 3. Criterio de decisión, fijado antes de medir
 
 ### Filtros duros (eliminan, no puntúan)
 
 1. **Licencia** apta para operación comercial interna y entrega a PAPELSA.
-   Decisión pendiente de aprobación: si el criterio es «licencia OSI
-   permisiva» (MIT/Apache-2.0), EmbeddingGemma queda fuera, porque los
+   BGE-M3 (MIT) y Qwen3-Embedding (Apache-2.0) lo cumplen sin discusión.
+   EmbeddingGemma entra al banco **condicionado a la decisión D1**: los
    *Gemma Terms of Use* no son una licencia OSI y traen política de uso
-   aceptable y condiciones de redistribución propias ⚠.
+   aceptable y condiciones de redistribución propias ⚠. Se mide igualmente,
+   porque tener el dato cuesta poco y no tenerlo deja sin respuesta la
+   pregunta «¿cuánto se pierde si la huella tiene que ser mínima?». Lo que no
+   se hará es elegirlo antes de que D1 esté resuelta.
 2. **Cabe en el escenario de producción acordado** (§6). Un modelo que no
    puede ejecutarse donde se va a ejecutar no es candidato.
 3. **Ventana real ≥ 1024 tokens** del tokenizador del propio modelo, medida
@@ -306,7 +342,7 @@ fuentes secundarias porque el egreso a los sitios de origen estaba bloqueado.
 - [Hybrid Search Patterns with Postgres and pgvector (Crunchy Data)](https://www.crunchydata.com/blog/hybrid-vector-search) — patrón híbrido en PostgreSQL
 - [Hybrid Search in Production: Why BM25 Still Wins on the Queries That Matter](https://tianpan.co/blog/2026-04-12-hybrid-search-production-bm25-dense-embeddings) — fallo de la recuperación densa en identificadores exactos
 - [pgvector Limitations (ParadeDB)](https://www.paradedb.com/learn/postgresql/pgvector-limitations) y [Tuning pgvector](https://www.paradedb.com/learn/postgresql/tuning-pgvector) — filtrado posterior al escaneo del índice
-- [HNSW index bypassed when LIMIT or filter selectivity exceeds threshold](https://github.com/pgvector/pgvector/issues/721) — el problema de filtrar y buscar a la vez
+- [HNSW index bypassed when LIMIT or filter selectivity exceeds threshold](https://github.com/pgvector/pgvector/issues/721) — pérdida de candidatos útiles al combinar índice aproximado y filtros selectivos. Es un problema de recall, no de autorización
 
 ---
 

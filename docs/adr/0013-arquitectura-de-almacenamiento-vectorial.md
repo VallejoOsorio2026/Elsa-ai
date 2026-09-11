@@ -19,17 +19,30 @@ Al llegar el Bloque 4.2 hay que decidir cinco cosas que no son independientes:
    la transición y sin perder la posibilidad de volver atrás.
 4. **Cómo se mantiene la regla 3 de `CLAUDE.md`** —los permisos se aplican
    antes de recuperar— cuando la recuperación pasa a ser una búsqueda por
-   vecino más cercano.
+   vecino más cercano, y cómo se evita que la elección de índice degrade la
+   calidad de lo que sí está autorizado.
 5. **Cómo se sabe que un vector está obsoleto** sin volver a leer el
    documento entero.
 
-La cuarta no es teórica. Con un índice aproximado (HNSW, IVFFlat), PostgreSQL
-**escanea el índice primero y aplica el `WHERE` después**: una consulta con
-`LIMIT 10` y un filtro selectivo puede devolver menos de 10 filas, o ninguna,
-sin error. Si el filtro es «el alcance que esta persona puede leer», un índice
-mal entendido convierte un control de autorización en una lotería de
-recuperación. Sería el peor fallo posible de este bloque: silencioso, y del
-lado equivocado.
+La cuarta tiene dos caras, y conviene no confundirlas.
+
+**La autorización no depende del índice.** La consulta de recuperación filtra
+siempre por dominio, activo autorizado, versión publicada y chunks permitidos.
+Esos filtros son cláusulas obligatorias del `WHERE`, y un índice —exista o no,
+sea exacto o aproximado— no puede devolver una fila que el filtro excluye.
+**Ningún índice se salta un permiso.** La regla 3 la sostiene el filtro, y el
+puerto ya la hace inevitable: `list_published_chunks` exige los alcances
+autorizados como argumento obligatorio.
+
+**Lo que un índice aproximado sí puede degradar es la calidad.** Con HNSW o
+IVFFlat, PostgreSQL recorre el índice y el filtro se aplica sobre lo que ese
+recorrido trajo. Con filtros selectivos —y los de ELSA lo son, porque acotan a
+un activo y a una versión publicada— una consulta con `LIMIT 10` puede acabar
+con menos de 10 candidatos útiles: no porque se recupere algo indebido, sino
+porque casi todos los vecinos que el índice visitó pertenecían a lo que el
+filtro excluye. El fallo es de **recall**, no de autorización: se entrega de
+menos, nunca de más. Y es silencioso, que es justo lo que lo hace caro: una
+respuesta pobre se parece bastante a una respuesta.
 
 ## Decisión
 
@@ -119,26 +132,42 @@ no publica— aplicado a los embeddings:
 En ningún momento de la secuencia el sistema se queda sin vectores, y volver
 atrás es cambiar el activo otra vez, no regenerar nada.
 
-### 6. En el piloto no hay índice aproximado, y es una decisión
+### 6. Los filtros son obligatorios siempre; en el piloto, además, la búsqueda es exacta
 
-La recuperación filtra **primero** por alcance autorizado y por versión
-publicada, y ordena por distancia **después**, sobre el conjunto ya filtrado:
-búsqueda exacta, recall 100 %, sin índice ANN.
+**Los filtros no son optativos ni dependen del índice.** Toda recuperación
+vectorial pasa por la misma cadena, en la misma consulta que calcula la
+similitud:
 
-Por qué es la elección correcta ahora y no una carencia:
+```
+dominio → activo autorizado → versión publicada → chunks permitidos
+```
 
-- **Correcta por construcción.** El filtro de autorización es un `WHERE` que
-  se evalúa antes del orden, no un post-filtro sobre lo que un índice quiso
-  devolver. La regla 3 de `CLAUDE.md` deja de depender de la calidad de un
-  índice.
+Esto no cambia en ningún escenario, con índice o sin él. Es la regla 3 de
+`CLAUDE.md`, y el puerto ya la hace inevitable en vez de encomendarla a la
+memoria de quien escriba la consulta.
+
+**En el piloto, además, la búsqueda vectorial es exacta**: se ordena por
+distancia sobre el conjunto ya filtrado, sin índice ANN. Por qué es la
+elección correcta ahora y no una carencia:
+
 - **El tamaño lo permite con holgura.** El piloto es un activo y unos pocos
   manuales: del orden de 10³–10⁴ chunks. Un recorrido exacto sobre eso es
   cuestión de milisegundos, y la documentación de pgvector recomienda
   explícitamente no indexar cuando la tabla es pequeña.
-- **Un índice se añade cuando el volumen lo exija**, en su propia migración,
-  midiendo el recall **con el filtro puesto** y con `hnsw.iterative_scan` en
-  `strict_order`. Lo que nunca se hará es que la corrección de la
-  autorización dependa del índice.
+- **Recall 100 % sobre lo autorizado.** Con búsqueda exacta, los `k` mejores
+  candidatos del conjunto autorizado son exactamente los `k` que se entregan.
+  No hay una variable de recall que ajustar mientras se estrena todo lo demás.
+- **Da la verdad de referencia.** Cuando llegue el momento de indexar, la
+  búsqueda exacta es contra qué se compara el índice. Sin ella no habría con
+  qué medir la pérdida.
+
+**Un índice HNSW se añade cuando el volumen lo justifique**, en su propia
+migración y con tres condiciones: medir el recall con los **filtros reales**
+puestos (no con filtros de juguete), comparar contra la búsqueda exacta como
+verdad de referencia, y usar `hnsw.iterative_scan = strict_order` para que el
+recorrido siga buscando cuando el filtro descarta lo que trajo. Lo que se mide
+al indexar es **cuántos candidatos útiles sobreviven al filtro**, no si el
+filtro se aplica: eso último no está en discusión.
 
 Los vectores se guardan **normalizados** y la similitud se mide con distancia
 coseno. Con vectores normalizados el orden es el mismo que con producto
