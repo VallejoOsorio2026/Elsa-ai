@@ -1,12 +1,29 @@
-# Banco de pruebas del modelo de embeddings (Bloque 4.2.a)
+# Bloque 4.2.a — infraestructura y banco de evaluación de embeddings
 
 Cómo se mide, qué se midió, **qué no se pudo medir y por qué**, y qué hace
 falta para cerrar la selección.
 
-> **La selección NO está cerrada.** De los tres candidatos obligatorios,
-> **ninguno se pudo ejecutar** en el entorno donde se construyó este banco.
-> No hay ganador provisional, y no se propone uno: elegir con puntuaciones
-> públicas sería exactamente lo que el protocolo prohíbe.
+Este documento cubre la **etapa A** de 4.2.a: la infraestructura con la que
+se elegirá el modelo. No es la selección del modelo, que es la etapa B.
+
+| Pieza | Estado |
+|---|---|
+| Infraestructura del banco | **Completa** |
+| Corpus sintético | **Completo** |
+| Conjunto dorado | **Completo** |
+| Métricas | **Completas** |
+| Líneas base | **Medidas** |
+| Adaptadores exclusivos del banco | **Completos** |
+| Ejecución de BGE-M3 | **Pendiente** |
+| Ejecución de Qwen3-Embedding-0.6B | **Pendiente** |
+| Ejecución de EmbeddingGemma-300m | **Pendiente** |
+| Selección del ganador | **Pendiente** |
+
+> **La selección NO está cerrada, y este bloque no pretende cerrarla.** De
+> los tres candidatos obligatorios, **ninguno se pudo ejecutar**: la política
+> de egreso del entorno bloquea `huggingface.co`. La causa es externa y está
+> documentada en §5. No hay ganador provisional y no se propone uno: elegir
+> con puntuaciones públicas sería exactamente lo que el protocolo prohíbe.
 
 Implementación: `src/elsa/bench/`. Herramienta:
 `elsa.tools.embedding_benchmark`. Protocolo aprobado:
@@ -281,32 +298,60 @@ desmentir; no se usa como dato.
 
 ---
 
-## 6. Ítems del alcance de 4.2.a que NO se entregaron
+## 6. Qué cierra esta etapa, y qué queda por etapa
 
-`docs/bloque-4-2-plan.md` §2 es una **lista cerrada de 11 ítems**. Este
-bloque entregó 5, 6, 7 y parte del 9. Lo que falta, y por qué:
+`docs/bloque-4-2-plan.md` §2 organiza 4.2.a en tres etapas. La separación
+importa: sin ella, un bloqueo de red se lee como trabajo sin hacer.
 
-| Ítem | Qué pedía | Estado |
-|---|---|---|
-| §2.1 | `EmbeddingsPort` corregido: documento/consulta + identidad del modelo | **No entregado.** Es el puerto **productivo**, y la instrucción de esta sesión fue explícita: «NO integrar todavía embeddings al flujo productivo de ELSA». Requiere decisión |
-| §2.2 | Composición `context-v1` + `embedded_sha256` | **Entregado** (`src/elsa/documents/composition.py`), función pura y con tests |
-| §2.3 | `FakeEmbeddingsAdapter` a 768/1024 | **No entregado.** Toca un adaptador del runtime |
-| §2.4 | Adaptador real por candidato en `src/elsa/adapters/`, elegido por configuración | **No entregado.** Misma razón que §2.1. El adaptador medible vive en `src/elsa/bench/adapters/`, fuera del camino productivo. El **grupo opcional** de dependencias sí se declaró |
-| §2.8 | Guardarraíles como tests | **Reinterpretado.** Ver §3: el aislamiento lo impone el filtro de la consulta, no el modelo. Los tests de que una versión no publicada no se recupera ya existen en 4.1 (`list_published_chunks`); aquí se mide confusabilidad |
-| §2.9 | ADR 0014 con el modelo elegido | **Imposible todavía:** no hay medición |
-| §2.10 | Confirmación de D4, D6, D7 y D11 | **Pendiente.** D6 queda parcialmente respondida —`context-v1` existe— pero sin medir no se confirma nada |
-| §2.11 | `embeddings-model-evaluation.md` con cifras verificadas y `environment-variables.md` | **No entregado:** las tarjetas de modelo no son accesibles, y no hay configuración nueva porque no hay integración productiva |
+### A — Infraestructura y banco de evaluación · **cerrada**
 
-Entregar parcialmente es legítimo; no declararlo no lo sería (reglas 19-21).
-**El corte de §2.1, §2.3 y §2.4 necesita autorización explícita**: chocan con
-la instrucción de no integrar embeddings al flujo productivo, y la regla 20
-no permite estrechar un alcance cerrado por cuenta propia.
+Todo lo que se puede construir y verificar sin descargar un solo modelo:
+corpus sintético troceado con el chunker real, conjunto dorado de 67
+consultas en 19 ejes, métricas por eje, composición `context-v1` con su
+hash, interfaz de adaptadores medibles, control determinista, líneas base
+léxicas medidas, herramienta e informe reproducible, y el grupo opcional de
+dependencias con el `uv.lock` al día.
+
+Corresponde a los ítems **2, 5, 6 y 7** del plan, más dos piezas que la
+lista original no preveía y que la etapa necesitaba: la interfaz de
+evaluación y el control determinista que hace el banco ejecutable en CI.
+
+### B — Ejecución real de los modelos · **pendiente por causa externa**
+
+Ítems **4** (parte de medición), **9**, **10** y **11**. Medir los tres
+candidatos, elegir con evidencia, escribir ADR 0014 y reverificar las cifras
+contra las tarjetas de modelo.
+
+Bloqueado por la política de egreso (§5). El procedimiento reproducible para
+completarlo está en §7. **Sin esta etapa no hay ganador, ni provisional.**
+
+### C — Integración productiva · **diferida**
+
+Ítems **1**, **3** y **4** (parte de integración): `EmbeddingsPort`
+corregido, `FakeEmbeddingsAdapter` a dimensiones reales y un adaptador real
+por candidato elegido por configuración.
+
+Se difieren en conjunto porque solo tienen sentido juntos: un puerto
+asimétrico sin adaptador no sirve a nadie, y un fake a 1024 dimensiones sin
+puerto asimétrico prueba un contrato que todavía no existe.
+
+**El ítem 3 no afecta a la validez del banco.** `FakeEmbeddingsAdapter`
+implementa el puerto *productivo* —simétrico, `async embed`, sin distinción
+documento/consulta— y hoy lo usa solo `tests/test_contract_embeddings.py`. El
+banco nunca lo importa: tiene su propio control
+(`src/elsa/bench/adapters/hashing.py`), asimétrico y con `describe()`. Su
+dimensión no entra en ninguna métrica.
+
+La etapa A deja el camino hecho para C: los prefijos por candidato, la
+composición del texto y la distinción documento/consulta ya están resueltos y
+probados en `src/elsa/bench/`, listos para trasladarse cuando se autorice.
 
 ---
 
-## 7. Qué falta para cerrar la selección
+## 7. Qué falta para cerrar la selección (etapa B)
 
-1. **Medir los tres** en un entorno con acceso a HuggingFace.
+1. **Medir los tres** en un entorno con acceso a HuggingFace. El
+   procedimiento reproducible está en §5.
 2. **Reverificar** las tarjetas de modelo antes de medir.
 3. **Resolver la decisión D1**: los *Gemma Terms of Use* no son una licencia
    OSI. EmbeddingGemma está aprobado para el banco y **no es elegible para
@@ -316,10 +361,14 @@ no permite estrechar un alcance cerrado por cuenta propia.
 4. **Aprobación explícita** de la elección. Este banco produce evidencia; la
    decisión no la toma la herramienta.
 
-Lo que este bloque deliberadamente **no** hace: no persiste vectores, no
-toca pgvector, no añade migraciones, no recupera nada en producción y no
-integra los embeddings al flujo real de ELSA. `src/elsa/bench/` no lo
-importa ningún módulo del runtime, y una prueba lo comprueba.
+Y después de elegir, la **etapa C**: integrar los embeddings al flujo real
+de ELSA (§6). Es una autorización aparte, no una consecuencia de haber
+medido.
+
+Lo que esta etapa deliberadamente **no** hace: no persiste vectores, no toca
+pgvector, no añade migraciones, no recupera nada en producción y no integra
+los embeddings al flujo real de ELSA. `src/elsa/bench/` no lo importa ningún
+módulo del runtime, y una prueba lo comprueba.
 
 ---
 

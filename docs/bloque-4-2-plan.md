@@ -156,7 +156,7 @@ serían tres unidades de revisión, no una.
 | Orden | Subbloque | Qué entrega | Depende de |
 |---|---|---|---|
 | **1.º** | **4.1.b — Adaptador PostgreSQL documental** | `postgres_documents.py` contra el esquema ya aplicado en el remoto | Nada nuevo: el esquema ya está aplicado y validado (§0.1) |
-| **2.º** | **4.2.a — Banco de pruebas y selección de modelo** | Puerto corregido, adaptadores reales, corpus sintético, banco, informe con mediciones y ADR 0014 | Nada. Es independiente de 4.1.b |
+| **2.º** | **4.2.a — Banco de evaluación y selección de modelo** | Se entrega en tres etapas (§2): **A** infraestructura y banco, **B** ejecución real de los modelos, **C** integración productiva | Nada. Es independiente de 4.1.b |
 | **3.º** | **4.2.b — Persistencia vectorial** | Migración vectorial, registro de modelos, corridas de embedding | **4.2.a** (la dimensión) y **4.1.b** (dónde viven los chunks) |
 
 ### Por qué este orden es el correcto
@@ -209,45 +209,93 @@ detalle. Cada una tendrá su propia planificación cuando le toque.
 
 ## 2. Dentro del alcance de 4.2.a
 
-Lista cerrada. Todo verificable por comando.
+4.2.a se entrega en **tres etapas**, y la separación no es cosmética: la
+primera no depende de nada, la segunda depende de un entorno con acceso a
+HuggingFace, y la tercera de una decisión de producto que todavía no está
+tomada. Mezclarlas haría que un bloqueo de red pareciera trabajo sin hacer.
+
+| Etapa | Qué es | Estado |
+|---|---|---|
+| **A — Infraestructura y banco de evaluación** | Con qué se mide | **Cerrada** (PR #9) |
+| **B — Ejecución real de los modelos** | Medir los tres candidatos y elegir | **Pendiente**, por causa externa |
+| **C — Integración productiva** | Que ELSA use embeddings de verdad | **Diferida** |
+
+Los once ítems de la lista original se conservan con su numeración; lo único
+que cambia es a qué etapa pertenece cada uno.
+
+### 2.A — Infraestructura y banco de evaluación (cerrada)
+
+Lo que se puede construir y verificar sin descargar un solo modelo.
+
+5. **Corpus sintético** en `bench/corpus-sintetico/`: documentos técnicos en
+   español inventados, más uno en inglés, troceados con el chunker real.
+   Ningún dato de PAPELSA (regla 12). → **42 chunks, 2 activos, v1 publicada
+   y v2 no.**
+6. **Conjunto dorado** de ~60 consultas con las `structural_key` esperadas,
+   etiquetadas por eje. → **67 consultas en 19 ejes.**
+7. **Herramienta de banco de pruebas** en `src/elsa/tools/`:
+   `Recall@{1,3,5,10}`, `MRR@10`, `nDCG@10`, `P@5`, global y por eje; líneas
+   base léxica y de trigramas; métricas de operación. Informe reproducible.
+   → **`elsa.tools.embedding_benchmark`; la parte comparable del informe es
+   idéntica entre corridas.**
+2. **Composición determinista del texto embebido**: plantilla `context-v1`
+   (título del documento › rastro de títulos › contenido) y su hash
+   `embedded_sha256`. Función pura, sin base de datos, con tests. →
+   **`src/elsa/documents/composition.py`.** Estaba en la lista sin etapa
+   asignada; pertenece aquí porque **sin ella el banco mediría una entrada
+   que producción no va a usar**.
+
+Añadido que la lista original no preveía y que la etapa necesitaba:
+
+- **Interfaz de adaptadores medibles** (`src/elsa/bench/ports.py`) y un
+  **control determinista** (`adapters/hashing.py`) que fija el suelo y hace
+  el banco ejecutable sin red, también en CI.
+- **Grupo opcional** `bench` en `pyproject.toml` con el `uv.lock` al día, de
+  modo que la corrida de la etapa B sea reproducible desde el manifiesto y un
+  clon limpio siga pasando sin instalar nada (regla 24).
+
+### 2.B — Ejecución real de los modelos (pendiente, causa externa)
+
+4. *(parte de medición)* Medir los **tres** candidatos con el mismo conjunto
+   dorado y las mismas reglas: BGE-M3, Qwen3-Embedding-0.6B y
+   EmbeddingGemma-300m, este último sujeto a la revisión de licencia (D1).
+9. **Informe de resultados** con la salida real pegada, y **ADR 0014** con el
+   modelo elegido y por qué (se escribe *después* de medir).
+10. **Confirmación de D4, D6, D7 y D11** con lo que muestre el banco,
+    registrada en ADR 0014.
+11. Documentación: `docs/embeddings-model-evaluation.md` actualizado con las
+    cifras **verificadas contra las tarjetas de los modelos**.
+
+Bloqueo: la política de egreso del entorno de trabajo responde `403` al
+`CONNECT` para `huggingface.co`, `hf.co` y `cdn-lfs.huggingface.co`. No se
+pueden descargar los pesos ni leer las tarjetas. El procedimiento para
+completarlo en un entorno habilitado está en
+[`embedding-benchmark.md`](embedding-benchmark.md) §7.
+
+**Sin esta etapa no hay ganador, ni provisional.** Un candidato sin medir no
+se descarta ni se elige, y una puntuación pública no sustituye la medición.
+
+### 2.C — Integración productiva (diferida)
+
+Todo lo que hace que ELSA *use* embeddings, frente a *medirlos*. Se difiere
+en conjunto porque los tres ítems solo tienen sentido juntos: un puerto
+asimétrico sin adaptador no sirve a nadie, y un fake a 1024 dimensiones sin
+puerto asimétrico prueba un contrato que no existe.
 
 1. **`EmbeddingsPort` corregido**: distingue documento de consulta, y declara
    identidad del modelo (nombre, revisión, dimensión, si normaliza, ventana
    máxima, plantillas de prefijo). Sigue siendo `Protocol` en
    `src/elsa/ports/`, sin dependencia de ningún proveedor.
-2. **Composición determinista del texto embebido**: plantilla `context-v1`
-   (título del documento › rastro de títulos › contenido) y su hash
-   `embedded_sha256`. Función pura, sin base de datos, con tests.
 3. **`FakeEmbeddingsAdapter` ampliado** a dimensiones reales (768, 1024),
-   determinista entre procesos. Es lo que usa el CI.
-4. **Un adaptador real por candidato**, en `src/elsa/adapters/`, elegido por
-   configuración. Los candidatos que pasan al banco son **tres**: BGE-M3,
-   Qwen3-Embedding-0.6B y EmbeddingGemma-300m como opción de bajo consumo
-   sujeta a la revisión de licencia (D1). Si D1 no está resuelta cuando
-   arranque el banco, se corre con dos y el tercero se añade sin rehacer nada.
-   Dependencias en un grupo **opcional** de `pyproject.toml`: un clon limpio
-   sigue pasando los tests sin instalarlas (regla 24).
-5. **Corpus sintético** en `bench/corpus-sintetico/`: documentos técnicos en
-   español inventados, más uno en inglés, troceados con el chunker real.
-   Ningún dato de PAPELSA (regla 12).
-6. **Conjunto dorado** de ~60 consultas con las `structural_key` esperadas,
-   etiquetadas por eje.
-7. **Herramienta de banco de pruebas** en `src/elsa/tools/`, al estilo de
-   `document_acceptance.py`: `Recall@{1,3,5,10}`, `MRR@10`, `nDCG@10`, `P@5`,
-   global y por eje; líneas base léxica y de trigramas; métricas de operación
-   (chunks/s, latencia p50/p95, RSS pico, MB por 1000 chunks). Informe
-   reproducible byte a byte.
-8. **Guardarraíles como tests, no como métricas**: fuga de alcance = 0, fuga de
-   versión no publicada = 0, determinismo, truncamiento declarado.
-9. **Informe de resultados** con la salida real pegada, y **ADR 0014** con el
-   modelo elegido y por qué (se escribe *después* de medir, no antes).
-10. **Confirmación de D4, D6, D7 y D11** con lo que muestre el banco, registrada
-    en ADR 0014. ADR 0013 ya está **aceptado**: si una medición contradijera
-    alguna de sus decisiones, se abre un ADR nuevo, no se reescribe el anterior
-    (regla 25).
-11. Documentación: `docs/embeddings-model-evaluation.md` actualizado con las
-    cifras verificadas contra las tarjetas de los modelos, y
-    `docs/environment-variables.md` con la configuración nueva.
+   determinista entre procesos. **No afecta a la validez del banco**: el
+   banco tiene su propio control y nunca importa este fake, que hoy solo lo
+   usa `tests/test_contract_embeddings.py` contra el puerto productivo.
+4. *(parte de integración)* **Un adaptador real por candidato**, en
+   `src/elsa/adapters/`, elegido por configuración.
+
+La etapa A deja el camino hecho: los prefijos por candidato, la composición
+del texto y la distinción documento/consulta ya están resueltos y probados en
+`src/elsa/bench/`, listos para trasladarse cuando se autorice.
 
 ---
 
@@ -435,23 +483,65 @@ recomendación vigente y se cierra donde corresponda.
 
 ## 5. Criterios de aceptación de 4.2.a
 
-Comando o acción → resultado observable.
+Comando o acción → resultado observable, separados por etapa (§2). Algunos
+comandos de la redacción original nombraban banderas y archivos que no
+existen (`--corpus`, `--model fake`, `tests/test_embedding_benchmark.py`);
+aquí se corrigen por los reales, porque un criterio que no se puede ejecutar
+no es un criterio.
+
+### Etapa A — verificables hoy
+
+| # | Comando / acción | Resultado esperado | Estado |
+|---|---|---|---|
+| 1 | `uv run pytest` en un clon limpio **sin** el extra `bench` | Verde. Sin omisiones nuevas salvo las de PostgreSQL ya existentes | ✅ 941 pasadas, 106 omitidas |
+| 2 | `uv run ruff check . && uv run ruff format --check . && uv run mypy` | Sin hallazgos | ✅ |
+| 3 | `uv run python -m elsa.tools.embedding_benchmark --out bench/resultados` | Sale 0 e imprime las métricas por eje y las de operación | ✅ |
+| 4 | El comando 3, dos veces, comparando la **huella comparable** del informe | Idéntica. La sección de coste depende de la máquina y se excluye de la huella a propósito | ✅ |
+| 5 | `uv run pytest tests/test_bench_corpus.py tests/test_bench_metrics.py tests/test_bench_harness.py` | Verde | ✅ 49 pasadas |
+| 9 | Texto embebido de un chunk, calculado dos veces | Mismo `embedded_sha256`; y distinto al cambiar la plantilla | ✅ `tests/test_document_composition.py` |
+| 10 | `git status` tras una corrida completa | Limpio: ni pesos, ni vectores, ni corpus privado | ✅ |
+| 11 | `git grep -nE "\.onnx\|\.gguf\|\.safetensors"` y `gitleaks` | Sin pesos versionados, sin secretos | ✅ |
+
+### Etapa B — exigen medir los modelos
 
 | # | Comando / acción | Resultado esperado |
 |---|---|---|
-| 1 | `uv run pytest` en un clon limpio **sin** el grupo opcional | Verde. Sin omisiones nuevas salvo las de PostgreSQL ya existentes |
-| 2 | `uv run ruff check . && uv run ruff format --check . && uv run mypy` | Sin hallazgos |
-| 3 | `uv run python -m elsa.tools.embedding_benchmark --corpus bench/corpus-sintetico --model fake` | Sale 0 e imprime las métricas por eje y las de operación |
-| 4 | El comando 3, dos veces, con `diff` de las salidas | Idénticas byte a byte |
-| 5 | `uv run pytest tests/test_embedding_benchmark.py` | Verde, incluidos los guardarraíles: fuga de alcance 0, fuga de versión 0 |
-| 6 | Banco con corpus de dos activos y usuario autorizado a uno | **0** chunks del activo no autorizado en los resultados, para todo `k` |
-| 7 | Banco con una versión publicada y otra `pending_validation` | **0** chunks de la no publicada |
-| 8 | El comando 3 con **cada** adaptador real, en la máquina de referencia declarada | Informe completo por candidato, con la salida real pegada en el cierre |
-| 9 | Texto embebido de un chunk, calculado dos veces | Mismo `embedded_sha256`; y distinto al cambiar la plantilla |
-| 10 | `git status` tras una corrida completa | Limpio: ni pesos, ni vectores, ni corpus privado |
-| 11 | `git grep -nE "\.onnx|\.gguf|\.safetensors"` y `gitleaks` | Sin pesos versionados, sin secretos |
-| 12 | `uv run pytest tests/test_contract_embeddings.py` | El fake y cada adaptador real cumplen el mismo contrato de puerto |
+| 8 | El comando 3 con `--candidates bge-m3,qwen3-0.6b,embeddinggemma-300m`, en la máquina de referencia declarada | Informe completo por candidato, con la salida real pegada en el cierre |
 | 13 | Revisión del informe por el responsable | El modelo elegido cumple los filtros duros y el orden de preferencia fijado **antes** de medir |
+
+### Etapa C — exigen integración productiva
+
+| # | Comando / acción | Resultado esperado |
+|---|---|---|
+| 12 | `uv run pytest tests/test_contract_embeddings.py` | El fake y cada adaptador real cumplen el mismo contrato de puerto |
+
+### Criterios 6 y 7: reinterpretados
+
+La redacción original los pedía como guardarraíles **del modelo**:
+
+> 6. Banco con corpus de dos activos y usuario autorizado a uno → **0**
+>    chunks del activo no autorizado en los resultados, para todo `k`.
+> 7. Banco con una versión publicada y otra `pending_validation` → **0**
+>    chunks de la no publicada.
+
+No son propiedades del modelo, y exigirlas como tales sería medir lo que no
+depende de él. El aislamiento lo impone el `WHERE` de la consulta de
+recuperación, y ningún índice puede devolver una fila que el filtro excluye
+—es lo que ya razona [ADR 0013](adr/0013-arquitectura-de-almacenamiento-vectorial.md).
+Los tests de que una versión no publicada no se recupera **ya existen**,
+donde corresponde: en el repositorio documental del Bloque 4.1
+(`list_published_chunks`).
+
+Lo que el banco sí mide, y aporta, es **confusabilidad**: si el ranking denso
+confunde dos activos que hablan parecido o dos versiones del mismo documento
+(`confusion@5`, ejes `asset_confusion`, `version_confusion` y
+`near_miss_document`). Para poder medirla, el banco **no aplica** el filtro
+de alcance: si lo aplicara, la confusión sería inmedible.
+
+**Esta reinterpretación reescribe dos criterios de una lista aprobada y
+necesita quedar registrada** —ADR 0014 o enmienda firmada de este plan—
+antes de dar 4.2.a por cerrado en su totalidad. Detalle en
+[`embedding-benchmark.md`](embedding-benchmark.md) §3.
 
 ---
 

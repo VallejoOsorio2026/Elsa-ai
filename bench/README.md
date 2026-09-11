@@ -1,4 +1,8 @@
-# `bench/` — banco de pruebas del modelo de embeddings
+# `bench/` — banco de evaluación de embeddings
+
+Es la **infraestructura con la que se elegirá** el modelo, no la elección: a
+día de hoy ninguno de los tres candidatos se ha podido ejecutar. Ver
+[`docs/embedding-benchmark.md`](../docs/embedding-benchmark.md) §6.
 
 Corpus y conjunto dorado **sintéticos**, y los informes que produce el banco.
 Nada de aquí procede de PAPELSA.
