@@ -625,3 +625,32 @@ async def test_invalid_structure_has_no_partial_writes(
     valid = await repository.store_version(data, actor=ACTOR)
     assert valid.version_number == 1
     assert len(await repository.list_version_events(valid.id)) == 1
+
+
+async def test_mutable_metadata_cannot_rewrite_a_stored_operation(
+    repository: DocumentRepositoryPort,
+) -> None:
+    doc = await document(repository)
+    data = await version_input(repository, doc)
+    warnings = {"example": 1}
+    data = replace(data, stats={"warnings": warnings})
+    version = await repository.store_version(data, actor=ACTOR)
+    warnings["example"] = 2
+    run = await repository.get_ingestion_run(data.run_id)
+    assert run and run.stats == {"warnings": {"example": 1}}
+    with pytest.raises(VersionConflictError):
+        await repository.store_version(data, actor=ACTOR)
+    # Las lecturas también deben ser snapshots: modificar un dict devuelto
+    # no equivale a una escritura del repositorio ni altera el próximo retry.
+    assert isinstance(run.stats, dict)
+    run.stats["warnings"] = {"example": 3}
+    assert isinstance(version.chunking_parameters, dict)
+    version.chunking_parameters["unexpected"] = True
+    saved = await repository.get_version(version.id)
+    assert saved and "unexpected" not in saved.chunking_parameters
+    assert (
+        await repository.store_version(
+            replace(data, stats={"warnings": {"example": 1}}), actor=ACTOR
+        )
+        == saved
+    )

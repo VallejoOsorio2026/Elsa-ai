@@ -15,6 +15,7 @@ la configuración solo la permite en DEV.
 import asyncio
 import uuid
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from datetime import UTC, datetime
 
 from elsa.core.authorization import Scope
@@ -164,8 +165,8 @@ class InMemoryDocumentRepository:
         source_id = self._source_by_hash.get(sha256)
         if source_id is None:
             return None
-        return next(
-            (run for run in self._runs.values() if run.source_artifact_id == source_id), None
+        return deepcopy(
+            next((run for run in self._runs.values() if run.source_artifact_id == source_id), None)
         )
 
     async def start_ingestion_run(
@@ -215,7 +216,7 @@ class InMemoryDocumentRepository:
                 request_id=request_id,
             )
             self._runs[run.id] = run
-            return run
+            return deepcopy(run)
 
     async def fail_ingestion_run(
         self,
@@ -243,20 +244,20 @@ class InMemoryDocumentRepository:
                 failure_message=failure_message,
                 request_id=run.request_id,
                 finished_at=_now(),
-                stats=dict(stats or {}),
+                stats=deepcopy(dict(stats or {})),
             )
             self._runs[run.id] = updated
-            return updated
+            return deepcopy(updated)
 
     async def get_ingestion_run(self, run_id: str) -> DocumentIngestionRunRecord | None:
-        return self._runs.get(run_id)
+        return deepcopy(self._runs.get(run_id))
 
     async def list_ingestion_runs(
         self, document_id: str, *, limit: int = 50
     ) -> tuple[DocumentIngestionRunRecord, ...]:
         runs = [run for run in self._runs.values() if run.document_id == document_id]
         runs.sort(key=lambda run: (-run.started_at.timestamp(), run.id))
-        return tuple(runs[: max(0, limit)])
+        return deepcopy(tuple(runs[: max(0, limit)]))
 
     # -----------------------------------------------------------------
     # Versiones
@@ -284,7 +285,7 @@ class InMemoryDocumentRepository:
                     actor=actor,
                     request_id=request_id,
                 )
-                return prior
+                return deepcopy(prior)
             require_open_run(run)
             source = self._sources.get(data.source_artifact_id)
             validate_source(data, run, None if source is None else source.sha256)
@@ -328,29 +329,31 @@ class InMemoryDocumentRepository:
                 started_at=run.started_at,
                 request_id=run.request_id,
                 finished_at=_now(),
-                stats=dict(data.stats),
+                stats=deepcopy(dict(data.stats)),
             )
             self._record(version.id, VersionEvent.CREATED, actor, None, request_id)
-            return version
+            return deepcopy(version)
 
     async def get_version(self, version_id: str) -> DocumentVersionRecord | None:
-        return self._versions.get(version_id)
+        return deepcopy(self._versions.get(version_id))
 
     async def list_versions(self, document_id: str) -> tuple[DocumentVersionRecord, ...]:
         versions = [
             version for version in self._versions.values() if version.document_id == document_id
         ]
-        return tuple(sorted(versions, key=lambda version: version.version_number))
+        return deepcopy(tuple(sorted(versions, key=lambda version: version.version_number)))
 
     async def get_published_version(self, document_id: str) -> DocumentVersionRecord | None:
-        return next(
-            (
-                version
-                for version in self._versions.values()
-                if version.document_id == document_id
-                and version.state is DocumentVersionState.PUBLISHED
-            ),
-            None,
+        return deepcopy(
+            next(
+                (
+                    version
+                    for version in self._versions.values()
+                    if version.document_id == document_id
+                    and version.state is DocumentVersionState.PUBLISHED
+                ),
+                None,
+            )
         )
 
     async def list_sections(self, version_id: str) -> tuple[DocumentSectionRecord, ...]:
@@ -383,7 +386,7 @@ class InMemoryDocumentRepository:
             updated = self._replace(version, state=state)
             self._versions[version_id] = updated
             self._record(version_id, VersionEvent(state.value), actor, reason, request_id)
-            return updated
+            return deepcopy(updated)
 
     async def publish_version(
         self, *, version_id: str, actor: str, request_id: str | None = None
@@ -412,7 +415,7 @@ class InMemoryDocumentRepository:
             )
             self._versions[version_id] = published
             self._record(version_id, VersionEvent.PUBLISHED, actor, None, request_id)
-            return published
+            return deepcopy(published)
 
     async def list_version_events(self, version_id: str) -> tuple[DocumentVersionEventRecord, ...]:
         return tuple(event for event in self._events if event.version_id == version_id)
@@ -469,7 +472,7 @@ class InMemoryDocumentRepository:
         return ChunkProvenance(
             chunk=chunk,
             document=document,
-            version=version,
+            version=deepcopy(version),
             section=section,
             source_sha256=source.sha256,
             source_storage_key=source.storage_key,
