@@ -18,6 +18,13 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
 from elsa.core.authorization import Scope
+from elsa.documents.persistence import (
+    content_records,
+    require_publishable,
+    validate_retry,
+    validate_source,
+    validate_transition,
+)
 from elsa.ports.documents import (
     ChunkProvenance,
     DocumentAlreadyExistsError,
@@ -33,7 +40,6 @@ from elsa.ports.documents import (
     DocumentVersionState,
     DuplicateSourceError,
     IngestionRunStatus,
-    NotPublishableError,
     VersionEvent,
     VersionNotFoundError,
 )
@@ -261,6 +267,22 @@ class InMemoryDocumentRepository:
             if run is None:
                 raise VersionNotFoundError(data.run_id)
 
+            prior = next((v for v in self._versions.values() if v.run_id == run.id), None)
+            if prior is not None:
+                validate_retry(
+                    data,
+                    prior,
+                    run,
+                    self._sections[prior.id],
+                    self._chunks[prior.id],
+                    next(e for e in self._events if e.version_id == prior.id),
+                    actor=actor,
+                    request_id=request_id,
+                )
+                return prior
+            source = self._sources.get(data.source_artifact_id)
+            validate_source(data, run, None if source is None else source.sha256)
+
             existing = [
                 version
                 for version in self._versions.values()
@@ -286,68 +308,7 @@ class InMemoryDocumentRepository:
                 chunk_count=len(data.structure.chunks),
             )
 
-            # Las secciones llegan en orden de lectura, asi que el padre
-            # siempre esta ya registrado cuando se procesa un hijo.
-            section_ids: dict[str, str] = {}
-            sections: list[DocumentSectionRecord] = []
-            for section in data.structure.sections:
-                identifier = _identifier()
-                section_ids[section.path] = identifier
-                sections.append(
-                    DocumentSectionRecord(
-                        id=identifier,
-                        version_id=version.id,
-                        ordinal=section.ordinal,
-                        path=section.path,
-                        depth=section.depth,
-                        title=section.title,
-                        parent_id=(
-                            None
-                            if section.parent_path is None
-                            else section_ids.get(section.parent_path)
-                        ),
-                        parent_path=section.parent_path,
-                        number_label=section.number_label,
-                        page_start=section.page_start,
-                        page_end=section.page_end,
-                        char_start=section.char_start,
-                        char_end=section.char_end,
-                        is_preamble=section.is_preamble,
-                    )
-                )
-
-            chunks = [
-                DocumentChunkRecord(
-                    id=_identifier(),
-                    version_id=version.id,
-                    ordinal=chunk.ordinal,
-                    structural_key=chunk.structural_key,
-                    content=chunk.content,
-                    content_sha256=chunk.content_sha256,
-                    kind=chunk.kind,
-                    section_id=(
-                        None if chunk.section_path is None else section_ids.get(chunk.section_path)
-                    ),
-                    section_path=chunk.section_path,
-                    section_title=chunk.section_title,
-                    index_in_section=chunk.index_in_section,
-                    heading_trail=chunk.heading_trail,
-                    page_start=chunk.page_start,
-                    page_end=chunk.page_end,
-                    block_start=chunk.block_start,
-                    block_end=chunk.block_end,
-                    char_start=chunk.char_start,
-                    char_end=chunk.char_end,
-                    token_estimate=chunk.token_estimate,
-                    char_length=chunk.char_length,
-                    overlap_chars=chunk.overlap_chars,
-                    boundary_reason=chunk.boundary_reason,
-                    oversized=chunk.oversized,
-                    warnings=chunk.warnings,
-                    change_kind=data.changes.get(chunk.structural_key),
-                )
-                for chunk in data.structure.chunks
-            ]
+            sections, chunks = content_records(data, version.id)
 
             self._versions[version.id] = version
             self._sections[version.id] = sections
@@ -412,15 +373,7 @@ class InMemoryDocumentRepository:
             version = self._versions.get(version_id)
             if version is None:
                 raise VersionNotFoundError(version_id)
-            if version.state is DocumentVersionState.PUBLISHED:
-                raise NotPublishableError("a published version cannot change state directly")
-            # Solo las dos decisiones que toma una persona. `published` tiene
-            # su propia operacion porque ademas reemplaza a la anterior, y
-            # `superseded` no lo decide nadie: es consecuencia de publicar.
-            if state not in (DocumentVersionState.APPROVED, DocumentVersionState.REJECTED):
-                raise NotPublishableError(
-                    f"a version cannot be moved to {state.value} through this operation"
-                )
+            validate_transition(version.state, state, reason)
             updated = self._replace(version, state=state)
             self._versions[version_id] = updated
             self._record(version_id, VersionEvent(state.value), actor, reason, request_id)
@@ -433,12 +386,7 @@ class InMemoryDocumentRepository:
             version = self._versions.get(version_id)
             if version is None:
                 raise VersionNotFoundError(version_id)
-            if version.state is not DocumentVersionState.APPROVED:
-                # Publicar sin aprobar saltaría la validación entera. El
-                # estado no es decoración: es el permiso para publicar.
-                raise NotPublishableError(
-                    f"only an approved version can be published; this one is {version.state.value}"
-                )
+            require_publishable(version.state)
             moment = _now()
             for other in list(self._versions.values()):
                 if (
@@ -470,7 +418,7 @@ class InMemoryDocumentRepository:
     async def list_published_chunks(
         self, *, scopes: Sequence[Scope], limit: int = 100
     ) -> tuple[ChunkProvenance, ...]:
-        if not scopes:
+        if not scopes or limit <= 0:
             return ()
         allowed = set(scopes)
         results: list[ChunkProvenance] = []

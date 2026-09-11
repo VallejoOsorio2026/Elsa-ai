@@ -41,6 +41,8 @@ from elsa.ports.knowledge import (
 __all__ = [
     "ChunkProvenance",
     "DocumentAlreadyExistsError",
+    "DocumentIntegrityError",
+    "VersionConflictError",
     "DocumentChunkRecord",
     "DocumentIngestionRunRecord",
     "DocumentNotFoundError",
@@ -76,6 +78,14 @@ class DocumentAlreadyExistsError(Exception):
 
 class VersionNotFoundError(Exception):
     """No existe esa versión o esa ejecución de ingesta."""
+
+
+class DocumentIntegrityError(ValueError):
+    """Documento, corrida, original o estructura no corresponden entre sí."""
+
+
+class VersionConflictError(DocumentIntegrityError):
+    """La corrida ya produjo una versión con otra operación de escritura."""
 
 
 # ---------------------------------------------------------------------
@@ -440,6 +450,14 @@ class DocumentRepositoryPort(Protocol):
 
         La versión entra siempre como ``pending_validation``: nunca se
         publica sola.
+
+        Una corrida produce como máximo una versión. Repetir los mismos
+        campos persistibles, stats, actor y request_id devuelve la versión
+        existente en su estado actual, sin eventos ni timestamps nuevos.
+        Los campos transitorios de extracción no forman parte de esa igualdad.
+        Reutilizar la corrida con otros datos lanza VersionConflictError.
+        Documento, corrida, original y hash deben corresponder; una combinación
+        incompatible lanza DocumentIntegrityError sin escrituras parciales.
         """
         ...
 
@@ -466,7 +484,10 @@ class DocumentRepositoryPort(Protocol):
         reason: str | None = None,
         request_id: str | None = None,
     ) -> DocumentVersionRecord:
-        """Aprueba o rechaza una versión que aún no está publicada."""
+        """Aprueba o rechaza una versión que aún no está publicada.
+
+        Rechazar exige un motivo no vacío; de lo contrario NotPublishableError.
+        """
         ...
 
     async def publish_version(
