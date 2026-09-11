@@ -118,6 +118,35 @@ del primer resultado, y el coseno sobre vectores normalizados está acotado a
 es comparable; contra la línea léxica no lo es. El informe lo advierte donde
 aparece.
 
+### Se embebe el texto compuesto, no el chunk en crudo
+
+El texto que va al modelo lleva delante su contexto, con la plantilla
+versionada `context-v1` (`src/elsa/documents/composition.py`):
+
+```
+<título del documento> › <rastro de títulos> › <contenido>
+```
+
+No es un adorno. «El par de apriete es de 45 N·m» es casi idéntico en el
+manual de la prensa y en el de la bomba, y sin contexto los dos vectores
+quedarían prácticamente en el mismo sitio. Y sobre todo: **producción va a
+embeber el texto compuesto**, así que un banco que midiera el contenido en
+crudo elegiría el modelo con una entrada que nunca se va a usar. Es el error
+más caro posible aquí, porque no falla — mide otra cosa.
+
+La plantilla se identifica y el texto compuesto se hashea
+(`embedded_sha256`), de modo que cambiarla se sabe que invalida los vectores
+sin tener que releer el documento. `context-v1` entra en la identidad de cada
+corrida: dos corridas con plantillas distintas no son comparables y las
+huellas lo dicen.
+
+**Asimetría deliberada con las líneas base.** Los recuperadores léxicos
+buscan sobre el contenido en crudo; el denso, sobre el texto compuesto. Es lo
+que reproduce la arquitectura prevista —`tsvector` sobre el contenido, vector
+sobre la composición— pero conviene saberlo al leer la tabla. Si el canal
+léxico del Bloque 4.3 acaba indexando también los títulos, esta comparación
+habrá que repetirla.
+
 ---
 
 ## 4. Resultados medidos
@@ -130,7 +159,7 @@ Máquina: Intel Xeon @ 2,80 GHz, 4 vCPU, 15,7 GB RAM, **sin GPU**.
 |---|---|---|---|---|---|---|---|
 | `lexical-bm25` (línea base) | 0,661 | 0,658 | 0,763 | 0,822 | 0,742 | 0,709 | 0,244 |
 | `lexical-trigram` (línea base) | 0,373 | 0,508 | 0,669 | 0,847 | 0,556 | 0,591 | 0,220 |
-| `control-hashing-ngrams` (control) | 0,407 | 0,528 | 0,701 | 0,839 | 0,562 | 0,595 | 0,220 |
+| `control-hashing-ngrams` (control) | 0,458 | 0,667 | 0,774 | 0,873 | 0,630 | 0,653 | 0,251 |
 
 `control-hashing-ngrams` **no es un modelo**: proyecta n-gramas de
 caracteres por hash, sin ninguna semántica. Es el suelo del banco y sirve
@@ -140,37 +169,52 @@ para comprobar que el arnés mide lo que dice medir.
 
 | Eje (R@5) | BM25 | Trigramas | Control |
 |---|---|---|---|
-| **`synonyms`** | 0,500 | 0,250 | **0,125** |
+| **`synonyms`** | 0,500 | 0,250 | **0,250** |
 | **`cross_language`** | 0,500 | 0,375 | 0,500 |
-| **`typos`** | 0,375 | 0,250 | 0,250 |
-| `narrative` | 0,500 | 0,375 | 0,625 |
+| `section_reference` | 0,667 | 0,667 | 0,667 |
+| `preventive` | 0,667 | 0,667 | 1,000 |
+| `narrative` | 0,500 | 0,375 | 0,875 |
+| `typos` | 0,375 | 0,250 | 0,750 |
+| `numbers_units` | 1,000 | 1,000 | 0,625 |
+| `safety` | 1,000 | 1,000 | 0,667 |
 | `codes` *(diagnóstico)* | 1,000 | 1,000 | 1,000 |
-| `safety` | 1,000 | 1,000 | 1,000 |
-| `numbers_units` | 1,000 | 1,000 | 0,875 |
 
 Lo que estos números dicen, y es el resultado útil de este bloque aunque no
 se haya medido ningún modelo:
 
 - **`synonyms` es el eje discriminante.** Es el más bajo de los tres
-  recuperadores y el que mide exactamente lo que aporta un vector:
-  «balinera» por «rodamiento», «torsión» por «par». Un candidato denso que
-  no supere claramente 0,500 aquí no está aportando semántica.
+  recuperadores —0,500 el mejor— y mide exactamente lo que aporta un vector:
+  «balinera» por «rodamiento», «torsión» por «par». Un candidato denso que no
+  supere claramente 0,500 aquí no está aportando semántica, y es el único eje
+  que la composición del contexto **no** mejoró.
 - **`cross_language` es el segundo.** La línea léxica no puede cruzar
   idiomas por construcción; un multilingüe debería dominarlo.
-- **`codes` está resuelto sin vector.** Confirma la decisión de no
-  puntuarlo.
-- **`narrative`: el control gana a BM25** (0,625 vs 0,500). No es ruido: las
-  consultas narrativas usan palabras distintas a las del manual, y ahí un
+- **`codes` está resuelto sin vector**, al 100 % por las tres. Confirma la
+  decisión de no puntuarlo.
+- **Componer el contexto cambia mucho más de lo esperado.** Con el chunk en
+  crudo el control sacaba 0,701 de R@5 global; con `context-v1`, 0,774. Por
+  eje el salto es grande donde el título de la sección coincide con la
+  consulta —`narrative` de 0,625 a 0,875, `typos` de 0,250 a 0,750— y hay
+  **retrocesos** donde el contexto añade palabras que compiten con el dato:
+  `numbers_units` bajó de 0,875 a 0,625 y `safety` de 1,000 a 0,667.
+  Es una advertencia concreta para 4.2.b: la plantilla de composición no es
+  neutra y merece medirse como una variable más, no fijarse por intuición.
+- **`narrative`: el control gana a BM25** (0,875 vs 0,500). Las consultas
+  narrativas usan palabras distintas a las del manual, y ahí un
   emparejamiento por palabras exactas pierde contra cualquier cosa que
   generalice, aunque sea por n-gramas.
 
-### Coste
+### Coste### Coste
 
-| Corrida | Corpus (s) | p50 consulta (ms) | p95 (ms) | RSS pico (MB) |
-|---|---|---|---|---|
-| `lexical-bm25` | 0,013 | — | — | 33,4 |
-| `lexical-trigram` | 0,024 | — | — | 33,4 |
-| `control-hashing-ngrams` | 0,007 | 0,05 | 0,08 | 33,4 |
+| Corrida | Corpus (s) | p50 consulta (ms) | p95 (ms) | RSS pico (MB) | MB/1000 chunks |
+|---|---|---|---|---|---|
+| `lexical-bm25` | 0,013 | — | — | 34,6 | — |
+| `lexical-trigram` | 0,026 | — | — | 34,6 | — |
+| `control-hashing-ngrams` | 0,011 | 0,05 | 0,08 | 34,6 | 0,98 |
+
+`MB/1000 chunks` se calcula de la dimensión (`float32`), no se mide: entre
+768 y 1024 dimensiones hay un 33 % de diferencia en lo que va a pesar el
+índice, y conviene verlo al comparar. 1024 dim → 3,91 MB por 1000 chunks.
 
 Son las líneas base: irrelevantes como referencia de coste de un modelo
 real. Están para que la columna exista y se llene en la corrida de verdad.
@@ -225,7 +269,7 @@ uv run python -m elsa.tools.embedding_benchmark \
     --device cpu --out bench/resultados
 
 # 4. Comprobar en el informe que las tres huellas coinciden con esta corrida
-#    (corpus bf9265a0…, dorado 51171efc…). Si difieren, el corpus o el
+#    (corpus 34bebb71…, dorado 51171efc…, plantilla context-v1). Si difieren, el corpus o el
 #    conjunto cambiaron y los resultados no son comparables con estos.
 ```
 
@@ -237,7 +281,30 @@ desmentir; no se usa como dato.
 
 ---
 
-## 6. Qué falta para cerrar la selección
+## 6. Ítems del alcance de 4.2.a que NO se entregaron
+
+`docs/bloque-4-2-plan.md` §2 es una **lista cerrada de 11 ítems**. Este
+bloque entregó 5, 6, 7 y parte del 9. Lo que falta, y por qué:
+
+| Ítem | Qué pedía | Estado |
+|---|---|---|
+| §2.1 | `EmbeddingsPort` corregido: documento/consulta + identidad del modelo | **No entregado.** Es el puerto **productivo**, y la instrucción de esta sesión fue explícita: «NO integrar todavía embeddings al flujo productivo de ELSA». Requiere decisión |
+| §2.2 | Composición `context-v1` + `embedded_sha256` | **Entregado** (`src/elsa/documents/composition.py`), función pura y con tests |
+| §2.3 | `FakeEmbeddingsAdapter` a 768/1024 | **No entregado.** Toca un adaptador del runtime |
+| §2.4 | Adaptador real por candidato en `src/elsa/adapters/`, elegido por configuración | **No entregado.** Misma razón que §2.1. El adaptador medible vive en `src/elsa/bench/adapters/`, fuera del camino productivo. El **grupo opcional** de dependencias sí se declaró |
+| §2.8 | Guardarraíles como tests | **Reinterpretado.** Ver §3: el aislamiento lo impone el filtro de la consulta, no el modelo. Los tests de que una versión no publicada no se recupera ya existen en 4.1 (`list_published_chunks`); aquí se mide confusabilidad |
+| §2.9 | ADR 0014 con el modelo elegido | **Imposible todavía:** no hay medición |
+| §2.10 | Confirmación de D4, D6, D7 y D11 | **Pendiente.** D6 queda parcialmente respondida —`context-v1` existe— pero sin medir no se confirma nada |
+| §2.11 | `embeddings-model-evaluation.md` con cifras verificadas y `environment-variables.md` | **No entregado:** las tarjetas de modelo no son accesibles, y no hay configuración nueva porque no hay integración productiva |
+
+Entregar parcialmente es legítimo; no declararlo no lo sería (reglas 19-21).
+**El corte de §2.1, §2.3 y §2.4 necesita autorización explícita**: chocan con
+la instrucción de no integrar embeddings al flujo productivo, y la regla 20
+no permite estrechar un alcance cerrado por cuenta propia.
+
+---
+
+## 7. Qué falta para cerrar la selección
 
 1. **Medir los tres** en un entorno con acceso a HuggingFace.
 2. **Reverificar** las tarjetas de modelo antes de medir.

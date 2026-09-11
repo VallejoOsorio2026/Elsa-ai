@@ -41,6 +41,16 @@ class CandidateSpec:
     key: str
     model_name: str
     revision: str
+    """Revisión de los pesos.
+
+    Hoy es ``main`` en los tres, que es una referencia **móvil**: lo que se
+    descargue mañana puede no ser lo que se midió. Antes de la primera
+    corrida real hay que fijar aquí el commit o el digest de cada modelo, al
+    reverificar su tarjeta. ADR 0013 §2 lo exige precisamente porque la
+    identidad del espacio vectorial tiene que ser inmutable, y las huellas
+    del informe cubren corpus y conjunto dorado, nunca los pesos.
+    """
+
     expected_dimension: int
     document_prefix: str
     query_prefix: str
@@ -178,7 +188,16 @@ def _load(spec: CandidateSpec, device: str) -> Any:
             "benchmark only. See docs/embedding-benchmark.md"
         ) from error
     try:
-        return SentenceTransformer(spec.model_name, revision=spec.revision, device=device)
+        return SentenceTransformer(
+            spec.model_name,
+            revision=spec.revision,
+            device=device,
+            # Explícito y no por defecto: este es el único punto del
+            # proyecto que descarga artefactos de terceros, y que no se
+            # ejecute código del repositorio remoto tiene que ser una
+            # propiedad auditable, no el valor por defecto de una versión.
+            trust_remote_code=False,
+        )
     except Exception as error:  # noqa: BLE001 - cualquier fallo deja el candidato sin medir
         raise ModelUnavailableError(
             f"could not load {spec.model_name!r}: {type(error).__name__}"

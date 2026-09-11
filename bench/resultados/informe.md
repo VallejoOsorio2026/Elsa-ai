@@ -3,8 +3,8 @@
 Generado por `elsa.tools.embedding_benchmark`. Corpus y conjunto dorado
 **sintéticos**: ningún dato de PAPELSA.
 
-- Huella comparable: `f3f78fb46b59f7436a21440afcba8d38`
-- Huella del corpus: `bf9265a0a36bd671361abbba46326ced`
+- Huella comparable: `c4306605c08d51ef67bf0763ccc323b7`
+- Huella del corpus: `34bebb7167bcde2c16396118d616ebb3`
 - Huella del conjunto dorado: `51171efcf7f93cca8776b63b38278bcc`
 
 > Los ejes diagnósticos (códigos) **no** entran en la puntuación principal:
@@ -19,29 +19,29 @@ Generado por `elsa.tools.embedding_benchmark`. Corpus y conjunto dorado
 |---|---|---|---|---|---|---|---|---|
 | lexical-bm25 | 59 | 0.661 | 0.658 | 0.763 | 0.822 | 0.742 | 0.709 | 0.244 |
 | lexical-trigram | 59 | 0.373 | 0.508 | 0.669 | 0.847 | 0.556 | 0.591 | 0.220 |
-| control-hashing-ngrams | 59 | 0.407 | 0.528 | 0.701 | 0.839 | 0.562 | 0.595 | 0.220 |
+| control-hashing-ngrams | 59 | 0.458 | 0.667 | 0.774 | 0.873 | 0.630 | 0.653 | 0.251 |
 
 ## 2. Por eje
 
 | Eje | lexical-bm25 | lexical-trigram | control-hashing-ngrams |
 |---|---|---|---|
 | abbreviations (R@5) | 0.833 | 0.833 | 0.667 |
-| ambiguity (R@5) | 0.833 | 0.833 | 0.833 |
+| ambiguity (R@5) | 0.833 | 0.833 | 1.000 |
 | asset_confusion (R@5) | 0.875 | 1.000 | 1.000 |
-| component_names (R@5) | 0.875 | 0.750 | 0.583 |
+| component_names (R@5) | 0.875 | 0.750 | 0.792 |
 | cross_language (R@5) | 0.500 | 0.375 | 0.500 |
 | failure_symptoms (R@5) | 1.000 | 0.750 | 1.000 |
 | keyword (R@5) | 0.833 | 0.833 | 0.833 |
-| narrative (R@5) | 0.500 | 0.375 | 0.625 |
+| narrative (R@5) | 0.500 | 0.375 | 0.875 |
 | near_miss_document (R@5) | 1.000 | 1.000 | 0.833 |
-| numbers_units (R@5) | 1.000 | 1.000 | 0.875 |
-| preventive (R@5) | 0.667 | 0.667 | 0.667 |
+| numbers_units (R@5) | 1.000 | 1.000 | 0.625 |
+| preventive (R@5) | 0.667 | 0.667 | 1.000 |
 | procedure (R@5) | 0.667 | 0.167 | 0.833 |
-| safety (R@5) | 1.000 | 1.000 | 1.000 |
+| safety (R@5) | 1.000 | 1.000 | 0.667 |
 | section_reference (R@5) | 0.667 | 0.667 | 0.667 |
-| synonyms (R@5) | 0.500 | 0.250 | 0.125 |
-| typos (R@5) | 0.375 | 0.250 | 0.250 |
-| version_confusion (R@5) | 1.000 | 0.833 | 0.833 |
+| synonyms (R@5) | 0.500 | 0.250 | 0.250 |
+| typos (R@5) | 0.375 | 0.250 | 0.750 |
+| version_confusion (R@5) | 1.000 | 0.833 | 1.000 |
 
 ## 3. Diagnóstico: códigos (no puntúa)
 
@@ -57,17 +57,17 @@ Generado por `elsa.tools.embedding_benchmark`. Corpus y conjunto dorado
 |---|---|---|
 | lexical-bm25 | 0.210 | 0.000 |
 | lexical-trigram | 0.186 | 1.000 |
-| control-hashing-ngrams | 0.133 | 0.250 |
+| control-hashing-ngrams | 0.148 | 0.000 |
 
 ## 5. Coste y hardware
 
 Depende de la máquina; no se compara como calidad.
 
-| Corrida | Runtime | Dispositivo | Dim. | Corpus (s) | p50 (ms) | p95 (ms) | RSS pico (MB) |
-|---|---|---|---|---|---|---|---|
-| lexical-bm25 | pure-python | cpu | 0 | 0.013 | — | — | 33.3 |
-| lexical-trigram | pure-python | cpu | 0 | 0.028 | — | — | 33.3 |
-| control-hashing-ngrams | pure-python | cpu | 256 | 0.007 | 0.1 | 0.22 | 33.3 |
+| Corrida | Runtime | Disp. | Dim. | Corpus (s) | p50 (ms) | p95 (ms) | RSS pico (MB) | Carga (s) | MB/1000 chunks |
+|---|---|---|---|---|---|---|---|---|---|
+| lexical-bm25 | pure-python | cpu | 0 | 0.013 | — | — | 34.6 | — | — |
+| lexical-trigram | pure-python | cpu | 0 | 0.026 | — | — | 34.6 | — | — |
+| control-hashing-ngrams | pure-python | cpu | 256 | 0.011 | 0.05 | 0.08 | 34.6 | — | 0.98 |
 
 Máquina: Intel(R) Xeon(R) Processor @ 2.80GHz · 15.7 GB RAM · GPU: none
 

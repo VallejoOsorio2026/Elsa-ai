@@ -17,6 +17,7 @@ from elsa.bench.metrics import QueryResult, Scoreboard, score_run
 from elsa.bench.model import BenchCorpus, GoldenSet, RunMetadata
 from elsa.bench.ports import BenchmarkEmbedder
 from elsa.bench.retrievers import DenseRetriever, Retriever
+from elsa.documents.composition import COMPOSITION_TEMPLATE
 
 __all__ = ["BenchmarkRun", "hardware_description", "run_dense", "run_retriever"]
 
@@ -64,6 +65,13 @@ def _peak_rss_mb() -> float:
     return round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
 
 
+def _vectors_mb_per_1000(dimension: int) -> float | None:
+    """MB que ocupan 1000 vectores de esa dimensión, en `float32`."""
+    if not dimension:
+        return None
+    return round(dimension * 4 * 1000 / 1024 / 1024, 2)
+
+
 def _percentile(values: Sequence[float], fraction: float) -> float | None:
     if not values:
         return None
@@ -106,8 +114,10 @@ def run_retriever(
         device=device,
         corpus_fingerprint=corpus.fingerprint,
         golden_fingerprint=golden.fingerprint,
+        composition_template=COMPOSITION_TEMPLATE,
         started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started)),
         corpus_embed_seconds=round(elapsed, 3),
+        vectors_mb_per_1000_chunks=_vectors_mb_per_1000(dimension),
         peak_rss_mb=_peak_rss_mb(),
         cpu=str(hardware["cpu"]),
         ram_gb=hardware["ram_gb"] if isinstance(hardware["ram_gb"], float) else None,
@@ -122,6 +132,8 @@ def run_dense(
     corpus: BenchCorpus,
     golden: GoldenSet,
     *,
+    load_seconds: float | None = None,
+    model_disk_mb: float | None = None,
     notes: Sequence[str] = (),
 ) -> BenchmarkRun:
     """Corre un candidato denso midiendo carga, corpus y latencia de consulta.
@@ -136,7 +148,9 @@ def run_dense(
     started = time.time()
 
     began = time.perf_counter()
-    passages = embedder.embed_documents([chunk.content for chunk in corpus.chunks])
+    passages = embedder.embed_documents(
+        [chunk.embedded_text or chunk.content for chunk in corpus.chunks]
+    )
     corpus_seconds = time.perf_counter() - began
 
     latencies: list[float] = []
@@ -161,10 +175,14 @@ def run_dense(
         device=description.device,
         corpus_fingerprint=corpus.fingerprint,
         golden_fingerprint=golden.fingerprint,
+        composition_template=COMPOSITION_TEMPLATE,
         started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started)),
+        load_seconds=load_seconds,
+        model_disk_mb=model_disk_mb,
         corpus_embed_seconds=round(corpus_seconds, 3),
         query_latency_p50_ms=_percentile(latencies, 0.50),
         query_latency_p95_ms=_percentile(latencies, 0.95),
+        vectors_mb_per_1000_chunks=_vectors_mb_per_1000(description.dimension),
         peak_rss_mb=_peak_rss_mb(),
         cpu=str(hardware["cpu"]),
         ram_gb=hardware["ram_gb"] if isinstance(hardware["ram_gb"], float) else None,

@@ -7,7 +7,7 @@ se compare entre ejecuciones.
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -108,10 +108,16 @@ class BenchChunk:
     kind: str
     content: str
 
-    @property
-    def is_retrievable(self) -> bool:
-        """Si ELSA lo entregaría: solo lo publicado se recupera."""
-        return self.published
+    embedded_text: str = ""
+    """Texto compuesto con `context-v1`: es **esto** lo que se embebe.
+
+    El banco indexa y rankea todo el corpus a propósito, incluida la versión
+    no publicada: si aplicara el corte por estado no podría medir si el
+    ranking confunde dos versiones. El corte lo hace el `WHERE` de la
+    consulta de recuperación, que no vive aquí.
+    """
+
+    embedded_sha256: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,7 +130,9 @@ class BenchCorpus:
     @property
     def fingerprint(self) -> str:
         """Huella del corpus. Dos corpus iguales dan la misma; uno distinto, otra."""
-        payload = "\x1f".join(f"{c.chunk_id}\x1e{c.content}" for c in self.chunks)
+        payload = "\x1f".join(
+            f"{c.chunk_id}\x1e{c.embedded_text or c.content}" for c in self.chunks
+        )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
@@ -208,6 +216,13 @@ class RunMetadata:
     device: str
     corpus_fingerprint: str
     golden_fingerprint: str
+    composition_template: str = ""
+    """Plantilla con la que se compuso el texto embebido.
+
+    Entra en :meth:`identity` porque una corrida con otra plantilla mide
+    otra entrada: sin esto, dos corridas incomparables dirían que lo son.
+    """
+
     started_at: str = ""
     load_seconds: float | None = None
     corpus_embed_seconds: float | None = None
@@ -215,6 +230,15 @@ class RunMetadata:
     query_latency_p95_ms: float | None = None
     peak_rss_mb: float | None = None
     model_disk_mb: float | None = None
+    """Tamaño del modelo en disco. Solo la corrida real puede medirlo."""
+
+    vectors_mb_per_1000_chunks: float | None = None
+    """MB de vectores por cada 1000 chunks, en coma flotante de 32 bits.
+
+    Se calcula, no se mide: depende solo de la dimensión. Está aquí porque
+    es el número que decide cuánto va a pesar el índice, y entre 768 y 1024
+    dimensiones hay un 33 % de diferencia que conviene ver al comparar.
+    """
     cpu: str = ""
     ram_gb: float | None = None
     gpu: str = "none"
@@ -232,8 +256,5 @@ class RunMetadata:
             "query_prefix": self.query_prefix,
             "corpus_fingerprint": self.corpus_fingerprint,
             "golden_fingerprint": self.golden_fingerprint,
+            "composition_template": self.composition_template,
         }
-
-
-def sequence_fingerprint(values: Sequence[str]) -> str:
-    return hashlib.sha256("\x1f".join(values).encode("utf-8")).hexdigest()

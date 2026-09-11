@@ -13,9 +13,10 @@ from pathlib import Path
 from elsa.adapters.structured_text_extractor import StructuredTextExtractor
 from elsa.bench.model import BenchChunk, BenchCorpus
 from elsa.documents.chunking import chunk_document
+from elsa.documents.composition import compose_for_embedding
 from elsa.documents.model import ChunkingPolicy
 
-__all__ = ["CORPUS_ROOT", "build_corpus", "load_corpus"]
+__all__ = ["CORPUS_ROOT", "build_corpus"]
 
 CORPUS_ROOT = Path(__file__).resolve().parents[3] / "bench" / "corpus-sintetico"
 
@@ -41,6 +42,14 @@ async def build_corpus_async(
         )
         structure = chunk_document(extracted, document_title=entry["title"], policy=active)
         for chunk in structure.chunks:
+            # Se embebe el texto **compuesto**, no el contenido en crudo: es
+            # lo que producción va a embeber, y medir otra cosa elegiría el
+            # modelo con una entrada que nunca se va a usar.
+            composed = compose_for_embedding(
+                content=chunk.content,
+                document_title=entry["title"],
+                heading_trail=chunk.heading_trail,
+            )
             chunks.append(
                 BenchChunk(
                     chunk_id=f"{entry['code']}@v{entry['version']}#{chunk.structural_key}",
@@ -57,11 +66,8 @@ async def build_corpus_async(
                     page_start=chunk.page_start,
                     kind=chunk.kind.value,
                     content=chunk.content,
+                    embedded_text=composed.text,
+                    embedded_sha256=composed.embedded_sha256,
                 )
             )
     return BenchCorpus(chunks=tuple(chunks))
-
-
-def load_corpus(root: Path | None = None) -> BenchCorpus:
-    """Alias explícito para quien solo quiere leerlo, no reconstruirlo."""
-    return build_corpus(root)

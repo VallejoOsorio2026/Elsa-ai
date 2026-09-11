@@ -17,6 +17,15 @@ dependencies = [
     "python-multipart>=0.0.9",
 ]
 
+[project.optional-dependencies]
+# Solo para el banco de pruebas del modelo de embeddings (Bloque 4.2.a).
+# NO es dependencia del runtime: ELSA no necesita torch para funcionar, y un
+# clon limpio tiene que pasar los tests sin instalar cientos de megas
+# (regla 24). Se instala con `uv sync --extra bench`.
+bench = [
+    "sentence-transformers>=3.0,<6",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",

@@ -130,16 +130,17 @@ def render_markdown(
         "",
     ]
     lines.append(
-        "| Corrida | Runtime | Dispositivo | Dim. | Corpus (s) | p50 (ms) | p95 (ms) | "
-        "RSS pico (MB) |"
+        "| Corrida | Runtime | Disp. | Dim. | Corpus (s) | p50 (ms) | p95 (ms) | "
+        "RSS pico (MB) | Carga (s) | MB/1000 chunks |"
     )
-    lines.append("|---|---|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|---|---|---|")
     for run in runs:
         meta = run.metadata
         lines.append(
             f"| {meta.model_name} | {meta.runtime} | {meta.device} | {meta.dimension} | "
             f"{meta.corpus_embed_seconds} | {meta.query_latency_p50_ms or '—'} | "
-            f"{meta.query_latency_p95_ms or '—'} | {meta.peak_rss_mb or '—'} |"
+            f"{meta.query_latency_p95_ms or '—'} | {meta.peak_rss_mb or '—'} | "
+            f"{meta.load_seconds or '—'} | {meta.vectors_mb_per_1000_chunks or '—'} |"
         )
     if runs:
         meta = runs[0].metadata

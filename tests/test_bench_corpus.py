@@ -1,5 +1,7 @@
 """El corpus del banco se construye con el chunker real y es reproducible."""
 
+from pathlib import Path
+
 import pytest
 
 from elsa.bench.corpus import build_corpus
@@ -68,12 +70,40 @@ def test_the_corpus_is_deterministic(corpus: BenchCorpus) -> None:
     assert [c.chunk_id for c in again.chunks] == [c.chunk_id for c in corpus.chunks]
 
 
-def test_the_corpus_carries_no_real_plant_data(corpus: BenchCorpus) -> None:
-    """Regla 12 del contrato: los datos reales no entran a Git."""
-    body = " ".join(chunk.content for chunk in corpus.chunks).lower()
+def test_no_artefact_of_the_benchmark_carries_real_plant_data(
+    corpus: BenchCorpus,
+) -> None:
+    """Regla 12 del contrato: los datos reales no entran a Git.
 
+    Se barre **todo** el material versionado del banco, no solo el contenido
+    de los chunks: el conjunto dorado es precisamente donde acabaria pegada
+    una pregunta real de un ingeniero de planta, y los informes generados se
+    versionan tambien.
+    """
+    root = Path(__file__).resolve().parent.parent / "bench"
+    pieces = [chunk.content for chunk in corpus.chunks]
+    golden = load_golden_set(corpus)
+    pieces += [query.text for query in golden.queries]
+    pieces += [query.rationale for query in golden.queries]
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and path.suffix in (".md", ".json"):
+            pieces.append(path.read_text(encoding="utf-8"))
+
+    body = " ".join(pieces).lower()
     for marker in FORBIDDEN:
-        assert marker not in body, f"{marker!r} no puede aparecer en un corpus sintetico"
+        # La propia lista vive en este archivo de test, no en `bench/`.
+        assert marker not in body, f"{marker!r} no puede aparecer en el material del banco"
+
+
+def test_the_benchmark_versions_no_binaries_or_dumps() -> None:
+    """Ni planos, ni PDFs, ni pesos de modelos, ni volcados de base."""
+    root = Path(__file__).resolve().parent.parent / "bench"
+
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        assert path.suffix in (".md", ".json"), f"{path.name} no deberia estar versionado"
+        assert path.stat().st_size < 1_000_000, f"{path.name} es demasiado grande"
 
 
 # ---------------------------------------------------------------------

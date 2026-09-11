@@ -27,6 +27,7 @@ y acceso de red a `huggingface.co`.
 
 import argparse
 import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -103,7 +104,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"unknown candidate {key!r}; known: {sorted(known)}", file=sys.stderr)
             return 2
         try:
+            # La carga se cronometra aparte: decide si cabe arrancar el modelo
+            # en una PC de ingenieria, que es una pregunta distinta de cuanto
+            # cuesta embeber el corpus.
+            began = time.perf_counter()
             embedder = SentenceTransformerEmbedder(spec, device=args.device)
+            load_seconds = round(time.perf_counter() - began, 3)
         except ModelUnavailableError as error:
             unmeasured.append({"model": spec.model_name, "reason": str(error)})
             continue
@@ -113,7 +119,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "measured but NOT eligible for production until its licence is formally "
                 "validated for corporate use (decision D1)"
             )
-        runs.append(run_dense(embedder, corpus, golden, notes=tuple(n for n in notes if n)))
+        runs.append(
+            run_dense(
+                embedder,
+                corpus,
+                golden,
+                load_seconds=load_seconds,
+                notes=tuple(n for n in notes if n),
+            )
+        )
 
     for spec in CANDIDATES:
         if spec.key not in requested and not any(

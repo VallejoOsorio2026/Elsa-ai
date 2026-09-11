@@ -146,8 +146,11 @@ def test_the_dense_retriever_never_embeds_a_passage_as_a_query(
 
     DenseRetriever(Spy()).run(corpus, golden)
 
-    assert seen["documents"] == [chunk.content for chunk in corpus.chunks]
+    # Y lo que se embebe como pasaje es el texto **compuesto**, no el
+    # contenido en crudo: es lo que produccion va a embeber.
+    assert seen["documents"] == [chunk.embedded_text for chunk in corpus.chunks]
     assert seen["queries"] == [query.text for query in golden.queries]
+    assert all(" › " in text for text in seen["documents"])
 
 
 def test_the_lexical_baseline_beats_the_control_on_codes(
@@ -244,17 +247,59 @@ def test_the_report_states_that_codes_do_not_decide(corpus: BenchCorpus, golden:
 
 
 def test_the_productive_code_does_not_import_the_benchmark() -> None:
-    """Regla del bloque: los embeddings no se integran al flujo real todavía."""
+    """Regla del bloque: los embeddings no se integran al flujo real todavía.
+
+    Se resuelven las importaciones con `ast`, absolutas y relativas: buscar la
+    subcadena `elsa.bench` dejaría pasar un `from ..bench.ports import ...`
+    desde `services/`, que es exactamente el import que no debe existir.
+
+    La exclusión es la herramienta del banco y nada más. `src/elsa/tools/`
+    completo seria demasiado ancho: un modulo futuro colocado ahi podria
+    importar el banco sin que salte nada.
+    """
+    import ast
+
     root = Path(__file__).resolve().parent.parent / "src" / "elsa"
+    allowed = {Path("bench"), Path("tools/embedding_benchmark.py")}
     offenders: list[str] = []
-    for path in root.rglob("*.py"):
+
+    for path in sorted(root.rglob("*.py")):
         relative = path.relative_to(root)
-        if relative.parts[0] in ("bench", "tools"):
+        if any(relative == item or item in relative.parents for item in allowed):
             continue
-        if "elsa.bench" in path.read_text(encoding="utf-8"):
-            offenders.append(str(relative))
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                if any(alias.name.startswith("elsa.bench") for alias in node.names):
+                    offenders.append(f"{relative}: import {node.names[0].name}")
+            elif isinstance(node, ast.ImportFrom):
+                absolute = (node.module or "").startswith("elsa.bench")
+                # Un import relativo desde `elsa/x/y.py` con level=2 sube a
+                # `elsa`, asi que `from ..bench import ...` apunta al banco.
+                relative_to_bench = node.level > 0 and (node.module or "").split(".")[0] == "bench"
+                if absolute or relative_to_bench:
+                    offenders.append(f"{relative}: from {'.' * node.level}{node.module}")
 
     assert offenders == [], f"el runtime importa el banco: {offenders}"
+
+
+def test_importing_the_application_does_not_pull_in_the_benchmark() -> None:
+    """Ni siquiera de forma transitiva: se comprueba sobre `sys.modules`."""
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import elsa.main, sys; print([m for m in sys.modules if m.startswith('elsa.bench')])",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert result.stdout.strip() == "[]", result.stdout
 
 
 def test_the_benchmark_needs_neither_postgres_nor_pgvector() -> None:

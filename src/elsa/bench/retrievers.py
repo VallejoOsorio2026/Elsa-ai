@@ -132,7 +132,9 @@ class DenseRetriever(Retriever):
         self.name = f"dense:{embedder.describe().model_name}"
 
     def run(self, corpus: BenchCorpus, golden: GoldenSet) -> dict[str, QueryResult]:
-        passages = self._embedder.embed_documents([chunk.content for chunk in corpus.chunks])
+        passages = self._embedder.embed_documents(
+            [chunk.embedded_text or chunk.content for chunk in corpus.chunks]
+        )
         queries = self._embedder.embed_queries([query.text for query in golden.queries])
         return self.precomputed(corpus, golden, passages, queries)
 
