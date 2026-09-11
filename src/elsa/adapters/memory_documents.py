@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from elsa.core.authorization import Scope
 from elsa.documents.persistence import (
     content_records,
+    require_open_run,
     require_publishable,
     validate_retry,
     validate_source,
@@ -30,6 +31,7 @@ from elsa.ports.documents import (
     DocumentAlreadyExistsError,
     DocumentChunkRecord,
     DocumentIngestionRunRecord,
+    DocumentIntegrityError,
     DocumentNotFoundError,
     DocumentRecord,
     DocumentSectionRecord,
@@ -191,6 +193,8 @@ class InMemoryDocumentRepository:
                     "this exact file has already been ingested",
                     existing_import_id=None if previous is None else previous.id,
                 )
+            if any(source.storage_key == storage_key for source in self._sources.values()):
+                raise DocumentIntegrityError("source storage key already belongs to an original")
             source = _Source(
                 identifier=_identifier(),
                 sha256=sha256,
@@ -225,6 +229,7 @@ class InMemoryDocumentRepository:
             run = self._runs.get(run_id)
             if run is None:
                 raise VersionNotFoundError(run_id)
+            require_open_run(run)
             # Cerrar como fallida no toca ninguna versión: la publicada sigue
             # publicada y la anterior sigue siendo la última válida.
             updated = DocumentIngestionRunRecord(
@@ -250,8 +255,8 @@ class InMemoryDocumentRepository:
         self, document_id: str, *, limit: int = 50
     ) -> tuple[DocumentIngestionRunRecord, ...]:
         runs = [run for run in self._runs.values() if run.document_id == document_id]
-        runs.sort(key=lambda run: run.started_at, reverse=True)
-        return tuple(runs[:limit])
+        runs.sort(key=lambda run: (-run.started_at.timestamp(), run.id))
+        return tuple(runs[: max(0, limit)])
 
     # -----------------------------------------------------------------
     # Versiones
@@ -280,6 +285,7 @@ class InMemoryDocumentRepository:
                     request_id=request_id,
                 )
                 return prior
+            require_open_run(run)
             source = self._sources.get(data.source_artifact_id)
             validate_source(data, run, None if source is None else source.sha256)
 
@@ -422,7 +428,14 @@ class InMemoryDocumentRepository:
             return ()
         allowed = set(scopes)
         results: list[ChunkProvenance] = []
-        for version in sorted(self._versions.values(), key=lambda v: v.version_number):
+        for version in sorted(
+            self._versions.values(),
+            key=lambda v: (
+                v.version_number,
+                self._documents[v.document_id].created_at,
+                v.document_id,
+            ),
+        ):
             if version.state is not DocumentVersionState.PUBLISHED:
                 continue
             document = self._documents[version.document_id]

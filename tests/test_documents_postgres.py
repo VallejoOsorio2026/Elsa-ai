@@ -13,11 +13,15 @@ from elsa.adapters.postgres_documents import PostgresDocumentRepository
 from elsa.core.authorization import Scope
 from elsa.ports.documents import (
     DocumentIntegrityError,
+    DocumentVersionRecord,
     DocumentVersionState,
+    IngestionRunStatus,
     KnowledgeUnavailableError,
     NotPublishableError,
+    VersionConflictError,
     VersionEvent,
 )
+from elsa.services.document_ingestion import IngestedVersion
 from tests import db
 from tests import fixtures_documents as fx
 from tests.test_document_repository import ACTOR, OTHER, document, service, version_input
@@ -305,3 +309,58 @@ async def test_memory_postgres_observable_parity(postgres: PostgresDocumentRepos
         }
 
     assert await flow(InMemoryDocumentRepository()) == await flow(postgres)
+
+
+async def test_concurrent_conflicting_retry_across_pools(
+    postgres: PostgresDocumentRepository,
+) -> None:
+    doc = await document(postgres)
+    data = await version_input(postgres, doc)
+    other = await PostgresDocumentRepository.connect(db.database_url() or "")
+    try:
+        results = await asyncio.gather(
+            postgres.store_version(data, actor=ACTOR),
+            other.store_version(replace(data, extractor_version="conflict"), actor=ACTOR),
+            return_exceptions=True,
+        )
+        assert sum(isinstance(r, VersionConflictError) for r in results) == 1
+        stored = await postgres.list_versions(doc.id)
+        assert len(stored) == 1 and stored[0].version_number == 1
+        assert len(await other.list_version_events(stored[0].id)) == 1
+        winner = (
+            data
+            if stored[0].extractor_version == data.extractor_version
+            else replace(data, extractor_version="conflict")
+        )
+        assert await other.store_version(winner, actor=ACTOR) == stored[0]
+    finally:
+        await other.close()
+
+
+async def test_failure_and_store_serialize_without_mixed_outcomes(
+    postgres: PostgresDocumentRepository,
+) -> None:
+    doc = await document(postgres)
+    data = await version_input(postgres, doc)
+    other = await PostgresDocumentRepository.connect(db.database_url() or "")
+    try:
+        results = await asyncio.gather(
+            postgres.store_version(data, actor=ACTOR),
+            other.fail_ingestion_run(
+                run_id=data.run_id, failure_kind="parse", failure_message="concurrent failure"
+            ),
+            return_exceptions=True,
+        )
+        assert sum(isinstance(r, DocumentIntegrityError) for r in results) == 1
+        run = await postgres.get_ingestion_run(data.run_id)
+        assert run and run.finished_at
+        versions = await postgres.list_versions(doc.id)
+        if isinstance(results[0], DocumentVersionRecord):
+            assert run.status is IngestionRunStatus.COMPLETED and run.failure_kind is None
+            assert versions == (results[0],)
+            assert len(await postgres.list_version_events(versions[0].id)) == 1
+        else:
+            assert run.status is IngestionRunStatus.FAILED and run.failure_kind == "parse"
+            assert versions == ()
+    finally:
+        await other.close()

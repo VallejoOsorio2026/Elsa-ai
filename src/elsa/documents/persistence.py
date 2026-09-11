@@ -13,6 +13,7 @@ from elsa.ports.documents import (
     DocumentVersionInput,
     DocumentVersionRecord,
     DocumentVersionState,
+    IngestionRunStatus,
     NotPublishableError,
     VersionConflictError,
 )
@@ -26,8 +27,8 @@ def require_reason(reason: str | None) -> None:
 def validate_transition(
     current: DocumentVersionState, target: DocumentVersionState, reason: str | None
 ) -> None:
-    if current is DocumentVersionState.PUBLISHED:
-        raise NotPublishableError("a published version cannot change state directly")
+    if current in (DocumentVersionState.PUBLISHED, DocumentVersionState.SUPERSEDED):
+        raise NotPublishableError("a published or superseded version cannot change state directly")
     if target not in (DocumentVersionState.APPROVED, DocumentVersionState.REJECTED):
         raise NotPublishableError("only approval or rejection is allowed here")
     if target is DocumentVersionState.REJECTED:
@@ -37,6 +38,11 @@ def validate_transition(
 def require_publishable(state: DocumentVersionState) -> None:
     if state is not DocumentVersionState.APPROVED:
         raise NotPublishableError("only an approved version can be published")
+
+
+def require_open_run(run: DocumentIngestionRunRecord) -> None:
+    if run.status not in (IngestionRunStatus.RECEIVED, IngestionRunStatus.PROCESSING):
+        raise DocumentIntegrityError("a closed ingestion run cannot change its outcome")
 
 
 def validate_source(

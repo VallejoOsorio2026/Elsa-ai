@@ -20,6 +20,7 @@ from elsa.core.versioning import ChangeKind
 from elsa.documents.model import ChunkKind
 from elsa.documents.persistence import (
     content_records,
+    require_open_run,
     require_publishable,
     validate_retry,
     validate_source,
@@ -316,6 +317,13 @@ class PostgresDocumentRepository:
         stats: Mapping[str, object] | None = None,
     ) -> DocumentIngestionRunRecord:
         async with self._transaction() as conn:
+            run = await conn.fetchrow(
+                "select * from elsa.document_ingestion_runs where id=$1 for update",
+                _uuid(run_id),
+            )
+            if run is None:
+                raise VersionNotFoundError(run_id)
+            require_open_run(_record(DocumentIngestionRunRecord, run))
             row = await conn.fetchrow(
                 "update elsa.document_ingestion_runs set status='failed',failure_kind=$2,"
                 "failure_message=$3,stats=$4::jsonb,finished_at=clock_timestamp() where id=$1 "
@@ -325,8 +333,6 @@ class PostgresDocumentRepository:
                 failure_message,
                 _json(stats or {}),
             )
-            if row is None:
-                raise VersionNotFoundError(run_id)
             return _record(DocumentIngestionRunRecord, row)
 
     async def store_version(
@@ -370,6 +376,7 @@ class PostgresDocumentRepository:
                     request_id=request_id,
                 )
                 return version
+            require_open_run(run)
             source = await conn.fetchrow(
                 "select sha256 from elsa.source_artifacts where id=$1 for share",
                 _uuid(data.source_artifact_id),

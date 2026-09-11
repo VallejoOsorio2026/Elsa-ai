@@ -503,3 +503,125 @@ async def test_ingestion_service_deduplicates_and_compares(
     assert ChangeKind.UNCHANGED in second.changes.values()
     still_published = await repository.get_published_version(doc.id)
     assert still_published is not None and still_published.id == first.version.id
+
+
+async def test_closed_runs_preserve_their_outcome(repository: DocumentRepositoryPort) -> None:
+    doc = await document(repository)
+    data = await version_input(repository, doc)
+    version = await repository.store_version(data, actor=ACTOR)
+    completed = await repository.get_ingestion_run(data.run_id)
+    with pytest.raises(DocumentIntegrityError):
+        await repository.fail_ingestion_run(
+            run_id=data.run_id, failure_kind="parse", failure_message="late failure"
+        )
+    assert await repository.get_ingestion_run(data.run_id) == completed
+    assert await repository.store_version(data, actor=ACTOR) == version
+    failed_data = await version_input(repository, doc, fx.MANUAL_V2)
+    failed = await repository.fail_ingestion_run(
+        run_id=failed_data.run_id, failure_kind="parse", failure_message="original failure"
+    )
+    with pytest.raises(DocumentIntegrityError):
+        await repository.store_version(failed_data, actor=ACTOR)
+    with pytest.raises(DocumentIntegrityError):
+        await repository.fail_ingestion_run(
+            run_id=failed.id, failure_kind="database", failure_message="late failure"
+        )
+    assert await repository.get_ingestion_run(failed.id) == failed
+    assert await repository.list_versions(doc.id) == (version,)
+
+
+async def test_superseded_version_is_historical(repository: DocumentRepositoryPort) -> None:
+    doc = await document(repository)
+    svc = service(repository)
+    data = await version_input(repository, doc)
+    first = await repository.store_version(data, actor=ACTOR)
+    await svc.approve(version_id=first.id, actor=ACTOR)
+    await svc.publish(version_id=first.id, actor=ACTOR)
+    second = await repository.store_version(
+        await version_input(repository, doc, fx.MANUAL_V2), actor=OTHER
+    )
+    await svc.approve(version_id=second.id, actor=OTHER)
+    published = await svc.publish(version_id=second.id, actor=OTHER)
+    historical = await repository.get_version(first.id)
+    history = await repository.list_version_events(first.id)
+    for state in (DocumentVersionState.APPROVED, DocumentVersionState.REJECTED):
+        with pytest.raises(NotPublishableError):
+            await repository.set_version_state(
+                version_id=first.id, state=state, actor=ACTOR, reason="late review"
+            )
+    with pytest.raises(NotPublishableError):
+        await svc.publish(version_id=first.id, actor=ACTOR)
+    assert await repository.store_version(data, actor=ACTOR) == historical
+    assert await repository.list_version_events(first.id) == history
+    assert await repository.get_published_version(doc.id) == published
+
+
+async def test_storage_key_collision_preserves_original(repository: DocumentRepositoryPort) -> None:
+    doc = await document(repository)
+    data = await version_input(repository, doc)
+    before = await repository.list_ingestion_runs(doc.id)
+    with pytest.raises(DocumentIntegrityError):
+        await repository.start_ingestion_run(
+            document_id=doc.id,
+            sha256="f" * 64,
+            byte_size=10,
+            storage_key=f"document_source/{data.content_sha256}",
+            uploaded_by=ACTOR,
+        )
+    assert await repository.list_ingestion_runs(doc.id) == before
+    assert await repository.find_run_by_source("f" * 64) is None
+    version = await repository.store_version(data, actor=ACTOR)
+    chunk = (await repository.list_chunks(version.id))[0]
+    provenance = await repository.get_chunk_provenance(chunk.id)
+    assert provenance and provenance.source_sha256 == data.content_sha256
+
+
+async def test_limits_and_order_do_not_depend_on_ingestion_order(
+    repository: DocumentRepositoryPort,
+) -> None:
+    first = await document(repository)
+    second = await document(repository, "manual-b")
+    # Se crean A,B y se ingieren B,A: el orden de lectura no debe invertirse.
+    for i, doc in enumerate((second, first)):
+        data = await version_input(repository, doc, fx.MANUAL_V1 + f"\nOrder {i}")
+        version = await repository.store_version(data, actor=ACTOR)
+        await service(repository).approve(version_id=version.id, actor=ACTOR)
+        await service(repository).publish(version_id=version.id, actor=ACTOR)
+    for limit in (0, -1):
+        assert await repository.list_ingestion_runs(first.id, limit=limit) == ()
+        assert await repository.list_published_chunks(scopes=[first.scope], limit=limit) == ()
+    # El reloj puede empatar en Windows; en ese caso el contrato desempata por id.
+    ordered = sorted((first, second), key=lambda d: (d.created_at, d.id))
+    limited = await repository.list_published_chunks(scopes=[first.scope], limit=1)
+    assert len(limited) == 1 and limited[0].document.id == ordered[0].id
+    all_chunks = await repository.list_published_chunks(scopes=[first.scope])
+    assert [p.document.id for p in all_chunks] == sorted(
+        [p.document.id for p in all_chunks], key=lambda id: id != ordered[0].id
+    )
+
+
+@pytest.mark.parametrize("invalid_part", ["section_parent", "chunk_section", "chunk_ordinal"])
+async def test_invalid_structure_has_no_partial_writes(
+    repository: DocumentRepositoryPort, invalid_part: str
+) -> None:
+    doc = await document(repository)
+    data = await version_input(repository, doc)
+    sections = list(data.structure.sections)
+    chunks = list(data.structure.chunks)
+    if invalid_part == "section_parent":
+        sections[-1] = replace(sections[-1], parent_path="missing")
+    elif invalid_part == "chunk_section":
+        chunks[-1] = replace(chunks[-1], section_path="missing")
+    else:
+        chunks[-1] = replace(chunks[-1], ordinal=chunks[0].ordinal)
+    invalid = replace(
+        data, structure=replace(data.structure, sections=tuple(sections), chunks=tuple(chunks))
+    )
+    run = await repository.get_ingestion_run(data.run_id)
+    with pytest.raises(DocumentIntegrityError):
+        await repository.store_version(invalid, actor=ACTOR)
+    assert await repository.get_ingestion_run(data.run_id) == run
+    assert await repository.list_versions(doc.id) == ()
+    valid = await repository.store_version(data, actor=ACTOR)
+    assert valid.version_number == 1
+    assert len(await repository.list_version_events(valid.id)) == 1
