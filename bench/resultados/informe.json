@@ -1,0 +1,835 @@
+{
+  "tool": "embedding-benchmark",
+  "comparison_fingerprint": "f3f78fb46b59f7436a21440afcba8d38aad28ea3309fe863c7375c129756b655",
+  "runs": [
+    {
+      "metadata": {
+        "retriever": "lexical-bm25",
+        "model_name": "lexical-bm25",
+        "revision": "-",
+        "dimension": 0,
+        "normalized": false,
+        "document_prefix": "",
+        "query_prefix": "",
+        "runtime": "pure-python",
+        "device": "cpu",
+        "corpus_fingerprint": "bf9265a0a36bd671361abbba46326ced956977fd2d6129327f6d6cd0a3054137",
+        "golden_fingerprint": "51171efcf7f93cca8776b63b38278bccaf44676b8057684f4cc1852868789f93",
+        "started_at": "2026-09-11T10:22:27Z",
+        "load_seconds": null,
+        "corpus_embed_seconds": 0.013,
+        "query_latency_p50_ms": null,
+        "query_latency_p95_ms": null,
+        "peak_rss_mb": 33.3,
+        "model_disk_mb": null,
+        "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+        "ram_gb": 15.7,
+        "gpu": "none",
+        "notes": []
+      },
+      "identity": {
+        "retriever": "lexical-bm25",
+        "model_name": "lexical-bm25",
+        "revision": "-",
+        "dimension": 0,
+        "normalized": false,
+        "document_prefix": "",
+        "query_prefix": "",
+        "corpus_fingerprint": "bf9265a0a36bd671361abbba46326ced956977fd2d6129327f6d6cd0a3054137",
+        "golden_fingerprint": "51171efcf7f93cca8776b63b38278bccaf44676b8057684f4cc1852868789f93"
+      },
+      "scoreboard": {
+        "primary": {
+          "label": "primary",
+          "queries": 59,
+          "recall@1": 0.661,
+          "recall@3": 0.6582,
+          "recall@5": 0.7627,
+          "recall@10": 0.822,
+          "mrr@10": 0.7417,
+          "ndcg@10": 0.7094,
+          "p@5": 0.2441,
+          "confusion@5": 0.1867
+        },
+        "per_axis": [
+          {
+            "label": "abbreviations",
+            "queries": 3,
+            "recall@1": 0.6667,
+            "recall@3": 0.6667,
+            "recall@5": 0.8333,
+            "recall@10": 0.8333,
+            "mrr@10": 0.7778,
+            "ndcg@10": 0.719,
+            "p@5": 0.2667
+          },
+          {
+            "label": "ambiguity",
+            "queries": 3,
+            "recall@1": 1.0,
+            "recall@3": 0.7222,
+            "recall@5": 0.8333,
+            "recall@10": 1.0,
+            "mrr@10": 1.0,
+            "ndcg@10": 0.8914,
+            "p@5": 0.4
+          },
+          {
+            "label": "asset_confusion",
+            "queries": 4,
+            "recall@1": 0.75,
+            "recall@3": 0.75,
+            "recall@5": 0.875,
+            "recall@10": 1.0,
+            "mrr@10": 0.875,
+            "ndcg@10": 0.8706,
+            "p@5": 0.25,
+            "confusion@5": 0.1
+          },
+          {
+            "label": "component_names",
+            "queries": 4,
+            "recall@1": 0.75,
+            "recall@3": 0.6667,
+            "recall@5": 0.875,
+            "recall@10": 0.875,
+            "mrr@10": 0.8333,
+            "ndcg@10": 0.7622,
+            "p@5": 0.35
+          },
+          {
+            "label": "cross_language",
+            "queries": 4,
+            "recall@1": 0.5,
+            "recall@3": 0.5,
+            "recall@5": 0.5,
+            "recall@10": 0.5,
+            "mrr@10": 0.5833,
+            "ndcg@10": 0.4377,
+            "p@5": 0.2
+          },
+          {
+            "label": "failure_symptoms",
+            "queries": 4,
+            "recall@1": 0.75,
+            "recall@3": 1.0,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 0.875,
+            "ndcg@10": 0.9077,
+            "p@5": 0.2,
+            "confusion@5": 0.2
+          },
+          {
+            "label": "keyword",
+            "queries": 3,
+            "recall@1": 0.6667,
+            "recall@3": 0.5,
+            "recall@5": 0.8333,
+            "recall@10": 1.0,
+            "mrr@10": 0.75,
+            "ndcg@10": 0.7693,
+            "p@5": 0.2667,
+            "confusion@5": 0.4
+          },
+          {
+            "label": "narrative",
+            "queries": 4,
+            "recall@1": 0.25,
+            "recall@3": 0.375,
+            "recall@5": 0.5,
+            "recall@10": 0.625,
+            "mrr@10": 0.425,
+            "ndcg@10": 0.4465,
+            "p@5": 0.15
+          },
+          {
+            "label": "near_miss_document",
+            "queries": 3,
+            "recall@1": 1.0,
+            "recall@3": 0.8333,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 1.0,
+            "ndcg@10": 0.9591,
+            "p@5": 0.2667,
+            "confusion@5": 0.1333
+          },
+          {
+            "label": "numbers_units",
+            "queries": 4,
+            "recall@1": 1.0,
+            "recall@3": 1.0,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 1.0,
+            "ndcg@10": 0.9678,
+            "p@5": 0.4,
+            "confusion@5": 0.1
+          },
+          {
+            "label": "preventive",
+            "queries": 3,
+            "recall@1": 0.6667,
+            "recall@3": 0.6667,
+            "recall@5": 0.6667,
+            "recall@10": 0.6667,
+            "mrr@10": 0.6667,
+            "ndcg@10": 0.6546,
+            "p@5": 0.2
+          },
+          {
+            "label": "procedure",
+            "queries": 3,
+            "recall@1": 0.3333,
+            "recall@3": 0.5,
+            "recall@5": 0.6667,
+            "recall@10": 0.6667,
+            "mrr@10": 0.5,
+            "ndcg@10": 0.4938,
+            "p@5": 0.2
+          },
+          {
+            "label": "safety",
+            "queries": 3,
+            "recall@1": 1.0,
+            "recall@3": 1.0,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 1.0,
+            "ndcg@10": 1.0,
+            "p@5": 0.2,
+            "confusion@5": 0.2
+          },
+          {
+            "label": "section_reference",
+            "queries": 3,
+            "recall@1": 0.3333,
+            "recall@3": 0.5,
+            "recall@5": 0.6667,
+            "recall@10": 0.6667,
+            "mrr@10": 0.4444,
+            "ndcg@10": 0.5146,
+            "p@5": 0.2
+          },
+          {
+            "label": "synonyms",
+            "queries": 4,
+            "recall@1": 0.5,
+            "recall@3": 0.5,
+            "recall@5": 0.5,
+            "recall@10": 0.625,
+            "mrr@10": 0.625,
+            "ndcg@10": 0.5394,
+            "p@5": 0.15
+          },
+          {
+            "label": "typos",
+            "queries": 4,
+            "recall@1": 0.5,
+            "recall@3": 0.375,
+            "recall@5": 0.375,
+            "recall@10": 0.625,
+            "mrr@10": 0.5357,
+            "ndcg@10": 0.4666,
+            "p@5": 0.15
+          },
+          {
+            "label": "version_confusion",
+            "queries": 3,
+            "recall@1": 0.6667,
+            "recall@3": 0.6667,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 0.7778,
+            "ndcg@10": 0.7515,
+            "p@5": 0.3333,
+            "confusion@5": 0.3333
+          }
+        ],
+        "diagnostic": [
+          {
+            "label": "codes",
+            "queries": 4,
+            "recall@1": 1.0,
+            "recall@3": 1.0,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 1.0,
+            "ndcg@10": 1.0,
+            "p@5": 0.2,
+            "confusion@5": 0.2
+          }
+        ],
+        "abstention": {
+          "queries": 4,
+          "rate": 0.0
+        },
+        "notes": [
+          "abstention measured over 4 queries with no expected answer, threshold 0.35",
+          "abstention is only comparable between retrievers on the same score scale: cosine over normalised vectors is bounded to [-1, 1] while BM25 is not, so a fixed threshold means different things for each",
+          "diagnostic axes are excluded from the primary score: exact codes are for the lexical or structured channel of block 4.3, not for the dense vector",
+          "confusion@5 measures ranking confusability, never authorisation: isolation is enforced by the query filter, which this benchmark deliberately does not apply"
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "retriever": "lexical-trigram",
+        "model_name": "lexical-trigram",
+        "revision": "-",
+        "dimension": 0,
+        "normalized": false,
+        "document_prefix": "",
+        "query_prefix": "",
+        "runtime": "pure-python",
+        "device": "cpu",
+        "corpus_fingerprint": "bf9265a0a36bd671361abbba46326ced956977fd2d6129327f6d6cd0a3054137",
+        "golden_fingerprint": "51171efcf7f93cca8776b63b38278bccaf44676b8057684f4cc1852868789f93",
+        "started_at": "2026-09-11T10:22:27Z",
+        "load_seconds": null,
+        "corpus_embed_seconds": 0.028,
+        "query_latency_p50_ms": null,
+        "query_latency_p95_ms": null,
+        "peak_rss_mb": 33.3,
+        "model_disk_mb": null,
+        "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+        "ram_gb": 15.7,
+        "gpu": "none",
+        "notes": []
+      },
+      "identity": {
+        "retriever": "lexical-trigram",
+        "model_name": "lexical-trigram",
+        "revision": "-",
+        "dimension": 0,
+        "normalized": false,
+        "document_prefix": "",
+        "query_prefix": "",
+        "corpus_fingerprint": "bf9265a0a36bd671361abbba46326ced956977fd2d6129327f6d6cd0a3054137",
+        "golden_fingerprint": "51171efcf7f93cca8776b63b38278bccaf44676b8057684f4cc1852868789f93"
+      },
+      "scoreboard": {
+        "primary": {
+          "label": "primary",
+          "queries": 59,
+          "recall@1": 0.3729,
+          "recall@3": 0.5085,
+          "recall@5": 0.6695,
+          "recall@10": 0.8475,
+          "mrr@10": 0.5558,
+          "ndcg@10": 0.5909,
+          "p@5": 0.2203,
+          "confusion@5": 0.1867
+        },
+        "per_axis": [
+          {
+            "label": "abbreviations",
+            "queries": 3,
+            "recall@1": 0.6667,
+            "recall@3": 0.8333,
+            "recall@5": 0.8333,
+            "recall@10": 0.8333,
+            "mrr@10": 0.7778,
+            "ndcg@10": 0.7421,
+            "p@5": 0.2667
+          },
+          {
+            "label": "ambiguity",
+            "queries": 3,
+            "recall@1": 0.6667,
+            "recall@3": 0.5556,
+            "recall@5": 0.8333,
+            "recall@10": 1.0,
+            "mrr@10": 0.8333,
+            "ndcg@10": 0.8024,
+            "p@5": 0.4
+          },
+          {
+            "label": "asset_confusion",
+            "queries": 4,
+            "recall@1": 0.5,
+            "recall@3": 0.875,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 0.75,
+            "ndcg@10": 0.8004,
+            "p@5": 0.3,
+            "confusion@5": 0.2
+          },
+          {
+            "label": "component_names",
+            "queries": 4,
+            "recall@1": 0.5,
+            "recall@3": 0.4167,
+            "recall@5": 0.75,
+            "recall@10": 0.875,
+            "mrr@10": 0.625,
+            "ndcg@10": 0.6428,
+            "p@5": 0.3
+          },
+          {
+            "label": "cross_language",
+            "queries": 4,
+            "recall@1": 0.25,
+            "recall@3": 0.375,
+            "recall@5": 0.375,
+            "recall@10": 0.5,
+            "mrr@10": 0.4167,
+            "ndcg@10": 0.3712,
+            "p@5": 0.15
+          },
+          {
+            "label": "failure_symptoms",
+            "queries": 4,
+            "recall@1": 0.25,
+            "recall@3": 0.75,
+            "recall@5": 0.75,
+            "recall@10": 1.0,
+            "mrr@10": 0.5312,
+            "ndcg@10": 0.6443,
+            "p@5": 0.15,
+            "confusion@5": 0.0
+          },
+          {
+            "label": "keyword",
+            "queries": 3,
+            "recall@1": 0.0,
+            "recall@3": 0.5,
+            "recall@5": 0.8333,
+            "recall@10": 1.0,
+            "mrr@10": 0.4167,
+            "ndcg@10": 0.5792,
+            "p@5": 0.2667,
+            "confusion@5": 0.4
+          },
+          {
+            "label": "narrative",
+            "queries": 4,
+            "recall@1": 0.25,
+            "recall@3": 0.25,
+            "recall@5": 0.375,
+            "recall@10": 0.5,
+            "mrr@10": 0.3958,
+            "ndcg@10": 0.3737,
+            "p@5": 0.15
+          },
+          {
+            "label": "near_miss_document",
+            "queries": 3,
+            "recall@1": 0.3333,
+            "recall@3": 0.8333,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 0.6111,
+            "ndcg@10": 0.6694,
+            "p@5": 0.2667,
+            "confusion@5": 0.1333
+          },
+          {
+            "label": "numbers_units",
+            "queries": 4,
+            "recall@1": 0.75,
+            "recall@3": 0.7917,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 0.875,
+            "ndcg@10": 0.8385,
+            "p@5": 0.4,
+            "confusion@5": 0.1
+          },
+          {
+            "label": "preventive",
+            "queries": 3,
+            "recall@1": 0.6667,
+            "recall@3": 0.6667,
+            "recall@5": 0.6667,
+            "recall@10": 1.0,
+            "mrr@10": 0.7,
+            "ndcg@10": 0.751,
+            "p@5": 0.2
+          },
+          {
+            "label": "procedure",
+            "queries": 3,
+            "recall@1": 0.0,
+            "recall@3": 0.0,
+            "recall@5": 0.1667,
+            "recall@10": 1.0,
+            "mrr@10": 0.168,
+            "ndcg@10": 0.3723,
+            "p@5": 0.0667
+          },
+          {
+            "label": "safety",
+            "queries": 3,
+            "recall@1": 0.3333,
+            "recall@3": 0.3333,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 0.4833,
+            "ndcg@10": 0.6058,
+            "p@5": 0.2,
+            "confusion@5": 0.2
+          },
+          {
+            "label": "section_reference",
+            "queries": 3,
+            "recall@1": 0.0,
+            "recall@3": 0.5,
+            "recall@5": 0.6667,
+            "recall@10": 0.6667,
+            "mrr@10": 0.2778,
+            "ndcg@10": 0.3836,
+            "p@5": 0.2
+          },
+          {
+            "label": "synonyms",
+            "queries": 4,
+            "recall@1": 0.25,
+            "recall@3": 0.125,
+            "recall@5": 0.25,
+            "recall@10": 0.375,
+            "mrr@10": 0.3403,
+            "ndcg@10": 0.2815,
+            "p@5": 0.1
+          },
+          {
+            "label": "typos",
+            "queries": 4,
+            "recall@1": 0.25,
+            "recall@3": 0.25,
+            "recall@5": 0.25,
+            "recall@10": 0.875,
+            "mrr@10": 0.4385,
+            "ndcg@10": 0.4632,
+            "p@5": 0.1
+          },
+          {
+            "label": "version_confusion",
+            "queries": 3,
+            "recall@1": 0.6667,
+            "recall@3": 0.6667,
+            "recall@5": 0.8333,
+            "recall@10": 1.0,
+            "mrr@10": 0.8333,
+            "ndcg@10": 0.8275,
+            "p@5": 0.2667,
+            "confusion@5": 0.2667
+          }
+        ],
+        "diagnostic": [
+          {
+            "label": "codes",
+            "queries": 4,
+            "recall@1": 1.0,
+            "recall@3": 1.0,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 1.0,
+            "ndcg@10": 1.0,
+            "p@5": 0.2,
+            "confusion@5": 0.2
+          }
+        ],
+        "abstention": {
+          "queries": 4,
+          "rate": 1.0
+        },
+        "notes": [
+          "abstention measured over 4 queries with no expected answer, threshold 0.35",
+          "abstention is only comparable between retrievers on the same score scale: cosine over normalised vectors is bounded to [-1, 1] while BM25 is not, so a fixed threshold means different things for each",
+          "diagnostic axes are excluded from the primary score: exact codes are for the lexical or structured channel of block 4.3, not for the dense vector",
+          "confusion@5 measures ranking confusability, never authorisation: isolation is enforced by the query filter, which this benchmark deliberately does not apply"
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "retriever": "dense:control-hashing-ngrams",
+        "model_name": "control-hashing-ngrams",
+        "revision": "n4-d256",
+        "dimension": 256,
+        "normalized": true,
+        "document_prefix": "",
+        "query_prefix": "",
+        "runtime": "pure-python",
+        "device": "cpu",
+        "corpus_fingerprint": "bf9265a0a36bd671361abbba46326ced956977fd2d6129327f6d6cd0a3054137",
+        "golden_fingerprint": "51171efcf7f93cca8776b63b38278bccaf44676b8057684f4cc1852868789f93",
+        "started_at": "2026-09-11T10:22:27Z",
+        "load_seconds": null,
+        "corpus_embed_seconds": 0.007,
+        "query_latency_p50_ms": 0.1,
+        "query_latency_p95_ms": 0.22,
+        "peak_rss_mb": 33.3,
+        "model_disk_mb": null,
+        "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+        "ram_gb": 15.7,
+        "gpu": "none",
+        "notes": [
+          "control determinista: no es un modelo y no compite con ninguno"
+        ]
+      },
+      "identity": {
+        "retriever": "dense:control-hashing-ngrams",
+        "model_name": "control-hashing-ngrams",
+        "revision": "n4-d256",
+        "dimension": 256,
+        "normalized": true,
+        "document_prefix": "",
+        "query_prefix": "",
+        "corpus_fingerprint": "bf9265a0a36bd671361abbba46326ced956977fd2d6129327f6d6cd0a3054137",
+        "golden_fingerprint": "51171efcf7f93cca8776b63b38278bccaf44676b8057684f4cc1852868789f93"
+      },
+      "scoreboard": {
+        "primary": {
+          "label": "primary",
+          "queries": 59,
+          "recall@1": 0.4068,
+          "recall@3": 0.5282,
+          "recall@5": 0.7006,
+          "recall@10": 0.839,
+          "mrr@10": 0.5621,
+          "ndcg@10": 0.5946,
+          "p@5": 0.2203,
+          "confusion@5": 0.1333
+        },
+        "per_axis": [
+          {
+            "label": "abbreviations",
+            "queries": 3,
+            "recall@1": 0.3333,
+            "recall@3": 0.3333,
+            "recall@5": 0.6667,
+            "recall@10": 0.8333,
+            "mrr@10": 0.4833,
+            "ndcg@10": 0.5649,
+            "p@5": 0.2
+          },
+          {
+            "label": "ambiguity",
+            "queries": 3,
+            "recall@1": 0.6667,
+            "recall@3": 0.3889,
+            "recall@5": 0.8333,
+            "recall@10": 1.0,
+            "mrr@10": 0.7333,
+            "ndcg@10": 0.7456,
+            "p@5": 0.4667
+          },
+          {
+            "label": "asset_confusion",
+            "queries": 4,
+            "recall@1": 0.75,
+            "recall@3": 0.875,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 0.8333,
+            "ndcg@10": 0.8927,
+            "p@5": 0.3,
+            "confusion@5": 0.1
+          },
+          {
+            "label": "component_names",
+            "queries": 4,
+            "recall@1": 0.5,
+            "recall@3": 0.3333,
+            "recall@5": 0.5833,
+            "recall@10": 1.0,
+            "mrr@10": 0.6458,
+            "ndcg@10": 0.6526,
+            "p@5": 0.2
+          },
+          {
+            "label": "cross_language",
+            "queries": 4,
+            "recall@1": 0.25,
+            "recall@3": 0.375,
+            "recall@5": 0.5,
+            "recall@10": 0.5,
+            "mrr@10": 0.3833,
+            "ndcg@10": 0.3437,
+            "p@5": 0.2
+          },
+          {
+            "label": "failure_symptoms",
+            "queries": 4,
+            "recall@1": 0.5,
+            "recall@3": 1.0,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 0.7083,
+            "ndcg@10": 0.7827,
+            "p@5": 0.2,
+            "confusion@5": 0.0
+          },
+          {
+            "label": "keyword",
+            "queries": 3,
+            "recall@1": 0.6667,
+            "recall@3": 0.6667,
+            "recall@5": 0.8333,
+            "recall@10": 0.8333,
+            "mrr@10": 0.7778,
+            "ndcg@10": 0.719,
+            "p@5": 0.2667,
+            "confusion@5": 0.2
+          },
+          {
+            "label": "narrative",
+            "queries": 4,
+            "recall@1": 0.25,
+            "recall@3": 0.5,
+            "recall@5": 0.625,
+            "recall@10": 0.875,
+            "mrr@10": 0.5083,
+            "ndcg@10": 0.5849,
+            "p@5": 0.2
+          },
+          {
+            "label": "near_miss_document",
+            "queries": 3,
+            "recall@1": 0.3333,
+            "recall@3": 0.8333,
+            "recall@5": 0.8333,
+            "recall@10": 1.0,
+            "mrr@10": 0.5556,
+            "ndcg@10": 0.6058,
+            "p@5": 0.2,
+            "confusion@5": 0.1333
+          },
+          {
+            "label": "numbers_units",
+            "queries": 4,
+            "recall@1": 0.75,
+            "recall@3": 0.6667,
+            "recall@5": 0.875,
+            "recall@10": 1.0,
+            "mrr@10": 0.8333,
+            "ndcg@10": 0.7292,
+            "p@5": 0.35,
+            "confusion@5": 0.1
+          },
+          {
+            "label": "preventive",
+            "queries": 3,
+            "recall@1": 0.6667,
+            "recall@3": 0.5,
+            "recall@5": 0.6667,
+            "recall@10": 0.6667,
+            "mrr@10": 0.6667,
+            "ndcg@10": 0.6483,
+            "p@5": 0.2
+          },
+          {
+            "label": "procedure",
+            "queries": 3,
+            "recall@1": 0.0,
+            "recall@3": 0.5,
+            "recall@5": 0.8333,
+            "recall@10": 1.0,
+            "mrr@10": 0.4167,
+            "ndcg@10": 0.5443,
+            "p@5": 0.2
+          },
+          {
+            "label": "safety",
+            "queries": 3,
+            "recall@1": 0.6667,
+            "recall@3": 0.6667,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 0.75,
+            "ndcg@10": 0.8102,
+            "p@5": 0.2,
+            "confusion@5": 0.2
+          },
+          {
+            "label": "section_reference",
+            "queries": 3,
+            "recall@1": 0.0,
+            "recall@3": 0.5,
+            "recall@5": 0.6667,
+            "recall@10": 0.6667,
+            "mrr@10": 0.2222,
+            "ndcg@10": 0.3479,
+            "p@5": 0.2
+          },
+          {
+            "label": "synonyms",
+            "queries": 4,
+            "recall@1": 0.0,
+            "recall@3": 0.125,
+            "recall@5": 0.125,
+            "recall@10": 0.5,
+            "mrr@10": 0.1528,
+            "ndcg@10": 0.2445,
+            "p@5": 0.05
+          },
+          {
+            "label": "typos",
+            "queries": 4,
+            "recall@1": 0.25,
+            "recall@3": 0.25,
+            "recall@5": 0.25,
+            "recall@10": 0.5,
+            "mrr@10": 0.375,
+            "ndcg@10": 0.3454,
+            "p@5": 0.1
+          },
+          {
+            "label": "version_confusion",
+            "queries": 3,
+            "recall@1": 0.3333,
+            "recall@3": 0.5,
+            "recall@5": 0.8333,
+            "recall@10": 1.0,
+            "mrr@10": 0.5278,
+            "ndcg@10": 0.6063,
+            "p@5": 0.2667,
+            "confusion@5": 0.2
+          }
+        ],
+        "diagnostic": [
+          {
+            "label": "codes",
+            "queries": 4,
+            "recall@1": 1.0,
+            "recall@3": 1.0,
+            "recall@5": 1.0,
+            "recall@10": 1.0,
+            "mrr@10": 1.0,
+            "ndcg@10": 1.0,
+            "p@5": 0.2,
+            "confusion@5": 0.2
+          }
+        ],
+        "abstention": {
+          "queries": 4,
+          "rate": 0.25
+        },
+        "notes": [
+          "abstention measured over 4 queries with no expected answer, threshold 0.35",
+          "abstention is only comparable between retrievers on the same score scale: cosine over normalised vectors is bounded to [-1, 1] while BM25 is not, so a fixed threshold means different things for each",
+          "diagnostic axes are excluded from the primary score: exact codes are for the lexical or structured channel of block 4.3, not for the dense vector",
+          "confusion@5 measures ranking confusability, never authorisation: isolation is enforced by the query filter, which this benchmark deliberately does not apply"
+        ]
+      }
+    }
+  ],
+  "unmeasured_candidates": [
+    {
+      "model": "BAAI/bge-m3",
+      "reason": "sentence-transformers is not installed; it is an optional dependency of the benchmark only. See docs/embedding-benchmark.md"
+    },
+    {
+      "model": "Qwen/Qwen3-Embedding-0.6B",
+      "reason": "sentence-transformers is not installed; it is an optional dependency of the benchmark only. See docs/embedding-benchmark.md"
+    },
+    {
+      "model": "google/embeddinggemma-300m",
+      "reason": "sentence-transformers is not installed; it is an optional dependency of the benchmark only. See docs/embedding-benchmark.md"
+    }
+  ]
+}

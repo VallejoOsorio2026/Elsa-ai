@@ -186,6 +186,12 @@ def score_run(
     resultado de una consulta sin respuesta esperada. Es un umbral del
     **banco**, no del modelo: sirve para comparar candidatos entre sí, no
     para fijar un corte de producción.
+
+    Y solo compara candidatos **en la misma escala**. El coseno sobre
+    vectores normalizados está acotado a [-1, 1]; BM25 no está acotado, así
+    que un umbral fijo le exige otra cosa. Entre los tres candidatos densos
+    el número es comparable; contra la línea léxica no lo es, y el informe
+    lo dice donde aparece.
     """
     missing = [query.id for query in golden.queries if query.id not in results]
     if missing:
@@ -218,6 +224,11 @@ def score_run(
         notes.append(
             f"abstention measured over {len(unanswered)} queries with no expected answer, "
             f"threshold {abstention_threshold}"
+        )
+        notes.append(
+            "abstention is only comparable between retrievers on the same score scale: "
+            "cosine over normalised vectors is bounded to [-1, 1] while BM25 is not, so a "
+            "fixed threshold means different things for each"
         )
 
     notes.append(
