@@ -8,7 +8,7 @@
  *   constantes del adaptador fake y la configuración lo prohíbe fuera de DEV.
  * - **Identidad real**: la sesión la emite el Supabase del Asistente de
  *   Materiales. ELSA no pide contraseña porque no es dueña de la identidad
- *   (CLAUDE.md §4). Mientras no exista el enlace de sesión, se admite pegar
+ *   (CLAUDE.md, regla 5). Mientras no exista el enlace de sesión, se admite pegar
  *   el token para poder probar contra un ambiente real.
  *
  * En ambos casos el token se comprueba contra /me antes de entrar: si el

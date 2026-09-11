@@ -164,6 +164,7 @@ uv run pre-commit install
 | [`docs/demo-runbook.md`](docs/demo-runbook.md) | Cómo levantar y enseñar el piloto, y qué falta para HTTPS |
 | [`docs/brand/`](docs/brand/) | Identidad visual PAPELSA: guía de marca, design tokens y reglas de interfaz |
 | [`docs/brand/UI_BACKLOG_CLAUDE_DESIGN.md`](docs/brand/UI_BACKLOG_CLAUDE_DESIGN.md) | Pendientes visuales reservados para el futuro ELSA Design System |
+| [`docs/agentic-tooling/`](docs/agentic-tooling/) | Cómo se le da contexto a Claude Code: contrato, Skills, subagentes y política MCP |
 | [`docs/adr/`](docs/adr/) | Decisiones arquitectónicas registradas (ADR) |
 
 ## Estructura del repositorio
