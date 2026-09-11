@@ -259,10 +259,10 @@ Añadido que la lista original no preveía y que la etapa necesitaba:
 4. *(parte de medición)* Medir los **tres** candidatos con el mismo conjunto
    dorado y las mismas reglas: BGE-M3, Qwen3-Embedding-0.6B y
    EmbeddingGemma-300m, este último sujeto a la revisión de licencia (D1).
-9. **Informe de resultados** con la salida real pegada, y **ADR 0014** con el
+9. **Informe de resultados** con la salida real pegada, y **ADR 0015** con el
    modelo elegido y por qué (se escribe *después* de medir).
 10. **Confirmación de D4, D6, D7 y D11** con lo que muestre el banco,
-    registrada en ADR 0014.
+    registrada en ADR 0015.
 11. Documentación: `docs/embeddings-model-evaluation.md` actualizado con las
     cifras **verificadas contra las tarjetas de los modelos**.
 
@@ -327,17 +327,17 @@ indica. Una decisión aprobada no se reabre sin un ADR nuevo (regla 25).
 
 | # | Decisión | Estado | ADR |
 |---|---|---|---|
-| **D1** | EmbeddingGemma como candidato | **Aprobada con condición** | 0014 |
+| **D1** | EmbeddingGemma como candidato | **Aprobada con condición** | 0015 |
 | **D2** | Dónde se ejecuta el motor de embeddings | **Aprobada en lo arquitectónico · ubicación DIFERIDA** | 0013 §8 |
 | **D3** | Dónde vive el vector | **Aprobada** | 0013 §1 |
 | **D4** | Tipo, métrica e índice | Abierta, no bloqueante | 0013 §6 |
 | **D5** | Qué versiones se embeben | **Aprobada con política** | 0013 §5 y §7 |
 | **D6** | Contexto en el texto embebido | Abierta, no bloqueante | 0013 §4 |
-| **D7** | Embeber chunks de tipo `table` | Abierta, no bloqueante | 0014 |
+| **D7** | Embeber chunks de tipo `table` | Abierta, no bloqueante | 0015 |
 | **D8** | Corte del bloque y orden | **Aprobada** | — |
 | **D9** | Imagen de PostgreSQL del CI | Abierta, se decide al llegar 4.2.b | — |
 | **D10** | Supabase remoto | **Aprobada con aclaración** | — |
-| **D11** | Runtime del adaptador real | Abierta, no bloqueante | 0014 |
+| **D11** | Runtime del adaptador real | Abierta, no bloqueante | 0015 |
 
 ---
 
@@ -477,7 +477,12 @@ recomendación vigente y se cierra donde corresponda.
 | ADR | Estado | Qué registra |
 |---|---|---|
 | [0013](adr/0013-arquitectura-de-almacenamiento-vectorial.md) | **Aceptado** | Arquitectura vectorial: tabla aparte, registro de modelos, «generar no activa», filtros obligatorios, motor reemplazable. Lo respaldan D2, D3 y D5 |
-| `0014-eleccion-del-modelo-de-embeddings.md` | Pendiente | El modelo elegido y por qué. **No se escribe hasta tener mediciones** (regla 21). Recogerá D1, D7 y D11 |
+| [0014](adr/0014-confusabilidad-no-es-autorizacion.md) | **Aceptado** | El aislamiento lo aplica el retrieval con filtros obligatorios; el banco mide **confusabilidad** como diagnóstico de calidad, nunca como autorización. Reescribe los criterios 6 y 7 de §5 |
+| `0015-eleccion-del-modelo-de-embeddings.md` | Pendiente | El modelo elegido y por qué. **No se escribe hasta tener mediciones** (regla 21). Recogerá D1, D7 y D11 |
+
+El ADR de la elección pasa de 0014 a **0015**: el número 0014 lo ocupa la
+decisión que sí se pudo cerrar en la etapa A. La elección sigue sin escribirse,
+y no se escribe hasta medir.
 
 ---
 
@@ -515,7 +520,11 @@ no es un criterio.
 |---|---|---|
 | 12 | `uv run pytest tests/test_contract_embeddings.py` | El fake y cada adaptador real cumplen el mismo contrato de puerto |
 
-### Criterios 6 y 7: reinterpretados
+### Criterios 6 y 7: reinterpretados y registrados
+
+Los reescribe [ADR 0014](adr/0014-confusabilidad-no-es-autorizacion.md),
+**aceptado**. Quedan reinterpretados, no incumplidos ni pendientes. Resumen;
+el razonamiento completo y las alternativas descartadas están en el ADR.
 
 La redacción original los pedía como guardarraíles **del modelo**:
 
@@ -538,9 +547,17 @@ confunde dos activos que hablan parecido o dos versiones del mismo documento
 `near_miss_document`). Para poder medirla, el banco **no aplica** el filtro
 de alcance: si lo aplicara, la confusión sería inmedible.
 
-**Esta reinterpretación reescribe dos criterios de una lista aprobada y
-necesita quedar registrada** —ADR 0014 o enmienda firmada de este plan—
-antes de dar 4.2.a por cerrado en su totalidad. Detalle en
+Y queda como **diagnóstico de calidad, nunca como mecanismo de
+autorización**: `confusion@5` informa la elección del modelo y no relaja
+ningún filtro, no justifica omitir una cláusula del `WHERE` y no es evidencia
+de aislamiento. Ninguna decisión de autorización puede tomarla como entrada.
+
+| # | Qué se retira | Qué lo sustituye | Dónde se prueba de verdad |
+|---|---|---|---|
+| 6 | «Fuga de alcance = 0» como guardarraíl del modelo | `confusion@5` del eje `asset_confusion` | `tests/test_document_lifecycle.py::test_chunks_are_only_readable_within_an_authorised_scope` |
+| 7 | «Fuga de versión = 0» como guardarraíl del modelo | `confusion@5` del eje `version_confusion` | `tests/test_document_lifecycle.py::test_only_published_versions_are_retrievable` |
+
+Detalle de cómo lo aplica el banco en
 [`embedding-benchmark.md`](embedding-benchmark.md) §3.
 
 ---
@@ -580,7 +597,7 @@ Sin fechas: el proyecto avanza por bloques, no por calendario.
 | Herramienta de banco de pruebas y sus tests | Medio | Métricas por eje e informe reproducible |
 | Tres adaptadores reales | Medio | Descarga de pesos y runtime ONNX; la primera vez cuesta, la segunda y la tercera no |
 | Corridas de medición | Pequeño en tiempo de persona | Minutos de CPU por modelo sobre 200–400 chunks, tres veces. No horas |
-| Informe y ADR 0014 | Pequeño | Ya está el protocolo |
+| Informe y ADR 0015 | Pequeño | Ya está el protocolo |
 | **4.2.b** (último) | Medio | Migración, registro de modelos, corridas, herramienta. **Sin *backfill***: el corpus documental remoto está vacío (§0.1) |
 
 **Coste monetario del piloto: cero en licencias.** Los tres finalistas son

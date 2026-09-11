@@ -14,6 +14,7 @@ se elegirá el modelo. No es la selección del modelo, que es la etapa B.
 | Métricas | **Completas** |
 | Líneas base | **Medidas** |
 | Adaptadores exclusivos del banco | **Completos** |
+| Reinterpretación de los criterios 6 y 7 | **Registrada** en [ADR 0014](adr/0014-confusabilidad-no-es-autorizacion.md) |
 | Ejecución de BGE-M3 | **Pendiente** |
 | Ejecución de Qwen3-Embedding-0.6B | **Pendiente** |
 | Ejecución de EmbeddingGemma-300m | **Pendiente** |
@@ -107,15 +108,19 @@ por el eje equivocado. En la medición, las tres líneas base los aciertan al
 
 ### El aislamiento no es una propiedad del modelo
 
-`embeddings-model-evaluation.md` §7.5 llama «fuga de alcance» y «fuga de
-versión» a dos guardarraíles del modelo. **No lo son**, y conviene
-corregirlo antes de que alguien lea un número y crea que el modelo protege
-algo:
+Lo registra [ADR 0014](adr/0014-confusabilidad-no-es-autorizacion.md),
+**aceptado**. La lista de aceptación original pedía «fuga de alcance = 0» y
+«fuga de versión = 0» como guardarraíles del modelo. **No lo son**, y
+conviene tenerlo claro antes de que alguien lea un número y crea que el
+modelo protege algo:
 
 - El aislamiento entre activos y entre versiones lo impone el filtro de la
   consulta (`WHERE` por dominio, activo autorizado y versión publicada).
   Ningún índice puede devolver una fila que el filtro excluye — es lo que
   ya razona [ADR 0013](adr/0013-arquitectura-de-almacenamiento-vectorial.md).
+  Donde eso se prueba de verdad es en el repositorio documental del Bloque
+  4.1: `test_chunks_are_only_readable_within_an_authorised_scope` y
+  `test_only_published_versions_are_retrievable`.
 - Lo que sí se puede medir es **confusabilidad**: si el ranking denso
   confunde dos activos que hablan parecido, o dos versiones del mismo
   documento. Eso es una señal sobre el modelo, no sobre los permisos.
@@ -125,6 +130,11 @@ Por eso los ejes `asset_confusion`, `version_confusion` y
 dónde acaba la responsabilidad del modelo cada vez que muestra el número.
 El banco **no aplica** el filtro de alcance a propósito: si lo aplicara, la
 confusión sería inmedible.
+
+`confusion@5` es **diagnóstico de calidad, nunca autorización**: informa la
+elección del modelo, y no relaja ningún filtro, no justifica omitir una
+cláusula del `WHERE` ni es evidencia de aislamiento. Un valor alto es un
+problema de ranking en un corpus sin filtrar, no una fuga.
 
 ### La abstención solo compara escalas iguales
 
@@ -316,10 +326,16 @@ Corresponde a los ítems **2, 5, 6 y 7** del plan, más dos piezas que la
 lista original no preveía y que la etapa necesitaba: la interfaz de
 evaluación y el control determinista que hace el banco ejecutable en CI.
 
+Cierra también la única decisión arquitectónica que la etapa dejó abierta:
+[ADR 0014](adr/0014-confusabilidad-no-es-autorizacion.md), **aceptado** —el
+aislamiento lo aplica el retrieval con filtros obligatorios y el banco mide
+confusabilidad como diagnóstico de calidad, nunca como autorización— que
+reescribe los criterios 6 y 7 de la lista de aceptación.
+
 ### B — Ejecución real de los modelos · **pendiente por causa externa**
 
 Ítems **4** (parte de medición), **9**, **10** y **11**. Medir los tres
-candidatos, elegir con evidencia, escribir ADR 0014 y reverificar las cifras
+candidatos, elegir con evidencia, escribir ADR 0015 y reverificar las cifras
 contra las tarjetas de modelo.
 
 Bloqueado por la política de egreso (§5). El procedimiento reproducible para
@@ -377,4 +393,5 @@ módulo del runtime, y una prueba lo comprueba.
 - [`embeddings-model-evaluation.md`](embeddings-model-evaluation.md) — candidatos y criterio de decisión, fijado antes de medir
 - [`bloque-4-2-plan.md`](bloque-4-2-plan.md) — plan del Bloque 4.2
 - [ADR 0013](adr/0013-arquitectura-de-almacenamiento-vectorial.md) — dónde vive el vector y por qué el índice no decide permisos
+- [ADR 0014](adr/0014-confusabilidad-no-es-autorizacion.md) — el aislamiento lo aplica el retrieval; el banco mide confusabilidad
 - [`document-chunking.md`](document-chunking.md) — el chunker con el que se trocea el corpus
