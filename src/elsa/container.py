@@ -20,8 +20,10 @@ from elsa.adapters.local_artifact_storage import LocalArtifactStorage
 from elsa.adapters.memory_abuse_guard import InMemoryAbuseGuard
 from elsa.adapters.memory_artifact_storage import InMemoryArtifactStorage
 from elsa.adapters.memory_contributions import InMemoryContributionsRepository
+from elsa.adapters.memory_documents import InMemoryDocumentRepository
 from elsa.adapters.memory_knowledge import InMemoryKnowledgeRepository
 from elsa.adapters.memory_permissions import InMemoryPermissionsRepository
+from elsa.adapters.postgres_documents import PostgresDocumentRepository
 from elsa.adapters.postgres_knowledge import PostgresKnowledgeRepository
 from elsa.adapters.postgres_permissions import PostgresPermissionsRepository
 from elsa.adapters.simulated_transcription import SimulatedTranscriptionAdapter
@@ -33,6 +35,7 @@ from elsa.ports.abuse import AbuseGuardPort, AbusePolicy
 from elsa.ports.artifact_storage import ArtifactStoragePort, ArtifactStorageUnavailableError
 from elsa.ports.auth import AuthPort, IdentityProviderUnavailableError
 from elsa.ports.contributions import ContributionsRepositoryPort
+from elsa.ports.documents import DocumentRepositoryPort
 from elsa.ports.knowledge import KnowledgeRepositoryPort, KnowledgeUnavailableError
 from elsa.ports.materials_identity import MaterialsIdentityPort
 from elsa.ports.permissions import PermissionsRepositoryPort, PermissionsUnavailableError
@@ -60,6 +63,7 @@ class Container:
         permissions: PermissionsRepositoryPort | None = None,
         abuse_guard: AbuseGuardPort | None = None,
         knowledge: KnowledgeRepositoryPort | None = None,
+        documents: DocumentRepositoryPort | None = None,
         artifact_storage: ArtifactStoragePort | None = None,
         contributions: ContributionsRepositoryPort | None = None,
         transcription: TranscriptionPort | None = None,
@@ -68,6 +72,7 @@ class Container:
         self._http: httpx.AsyncClient | None = None
         self._postgres: PostgresPermissionsRepository | None = None
         self._postgres_knowledge: PostgresKnowledgeRepository | None = None
+        self._postgres_documents: PostgresDocumentRepository | None = None
         self._overridden_permissions = permissions is not None
         self._overridden_knowledge = knowledge is not None
 
@@ -110,6 +115,17 @@ class Container:
         if self.knowledge is None and settings.permissions_backend is PermissionsBackend.MEMORY:
             self.knowledge = InMemoryKnowledgeRepository()
 
+        # El conocimiento documental sigue el mismo selector que el técnico y
+        # que los permisos: los tres viven en la misma base, y no tendría
+        # sentido que uno fuera a PostgreSQL y otro a memoria.
+        #
+        # `memory` es para desarrollo y para las pruebas que no necesitan
+        # persistencia; pierde todo al reiniciar y la configuración solo lo
+        # admite en DEV. `postgres` es la persistencia real.
+        self.documents: DocumentRepositoryPort | None = documents
+        if self.documents is None and settings.permissions_backend is PermissionsBackend.MEMORY:
+            self.documents = InMemoryDocumentRepository()
+
         self.artifact_storage: ArtifactStoragePort = (
             artifact_storage or self._build_artifact_storage(settings)
         )
@@ -144,7 +160,11 @@ class Container:
         settings = self.settings
         if settings.permissions_backend is not PermissionsBackend.POSTGRES:
             return
-        if self.permissions is not None and self.knowledge is not None:
+        if (
+            self.permissions is not None
+            and self.knowledge is not None
+            and self.documents is not None
+        ):
             return
         assert settings.database_url is not None  # noqa: S101 - garantizado por la configuración
 
@@ -166,8 +186,20 @@ class Container:
             self.knowledge = self._postgres_knowledge
             _logger.info("knowledge store connected")
 
+        if self.documents is None:
+            self._postgres_documents = await PostgresDocumentRepository.connect(
+                settings.database_url.get_secret_value(),
+                min_size=settings.database_pool_min_size,
+                max_size=settings.database_pool_max_size,
+            )
+            self.documents = self._postgres_documents
+            _logger.info("document store connected")
+
     async def aclose(self) -> None:
         """Cierra los recursos abiertos por :meth:`start`."""
+        if self._postgres_documents is not None:
+            await self._postgres_documents.close()
+            self._postgres_documents = None
         if self._postgres_knowledge is not None:
             await self._postgres_knowledge.close()
             self._postgres_knowledge = None
@@ -183,6 +215,12 @@ class Container:
         if self.permissions is None:
             raise PermissionsUnavailableError("the ELSA permissions store is not connected")
         return self.permissions
+
+    def require_documents(self) -> DocumentRepositoryPort:
+        """Devuelve el repositorio documental o falla como indisponible."""
+        if self.documents is None:
+            raise KnowledgeUnavailableError("the ELSA document store is not connected")
+        return self.documents
 
     def require_knowledge(self) -> KnowledgeRepositoryPort:
         """Devuelve el repositorio de conocimiento o falla como indisponible."""

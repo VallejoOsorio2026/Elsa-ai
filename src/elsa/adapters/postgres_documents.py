@@ -124,6 +124,11 @@ def _database_errors() -> Iterator[None]:
     publicable— se lanzan antes de llegar aquí. Lo que queda es
     infraestructura: conexión caída, timeout, disco. El detalle interno no
     sale al cliente; solo el tipo de excepción llega al log.
+
+    ``InterfaceError`` se captura aparte porque **no desciende de**
+    ``PostgresError``: un pool cerrado o una conexión rota son errores del
+    cliente, no del servidor, y sin nombrarlos se escaparían sin traducir
+    justo cuando la base no está.
     """
     try:
         yield
@@ -136,7 +141,7 @@ def _database_errors() -> Iterator[None]:
         AssetNotFoundError,
     ):
         raise
-    except (asyncpg.PostgresError, OSError, TimeoutError) as exc:
+    except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError, TimeoutError) as exc:
         _logger.warning("document store failure", extra={"error": type(exc).__name__})
         raise KnowledgeUnavailableError("the ELSA document store is unavailable") from None
 
