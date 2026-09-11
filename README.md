@@ -157,6 +157,7 @@ uv run pre-commit install
 | [`docs/document-model.md`](docs/document-model.md) | Contrato de documento, versión, sección y chunk |
 | [`docs/document-chunking.md`](docs/document-chunking.md) | Estrategia de chunking, con un ejemplo completo |
 | [`docs/document-acceptance.md`](docs/document-acceptance.md) | Prueba de aceptación determinística de la ingesta documental |
+| [`docs/embedding-benchmark.md`](docs/embedding-benchmark.md) | Infraestructura y banco de evaluación de embeddings: qué se midió y qué falta para elegir |
 | [`docs/bloque-4-2-plan.md`](docs/bloque-4-2-plan.md) | Planificación del Bloque 4.2: alcance, decisiones abiertas y aceptación |
 | [`docs/embeddings-model-evaluation.md`](docs/embeddings-model-evaluation.md) | Candidatos de embeddings, criterio de elección y banco de pruebas |
 | [`docs/private-storage.md`](docs/private-storage.md) | Almacenamiento privado de archivos originales y planos |

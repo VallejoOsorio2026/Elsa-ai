@@ -1,0 +1,874 @@
+{
+  "note": "Conjunto dorado sintetico del banco de embeddings. Inventado; ningun dato de PAPELSA. Los ejes asset_confusion, version_confusion y near_miss_document miden CONFUSABILIDAD del ranking denso, no autorizacion: el aislamiento lo garantiza el filtro de la consulta.",
+  "queries": [
+    {
+      "id": "nar-01",
+      "text": "¿cómo se ajusta el juego axial de la prensa?",
+      "axis": "narrative",
+      "match_kind": "semantic",
+      "difficulty": "easy",
+      "rationale": "Pregunta de taller completa; la respuesta son la medicion y los pasos de correccion.",
+      "relevant": {
+        "prensa-manual@v1#1.3.1#0000": 2,
+        "prensa-manual@v1#1.3.2#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "nar-02",
+      "text": "qué hago si la prensa me está calentando el alojamiento",
+      "axis": "narrative",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "Formulacion coloquial de un sintoma; el pasaje de sintomas lo cubre.",
+      "relevant": {
+        "prensa-manual@v1#1.5#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "nar-03",
+      "text": "cada cuánto hay que engrasar los rodamientos de la prensa",
+      "axis": "narrative",
+      "match_kind": "semantic",
+      "difficulty": "easy",
+      "rationale": "Intervalo de lubricacion: prosa y tabla del mismo apartado.",
+      "relevant": {
+        "prensa-manual@v1#1.2#0000": 2,
+        "prensa-manual@v1#1.2#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "nar-04",
+      "text": "por qué no debo apretar los tornillos de la tapa en círculo",
+      "axis": "narrative",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "La precaucion explica exactamente el porque; la prosa de par es parcial.",
+      "relevant": {
+        "prensa-manual@v1#1.3.2#0001": 2,
+        "prensa-manual@v1#1.4#0000": 1
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "sin-01",
+      "text": "lubricación de balineras de la prensa",
+      "axis": "synonyms",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "«balinera» es el termino local de rodamiento y no aparece en el manual.",
+      "relevant": {
+        "prensa-manual@v1#1.2#0000": 2,
+        "prensa-manual@v1#1.2#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "sin-02",
+      "text": "cambio del sello de la tapa del alojamiento",
+      "axis": "synonyms",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "El manual dice «reten», no «sello»; el preventivo fija el cambio.",
+      "relevant": {
+        "prensa-manual@v1#1.6#0000": 2,
+        "prensa-manual@v1#1.7#0000": 1
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "sin-03",
+      "text": "torsión de los pernos de la cubierta",
+      "axis": "synonyms",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "Tres sinonimos a la vez: torsion/par, pernos/tornillos, cubierta/tapa.",
+      "relevant": {
+        "prensa-manual@v1#1.4#0000": 2,
+        "prensa-manual@v1#1.4#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "sin-04",
+      "text": "holgura longitudinal del eje de la prensa",
+      "axis": "synonyms",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "«holgura longitudinal» por «juego axial»: ningun termino literal coincide.",
+      "relevant": {
+        "prensa-manual@v1#1.3.1#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "com-01",
+      "text": "el retén de la tapa de la prensa",
+      "axis": "component_names",
+      "match_kind": "mixed",
+      "difficulty": "easy",
+      "rationale": "Nombre exacto de componente; aparece en preventivo y en repuestos.",
+      "relevant": {
+        "prensa-manual@v1#1.7#0000": 2,
+        "prensa-manual@v1#1.6#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "com-02",
+      "text": "rodamiento del lado motriz",
+      "axis": "component_names",
+      "match_kind": "mixed",
+      "difficulty": "easy",
+      "rationale": "Nombre parcial de componente del activo A.",
+      "relevant": {
+        "prensa-manual@v1#1.2#0000": 2,
+        "prensa-manual@v1#1.2#0001": 2,
+        "prensa-manual@v1#1.7#0000": 1
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "com-03",
+      "text": "la lámina calibrada para el ajuste",
+      "axis": "component_names",
+      "match_kind": "mixed",
+      "difficulty": "medium",
+      "rationale": "Componente que solo aparece en repuestos y en los pasos de correccion.",
+      "relevant": {
+        "prensa-manual@v1#1.7#0000": 2,
+        "prensa-manual@v1#1.3.2#0000": 1
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "com-04",
+      "text": "buje de la guía lateral",
+      "axis": "component_names",
+      "match_kind": "mixed",
+      "difficulty": "medium",
+      "rationale": "Componente que solo existe en la tabla de lubricacion.",
+      "relevant": {
+        "prensa-manual@v1#1.2#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "cod-01",
+      "text": "PRX-4471-B",
+      "axis": "codes",
+      "match_kind": "lexical",
+      "difficulty": "easy",
+      "rationale": "Identificador exacto. Lo resolvera el canal lexico, no el vector.",
+      "relevant": {
+        "prensa-manual@v1#1.7#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "cod-02",
+      "text": "PRX-2280-A",
+      "axis": "codes",
+      "match_kind": "lexical",
+      "difficulty": "easy",
+      "rationale": "Codigo del reten. Diagnostico del eje lexico.",
+      "relevant": {
+        "prensa-manual@v1#1.7#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "cod-03",
+      "text": "BOX-4471-B",
+      "axis": "codes",
+      "match_kind": "lexical",
+      "difficulty": "hard",
+      "rationale": "Codigo casi identico al PRX-4471-B pero de otro activo: mide confusion de codigos.",
+      "relevant": {
+        "bomba-manual@v1#1.6#0000": 2
+      },
+      "must_not_retrieve": [
+        "prensa-manual@v1#1.7#0000"
+      ]
+    },
+    {
+      "id": "cod-04",
+      "text": "PRX-9015-D",
+      "axis": "codes",
+      "match_kind": "lexical",
+      "difficulty": "easy",
+      "rationale": "Codigo de la lamina calibrada.",
+      "relevant": {
+        "prensa-manual@v1#1.7#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "typ-01",
+      "text": "lubricacion rodamento prensa",
+      "axis": "typos",
+      "match_kind": "lexical",
+      "difficulty": "medium",
+      "rationale": "Escritura real de un movil: falta una letra en «rodamiento».",
+      "relevant": {
+        "prensa-manual@v1#1.2#0000": 2,
+        "prensa-manual@v1#1.2#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "typ-02",
+      "text": "juego acsial de la prenza",
+      "axis": "typos",
+      "match_kind": "mixed",
+      "difficulty": "hard",
+      "rationale": "Dos erratas en la misma consulta.",
+      "relevant": {
+        "prensa-manual@v1#1.3.1#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "typ-03",
+      "text": "par de apriete tornilos tapa",
+      "axis": "typos",
+      "match_kind": "mixed",
+      "difficulty": "medium",
+      "rationale": "Errata en «tornillos», resto correcto.",
+      "relevant": {
+        "prensa-manual@v1#1.4#0000": 2,
+        "prensa-manual@v1#1.4#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "typ-04",
+      "text": "mantenimeinto preventivo prenssa",
+      "axis": "typos",
+      "match_kind": "lexical",
+      "difficulty": "medium",
+      "rationale": "Erratas por transposicion y duplicacion.",
+      "relevant": {
+        "prensa-manual@v1#1.6#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "key-01",
+      "text": "torque tapa",
+      "axis": "keyword",
+      "match_kind": "mixed",
+      "difficulty": "medium",
+      "rationale": "Dos palabras, una de ellas anglicismo de uso corriente en planta.",
+      "relevant": {
+        "prensa-manual@v1#1.4#0000": 2,
+        "prensa-manual@v1#1.4#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "key-02",
+      "text": "grasa NLGI 2",
+      "axis": "keyword",
+      "match_kind": "mixed",
+      "difficulty": "medium",
+      "rationale": "Especificacion corta; la prensa usa NLGI 2 y la bomba NLGI 3.",
+      "relevant": {
+        "prensa-manual@v1#1.2#0000": 2,
+        "prensa-manual@v1#1.2#0001": 2
+      },
+      "must_not_retrieve": [
+        "bomba-manual@v1#1.2#0000",
+        "bomba-manual@v1#1.2#0001"
+      ]
+    },
+    {
+      "id": "key-03",
+      "text": "bloqueo y etiquetado",
+      "axis": "keyword",
+      "match_kind": "semantic",
+      "difficulty": "easy",
+      "rationale": "Termino de seguridad; la advertencia del activo A lo enuncia.",
+      "relevant": {
+        "prensa-manual@v1#1.1#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "xlg-01",
+      "text": "par de apriete de la tapa",
+      "axis": "cross_language",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "Consulta en espanol cuyo pasaje equivalente en ingles dice «tightening torque».",
+      "relevant": {
+        "prensa-manual@v1#1.4#0000": 2,
+        "prensa-nota-en@v1#1.2#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "xlg-02",
+      "text": "cómo cambiar el retén de la tapa paso a paso",
+      "axis": "cross_language",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "El procedimiento detallado solo existe en el documento en ingles.",
+      "relevant": {
+        "prensa-nota-en@v1#1.3#0000": 2,
+        "prensa-manual@v1#1.3.2#0000": 1
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "xlg-03",
+      "text": "medición de excentricidad del eje",
+      "axis": "cross_language",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "«shaft run-out» solo aparece en ingles; no hay equivalente en el manual espanol.",
+      "relevant": {
+        "prensa-nota-en@v1#1.4#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "xlg-04",
+      "text": "tightening torque housing cover",
+      "axis": "cross_language",
+      "match_kind": "mixed",
+      "difficulty": "easy",
+      "rationale": "Consulta en ingles sobre el documento en ingles: control del eje.",
+      "relevant": {
+        "prensa-nota-en@v1#1.2#0000": 2,
+        "prensa-nota-en@v1#1.2#0001": 1
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "num-01",
+      "text": "45 N·m",
+      "axis": "numbers_units",
+      "match_kind": "lexical",
+      "difficulty": "medium",
+      "rationale": "Valor con unidad; la prensa publicada dice 45 N·m.",
+      "relevant": {
+        "prensa-manual@v1#1.4#0000": 2,
+        "prensa-manual@v1#1.4#0001": 2,
+        "prensa-nota-en@v1#1.2#0000": 1
+      },
+      "must_not_retrieve": [
+        "prensa-manual@v2#1.4#0000"
+      ]
+    },
+    {
+      "id": "num-02",
+      "text": "intervalo de 500 horas",
+      "axis": "numbers_units",
+      "match_kind": "mixed",
+      "difficulty": "medium",
+      "rationale": "Cifra con unidad de tiempo de la version publicada.",
+      "relevant": {
+        "prensa-manual@v1#1.2#0000": 2,
+        "prensa-manual@v1#1.2#0001": 2
+      },
+      "must_not_retrieve": [
+        "prensa-manual@v2#1.2#0000"
+      ]
+    },
+    {
+      "id": "num-03",
+      "text": "tolerancia de 0,05 a 0,12 mm",
+      "axis": "numbers_units",
+      "match_kind": "mixed",
+      "difficulty": "hard",
+      "rationale": "Rango con decimales en coma, como se escribe en planta.",
+      "relevant": {
+        "prensa-manual@v1#1.3.1#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "num-04",
+      "text": "tres emboladas de grasa",
+      "axis": "numbers_units",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "Cantidad expresada en palabras y no en cifra.",
+      "relevant": {
+        "prensa-manual@v1#1.2#0000": 2,
+        "prensa-manual@v1#1.2#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "abr-01",
+      "text": "Nm tapa prensa",
+      "axis": "abbreviations",
+      "match_kind": "mixed",
+      "difficulty": "medium",
+      "rationale": "«Nm» sin punto medio ni separacion, como se teclea.",
+      "relevant": {
+        "prensa-manual@v1#1.4#0000": 2,
+        "prensa-manual@v1#1.4#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "abr-02",
+      "text": "rodam. lado motriz lubric.",
+      "axis": "abbreviations",
+      "match_kind": "mixed",
+      "difficulty": "hard",
+      "rationale": "Abreviaturas truncadas con punto, tipicas de una orden de trabajo.",
+      "relevant": {
+        "prensa-manual@v1#1.2#0000": 2,
+        "prensa-manual@v1#1.2#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "abr-03",
+      "text": "insp. visual semanal",
+      "axis": "abbreviations",
+      "match_kind": "mixed",
+      "difficulty": "medium",
+      "rationale": "Abreviatura de «inspeccion» en el plan preventivo.",
+      "relevant": {
+        "prensa-manual@v1#1.6#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "sym-01",
+      "text": "vibración que aumenta con la velocidad",
+      "axis": "failure_symptoms",
+      "match_kind": "semantic",
+      "difficulty": "easy",
+      "rationale": "Sintoma descrito casi literalmente en el apartado de sintomas.",
+      "relevant": {
+        "prensa-manual@v1#1.5#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "sym-02",
+      "text": "ruido metálico una vez por vuelta",
+      "axis": "failure_symptoms",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "Sintoma ciclico; el manual lo atribuye a pista picada.",
+      "relevant": {
+        "prensa-manual@v1#1.5#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "sym-03",
+      "text": "gotea aceite por la tapa",
+      "axis": "failure_symptoms",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "Fuga descrita en sintomas del activo A.",
+      "relevant": {
+        "prensa-manual@v1#1.5#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "sym-04",
+      "text": "ruido de grava en la succión y cae el caudal",
+      "axis": "failure_symptoms",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "Cavitacion: es del activo B, no de la prensa.",
+      "relevant": {
+        "bomba-manual@v1#1.5#0000": 2
+      },
+      "must_not_retrieve": [
+        "prensa-manual@v1#1.5#0000"
+      ]
+    },
+    {
+      "id": "prv-01",
+      "text": "plan de mantenimiento preventivo de la prensa",
+      "axis": "preventive",
+      "match_kind": "semantic",
+      "difficulty": "easy",
+      "rationale": "Apartado de preventivo del activo A.",
+      "relevant": {
+        "prensa-manual@v1#1.6#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "prv-02",
+      "text": "cada cuánto se verifica el juego axial",
+      "axis": "preventive",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "La periodicidad esta en preventivo; la medicion, en su apartado.",
+      "relevant": {
+        "prensa-manual@v1#1.6#0000": 2,
+        "prensa-manual@v1#1.3.1#0000": 1
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "prv-03",
+      "text": "cuándo se cambia el retén aunque no tenga fuga",
+      "axis": "preventive",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "Criterio explicito del preventivo.",
+      "relevant": {
+        "prensa-manual@v1#1.6#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "seg-01",
+      "text": "qué hago antes de abrir la guarda de la prensa",
+      "axis": "safety",
+      "match_kind": "semantic",
+      "difficulty": "easy",
+      "rationale": "Advertencia de seguridad del activo A.",
+      "relevant": {
+        "prensa-manual@v1#1.1#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "seg-02",
+      "text": "riesgo de atrapamiento",
+      "axis": "safety",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "Consecuencia nombrada en la advertencia del activo A.",
+      "relevant": {
+        "prensa-manual@v1#1.1#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "seg-03",
+      "text": "hay que cerrar la válvula de succión antes de abrir",
+      "axis": "safety",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "Advertencia del activo B; no aplica a la prensa.",
+      "relevant": {
+        "bomba-manual@v1#1.1#0001": 2
+      },
+      "must_not_retrieve": [
+        "prensa-manual@v1#1.1#0001"
+      ]
+    },
+    {
+      "id": "prc-01",
+      "text": "pasos para corregir el juego axial",
+      "axis": "procedure",
+      "match_kind": "semantic",
+      "difficulty": "easy",
+      "rationale": "Lista numerada de pasos del activo A.",
+      "relevant": {
+        "prensa-manual@v1#1.3.2#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "prc-02",
+      "text": "en qué orden se aprietan los tornillos de la tapa",
+      "axis": "procedure",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "El paso 4 y la precaucion lo responden juntos.",
+      "relevant": {
+        "prensa-manual@v1#1.3.2#0000": 2,
+        "prensa-manual@v1#1.3.2#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "prc-03",
+      "text": "cómo se drena la carcasa antes de abrirla",
+      "axis": "procedure",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "Procedimiento del activo B.",
+      "relevant": {
+        "bomba-manual@v1#1.3#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "sec-01",
+      "text": "apartado de par de apriete",
+      "axis": "section_reference",
+      "match_kind": "mixed",
+      "difficulty": "easy",
+      "rationale": "Referencia por titulo de seccion del activo A.",
+      "relevant": {
+        "prensa-manual@v1#1.4#0000": 2,
+        "prensa-manual@v1#1.4#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "sec-02",
+      "text": "sección 3.1 medición",
+      "axis": "section_reference",
+      "match_kind": "mixed",
+      "difficulty": "medium",
+      "rationale": "Referencia por numeracion impresa y titulo.",
+      "relevant": {
+        "prensa-manual@v1#1.3.1#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "sec-03",
+      "text": "tabla de repuestos del conjunto",
+      "axis": "section_reference",
+      "match_kind": "mixed",
+      "difficulty": "easy",
+      "rationale": "Referencia a la tabla por su pie.",
+      "relevant": {
+        "prensa-manual@v1#1.7#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "nul-01",
+      "text": "presión de inflado de los neumáticos",
+      "axis": "no_answer",
+      "match_kind": "semantic",
+      "difficulty": "easy",
+      "rationale": "El corpus no habla de neumaticos: no debe haber respuesta buena.",
+      "relevant": {},
+      "must_not_retrieve": []
+    },
+    {
+      "id": "nul-02",
+      "text": "configuración del variador de frecuencia",
+      "axis": "no_answer",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "Tema electrico ausente del corpus.",
+      "relevant": {},
+      "must_not_retrieve": []
+    },
+    {
+      "id": "nul-03",
+      "text": "procedimiento de soldadura del bastidor",
+      "axis": "no_answer",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "Ningun documento cubre soldadura.",
+      "relevant": {},
+      "must_not_retrieve": []
+    },
+    {
+      "id": "nul-04",
+      "text": "calibración del sensor de nivel",
+      "axis": "no_answer",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "Instrumentacion ausente del corpus.",
+      "relevant": {},
+      "must_not_retrieve": []
+    },
+    {
+      "id": "amb-01",
+      "text": "rodamiento lado conducido o lado acople",
+      "axis": "ambiguity",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "Dos componentes parecidos de activos distintos en la misma consulta; ambos validos.",
+      "relevant": {
+        "prensa-manual@v1#1.2#0001": 2,
+        "bomba-manual@v1#1.2#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "amb-02",
+      "text": "juego axial admisible",
+      "axis": "ambiguity",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "Existe en prensa y en bomba con valores distintos: la consulta es ambigua a proposito.",
+      "relevant": {
+        "prensa-manual@v1#1.3.1#0000": 2,
+        "bomba-manual@v1#1.3#0000": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "amb-03",
+      "text": "par de apriete de los tornillos",
+      "axis": "ambiguity",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "Sin decir el activo, prensa y bomba compiten legitimamente.",
+      "relevant": {
+        "prensa-manual@v1#1.4#0000": 2,
+        "prensa-manual@v1#1.4#0001": 2,
+        "bomba-manual@v1#1.4#0000": 2,
+        "bomba-manual@v1#1.4#0001": 2
+      },
+      "must_not_retrieve": []
+    },
+    {
+      "id": "act-01",
+      "text": "lubricación de rodamientos de la bomba centrífuga",
+      "axis": "asset_confusion",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "Pide el activo B con vocabulario casi identico al del A. Mide confusabilidad del ranking, NO autorizacion.",
+      "relevant": {
+        "bomba-manual@v1#1.2#0000": 2,
+        "bomba-manual@v1#1.2#0001": 2
+      },
+      "must_not_retrieve": [
+        "prensa-manual@v1#1.2#0000",
+        "prensa-manual@v1#1.2#0001"
+      ]
+    },
+    {
+      "id": "act-02",
+      "text": "par de apriete de los tornillos de la carcasa",
+      "axis": "asset_confusion",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "«carcasa» es de la bomba; «tapa» es de la prensa. Confusabilidad.",
+      "relevant": {
+        "bomba-manual@v1#1.4#0000": 2,
+        "bomba-manual@v1#1.4#0001": 2
+      },
+      "must_not_retrieve": [
+        "prensa-manual@v1#1.4#0000",
+        "prensa-manual@v1#1.4#0001"
+      ]
+    },
+    {
+      "id": "act-03",
+      "text": "juego axial del impulsor",
+      "axis": "asset_confusion",
+      "match_kind": "semantic",
+      "difficulty": "medium",
+      "rationale": "«impulsor» solo existe en el activo B.",
+      "relevant": {
+        "bomba-manual@v1#1.3#0000": 2
+      },
+      "must_not_retrieve": [
+        "prensa-manual@v1#1.3.1#0000"
+      ]
+    },
+    {
+      "id": "act-04",
+      "text": "alcance del manual de la prensa PR-100",
+      "axis": "asset_confusion",
+      "match_kind": "mixed",
+      "difficulty": "easy",
+      "rationale": "Nombra el activo A explicitamente; devolver el B seria confusion clara.",
+      "relevant": {
+        "prensa-manual@v1#1.1#0000": 2
+      },
+      "must_not_retrieve": [
+        "bomba-manual@v1#1.1#0000"
+      ]
+    },
+    {
+      "id": "ver-01",
+      "text": "par de apriete vigente de la tapa",
+      "axis": "version_confusion",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "Lo vigente es la v1 publicada (45 N·m). La v2 existe pero no esta publicada; el filtro de la consulta es lo que la excluye, no el modelo.",
+      "relevant": {
+        "prensa-manual@v1#1.4#0000": 2,
+        "prensa-manual@v1#1.4#0001": 2
+      },
+      "must_not_retrieve": [
+        "prensa-manual@v2#1.4#0000",
+        "prensa-manual@v2#1.4#0001"
+      ]
+    },
+    {
+      "id": "ver-02",
+      "text": "intervalo de lubricación vigente del lado motriz",
+      "axis": "version_confusion",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "Vigente = 500 h (v1). La v2 dice 400 h y no esta publicada.",
+      "relevant": {
+        "prensa-manual@v1#1.2#0000": 2,
+        "prensa-manual@v1#1.2#0001": 2
+      },
+      "must_not_retrieve": [
+        "prensa-manual@v2#1.2#0000",
+        "prensa-manual@v2#1.2#0001"
+      ]
+    },
+    {
+      "id": "ver-03",
+      "text": "juego axial admisible de la prensa según el manual publicado",
+      "axis": "version_confusion",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "Vigente = 0,05-0,12 mm (v1); la v2 dice 0,08-0,15 mm.",
+      "relevant": {
+        "prensa-manual@v1#1.3.1#0000": 2
+      },
+      "must_not_retrieve": [
+        "prensa-manual@v2#1.3.1#0000"
+      ]
+    },
+    {
+      "id": "nmd-01",
+      "text": "advertencia sobre apretar en secuencia circular",
+      "axis": "near_miss_document",
+      "match_kind": "semantic",
+      "difficulty": "hard",
+      "rationale": "La misma advertencia existe en espanol y en ingles; ambas son correctas y ninguna otra lo es.",
+      "relevant": {
+        "prensa-manual@v1#1.3.2#0001": 2,
+        "prensa-nota-en@v1#1.2#0001": 2
+      },
+      "must_not_retrieve": [
+        "bomba-manual@v1#1.1#0001"
+      ]
+    },
+    {
+      "id": "nmd-02",
+      "text": "repuestos del conjunto de prensa",
+      "axis": "near_miss_document",
+      "match_kind": "mixed",
+      "difficulty": "medium",
+      "rationale": "La tabla de repuestos de la bomba es semanticamente casi identica y es la incorrecta.",
+      "relevant": {
+        "prensa-manual@v1#1.7#0000": 2
+      },
+      "must_not_retrieve": [
+        "bomba-manual@v1#1.6#0000"
+      ]
+    },
+    {
+      "id": "nmd-03",
+      "text": "tabla de pares de apriete de la prensa",
+      "axis": "near_miss_document",
+      "match_kind": "mixed",
+      "difficulty": "hard",
+      "rationale": "Existen dos tablas de pares casi iguales, una por activo.",
+      "relevant": {
+        "prensa-manual@v1#1.4#0001": 2
+      },
+      "must_not_retrieve": [
+        "bomba-manual@v1#1.4#0001"
+      ]
+    }
+  ]
+}

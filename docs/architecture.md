@@ -44,6 +44,7 @@ y [ADR 0006](adr/0006-modelo-minimo-de-autorizacion.md).
 | Ingesta estructurada | `src/elsa/ingestion/` | Parsers de XLSX y HTM: reciben bytes, devuelven datos. Sin FastAPI ni base de datos |
 | Conocimiento documental | `src/elsa/documents/` | Seccionado, chunking y validación. Sin FastAPI ni base de datos |
 | Servicios | `src/elsa/services/` | Orquestación: el orden de los pasos de una ingesta y qué pasa cuando uno falla |
+| Banco de pruebas | `src/elsa/bench/` | **Fuera del camino productivo.** Mide candidatos de embeddings; puede componer adaptadores concretos, y ningún módulo del runtime lo importa |
 | Transversal | `config.py`, `logging.py`, `main.py` | Configuración validada, logging JSON con request-id, ensamblaje de la app |
 
 Reglas de dependencia entre capas:
