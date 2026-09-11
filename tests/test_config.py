@@ -3,8 +3,10 @@
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from elsa.config import ConfigurationError, Environment, load_settings
+from tests.conftest import make_test_settings
 
 
 @pytest.fixture(autouse=True)
@@ -389,3 +391,46 @@ def test_a_real_bootstrap_token_is_kept_verbatim(monkeypatch: pytest.MonkeyPatch
     assert settings.bootstrap_admin_token is not None
     assert settings.bootstrap_admin_token.get_secret_value() == "un-token-de-un-solo-uso"
     assert "un-token-de-un-solo-uso" not in repr(settings)
+
+
+# ---------------------------------------------------------------------
+# Chunking documental (Bloque 4.1)
+# ---------------------------------------------------------------------
+
+
+def test_the_chunking_policy_comes_from_configuration() -> None:
+    settings = make_test_settings(
+        document_chunk_profile="planta-v2",
+        document_chunk_target_tokens=200,
+        document_chunk_max_tokens=400,
+        document_chunk_min_tokens=20,
+        document_chunk_overlap_tokens=30,
+        document_chunk_chars_per_token=3,
+    )
+
+    policy = settings.chunking_policy
+
+    assert policy.name == "planta-v2"
+    assert policy.target_tokens == 200
+    assert policy.max_tokens == 400
+    assert policy.overlap_tokens == 30
+    assert policy.chars_per_token == 3
+
+
+def test_incoherent_chunking_limits_stop_the_application() -> None:
+    """El techo por debajo del objetivo produciría chunks imposibles."""
+    with pytest.raises(ValidationError):
+        make_test_settings(document_chunk_target_tokens=500, document_chunk_max_tokens=100)
+
+
+def test_an_overlap_as_large_as_the_target_is_rejected() -> None:
+    """Un solape del tamaño del chunk repetiría el contenido entero."""
+    with pytest.raises(ValidationError):
+        make_test_settings(document_chunk_target_tokens=300, document_chunk_overlap_tokens=300)
+
+
+def test_chunking_limits_must_be_positive() -> None:
+    with pytest.raises(ValidationError):
+        make_test_settings(document_chunk_chars_per_token=0)
+    with pytest.raises(ValidationError):
+        make_test_settings(document_chunk_overlap_tokens=-1)

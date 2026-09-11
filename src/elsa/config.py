@@ -18,6 +18,8 @@ from typing import Annotated
 from pydantic import SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+from elsa.documents.model import ChunkingPolicy
+
 _LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
 # Algoritmos de firma aceptables. `none` y cualquier algoritmo fuera de esta
@@ -187,6 +189,34 @@ class Settings(BaseSettings):
     """Número máximo de entradas dentro del paquete XLSX."""
 
     # ---------------------------------------------------------------
+    # Chunking documental (Bloque 4.1)
+    #
+    # Son los límites del chunking estructural. Se exponen como
+    # configuración —y se persisten con cada versión— porque el tokenizador
+    # real no existe todavía: llega con el modelo de embeddings (Bloque
+    # 4.2), y ajustarlos entonces debe ser cambiar un número, no reescribir
+    # el chunker. Ver `docs/document-chunking.md`.
+    # ---------------------------------------------------------------
+
+    document_chunk_profile: str = "structural-v1"
+    """Nombre del perfil de chunking. Queda registrado en cada versión."""
+
+    document_chunk_target_tokens: int = 350
+    """Tamaño al que apunta un chunk. Se cierra al superarlo."""
+
+    document_chunk_max_tokens: int = 700
+    """Techo duro. Por encima, la prosa se parte por frases."""
+
+    document_chunk_min_tokens: int = 60
+    """Por debajo, un chunk se fusiona con el anterior de su sección."""
+
+    document_chunk_overlap_tokens: int = 50
+    """Solape, solo en cortes provocados por el tamaño. 0 lo desactiva."""
+
+    document_chunk_chars_per_token: int = 4
+    """Divisor de la estimación de tokens mientras no haya tokenizador real."""
+
+    # ---------------------------------------------------------------
     # Interfaz web y demostración (Bloque 3)
     # ---------------------------------------------------------------
 
@@ -341,6 +371,9 @@ class Settings(BaseSettings):
         "ingestion_max_upload_bytes",
         "ingestion_max_uncompressed_bytes",
         "ingestion_max_archive_entries",
+        "document_chunk_target_tokens",
+        "document_chunk_max_tokens",
+        "document_chunk_chars_per_token",
         "contribution_max_attachments",
         "contribution_max_attachment_bytes",
         "contribution_max_audio_seconds",
@@ -355,6 +388,8 @@ class Settings(BaseSettings):
         "auth_jwt_leeway_seconds",
         "auth_jwks_cache_seconds",
         "auth_jwks_min_refresh_seconds",
+        "document_chunk_min_tokens",
+        "document_chunk_overlap_tokens",
         "rate_limit_requests_per_minute",
         "rate_limit_max_concurrent_requests",
         "max_sessions_per_user",
@@ -417,6 +452,14 @@ class Settings(BaseSettings):
                 "ELSA_INGESTION_MAX_UPLOAD_BYTES"
             )
 
+        # La coherencia de los límites del chunking la comprueba la propia
+        # política, para que la regla viva en un solo sitio y no se puedan
+        # separar.
+        try:
+            _ = self.chunking_policy
+        except ValueError as error:
+            raise ValueError(f"invalid document chunking limits: {error}") from None
+
         return self
 
     def _validate_supabase_auth(self, *, is_dev: bool) -> None:
@@ -466,6 +509,18 @@ class Settings(BaseSettings):
         if self.materials_supabase_url is None:
             return None
         return f"{self.materials_supabase_url}/auth/v1"
+
+    @property
+    def chunking_policy(self) -> ChunkingPolicy:
+        """Política de chunking construida a partir de la configuración."""
+        return ChunkingPolicy(
+            name=self.document_chunk_profile,
+            target_tokens=self.document_chunk_target_tokens,
+            max_tokens=self.document_chunk_max_tokens,
+            min_tokens=self.document_chunk_min_tokens,
+            overlap_tokens=self.document_chunk_overlap_tokens,
+            chars_per_token=self.document_chunk_chars_per_token,
+        )
 
     @property
     def materials_profiles_url(self) -> str | None:

@@ -41,6 +41,9 @@ y [ADR 0006](adr/0006-modelo-minimo-de-autorizacion.md).
 | Dominio | `src/elsa/core/` | Lógica de negocio; importa puertos, nunca adaptadores |
 | Puertos | `src/elsa/ports/` | Interfaces (`Protocol`) de toda dependencia externa reemplazable |
 | Adaptadores | `src/elsa/adapters/` | Implementaciones concretas de los puertos; hoy solo *fakes* deterministas |
+| Ingesta estructurada | `src/elsa/ingestion/` | Parsers de XLSX y HTM: reciben bytes, devuelven datos. Sin FastAPI ni base de datos |
+| Conocimiento documental | `src/elsa/documents/` | Seccionado, chunking y validación. Sin FastAPI ni base de datos |
+| Servicios | `src/elsa/services/` | Orquestación: el orden de los pasos de una ingesta y qué pasa cuando uno falla |
 | Transversal | `config.py`, `logging.py`, `main.py` | Configuración validada, logging JSON con request-id, ensamblaje de la app |
 
 Reglas de dependencia entre capas:
@@ -62,13 +65,21 @@ Reglas de dependencia entre capas:
 | `abuse` | `AbuseGuardPort.acquire` / `release` | Control de abuso por usuario |
 | `llm` | `LLMPort.complete` | Modelo de lenguaje local / autohospedado |
 | `embeddings` | `EmbeddingsPort.embed` + `dimension` | Modelo de embeddings |
-| `ocr` | `OCRPort.extract_text` | Extracción de texto de documentos |
+| `ocr` | `OCRPort.extract_text` | Extracción de texto de imágenes (OCR) |
+| `document_extraction` | `DocumentExtractionPort.extract` | Estructura de un documento: títulos, párrafos, listas, pasos, advertencias, tablas |
+| `documents` | `DocumentRepositoryPort` | Conocimiento documental de ELSA (documentos, versiones, secciones, chunks) |
 | `reranker` | `RerankerPort.rerank` | Reordenamiento de candidatos por relevancia |
 | `materials` | `MaterialsPort.get_material` / `search_materials` | Motor del Asistente de Materiales (sin duplicar su inventario) |
 
 Cada puerto tiene un adaptador *fake* determinista usado por los tests de
 contrato (`tests/test_contract_*.py`). Un puerto sin adaptador real no es deuda
 técnica: es el diseño previsto (CLAUDE.md, sección 5).
+
+`ocr` y `document_extraction` son puertos **distintos** a propósito. OCR
+responde «qué texto hay en esta imagen»; la extracción documental responde
+«qué estructura tiene este documento». Un motor puede resolver las dos cosas,
+pero se reemplazan por separado: cambiar de OCR no debería obligar a cambiar
+el chunking.
 
 Adaptadores reales existentes (Bloque 1):
 
@@ -115,6 +126,34 @@ de los cinco pasos.
 
 El detalle del esquema está en [ADR 0006](adr/0006-modelo-minimo-de-autorizacion.md)
 y en `supabase/migrations/`.
+
+## Las dos clases de conocimiento
+
+ELSA guarda dos clases de conocimiento y **no las trata igual**:
+
+| | Estructurado (Bloque 2) | Documental (Bloque 4) |
+|---|---|---|
+| Qué | BOM, SAP, AMEF, S/O/D, códigos, cantidades, relaciones, activos, estados | Manuales, procedimientos, instructivos, documentación narrativa |
+| Cómo se consulta | SQL, filtros exactos, relaciones | Recuperación por pasajes (Bloque 4.3) |
+| ¿Se chunkea? | **No** | **Sí** |
+| Ciclo de vida | `engineering_bom_versions` + `reviews` | `document_versions` + `document_version_events` |
+
+Trocear un BOM para buscarlo por parecido destruiría la única forma fiable de
+consultarlo: un código o una cantidad se responden con una consulta exacta,
+no con un vecino más cercano. La separación completa, con la regla para
+decidir de qué lado cae un dato dudoso, está en
+[`knowledge-architecture.md`](knowledge-architecture.md) y en
+[ADR 0010](adr/0010-conocimiento-estructurado-vs-documental.md).
+
+Los dos modelos comparten el catálogo de dominios, los activos técnicos, el
+catálogo de archivos originales y —sobre todo— el alcance `(dominio, equipo)`
+del Bloque 1. **No hay un segundo modelo de permisos.**
+
+En el conocimiento documental, la autorización se aplica **antes** de
+recuperar por construcción y no por convención:
+`DocumentRepositoryPort.list_published_chunks` exige los alcances
+autorizados como argumento obligatorio, de modo que no existe una lectura
+masiva de chunks sin alcance.
 
 ## Endpoints
 

@@ -51,7 +51,19 @@ KNOWLEDGE_TABLES = {
     "reviews",
 }
 
-ELSA_TABLES = AUTHORIZATION_TABLES | KNOWLEDGE_TABLES
+# Bloque 4: conocimiento documental. Sus garantías propias se prueban en
+# `test_migrations_documents.py`; aquí solo se declara que existen, para que
+# el conjunto de tablas del esquema siga siendo una lista revisada.
+DOCUMENT_TABLES = {
+    "documents",
+    "document_ingestion_runs",
+    "document_versions",
+    "document_sections",
+    "document_chunks",
+    "document_version_events",
+}
+
+ELSA_TABLES = AUTHORIZATION_TABLES | KNOWLEDGE_TABLES | DOCUMENT_TABLES
 
 
 @pytest.fixture

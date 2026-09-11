@@ -141,11 +141,21 @@ de las migraciones.
 
 ### Estado actual
 
-`supabase/migrations/` contiene el modelo de autorización del Bloque 1
-(esquema `elsa`: cuentas, dominios, permisos y auditoría). Está probado
-aplicándolo sobre un PostgreSQL limpio (ver arriba), pero **todavía no se ha
-aplicado a ningún proyecto Supabase remoto**: ese proyecto aún no está
-enlazado. Para enlazarlo hace falta el *project ref* del proyecto Supabase de
+`supabase/migrations/` contiene tres migraciones:
+
+| Archivo | Bloque | Qué crea |
+|---|---|---|
+| `20260905020000_…` | 1 | Modelo de autorización: cuentas, dominios, permisos y auditoría |
+| `20260906010000_…` | 2 | Conocimiento técnico: activos, componentes, BOM, SAP, AMEF, S/O/D, reconciliación y revisión |
+| `20260908010000_…` | 4 | Conocimiento documental: documentos, versiones, secciones y chunks |
+
+Las tres están probadas aplicándolas sobre un PostgreSQL limpio (ver arriba),
+pero **ninguna se ha aplicado a ningún proyecto Supabase remoto**: ese
+proyecto aún no está enlazado.
+
+Los runbooks de aplicación están en
+[`migration-runbook-bloque-2.md`](migration-runbook-bloque-2.md) y
+[`migration-runbook-bloque-4.md`](migration-runbook-bloque-4.md). Para enlazarlo hace falta el *project ref* del proyecto Supabase de
 ELSA (un dato no sensible) y entonces:
 
 ```bash
@@ -222,6 +232,44 @@ información de planta.
 Nunca se copian al repositorio ni se versionan. Para probar la ingesta contra
 los archivos reales de Ingeniería y de SAP, ver
 [`private-acceptance-test.md`](private-acceptance-test.md).
+
+## Trabajar con conocimiento documental (Bloque 4)
+
+Este bloque **no expone endpoints HTTP todavía**: la ingesta documental se
+ejerce con la herramienta de aceptación, que trabaja con adaptadores en
+memoria y no toca ningún Supabase.
+
+```bash
+# Un documento sintético cualquiera (texto plano o Markdown)
+uv run python -m elsa.tools.document_acceptance \
+    --input  manual-v1.md \
+    --second manual-v2.md \
+    --out    acceptance/documento.json \
+    --title  "Manual de ejemplo" \
+    --asset-code tampella
+```
+
+El reporte trae las secciones detectadas, los chunks con su orden y sus
+hashes, las páginas, los avisos, la comprobación de idempotencia y la
+reconstrucción de la procedencia. Termina en 0 si la aceptación pasa, en 1
+si falla —escribiendo el reporte igualmente— y en 2 si no se pudo intentar.
+Ver [`document-acceptance.md`](document-acceptance.md).
+
+Para generar documentos de prueba **sin datos reales**, usa los de la suite
+(`tests/fixtures_documents.py`): reproducen la forma de un manual técnico sin
+un solo dato de planta.
+
+Qué se chunkea y qué no —el BOM, SAP y el AMEF **no** se chunkean— está en
+[`knowledge-architecture.md`](knowledge-architecture.md).
+
+### Documentos reales
+
+Igual que con las fuentes estructuradas: nunca se copian al repositorio. La
+herramienta los lee desde su ruta y el reporte va a `acceptance/`, que está
+en `.gitignore`. Con documentos reales, **no** se usa `--include-text`.
+
+En este bloque el extractor lee texto plano y Markdown. Un PDF se rechaza con
+un aviso claro en vez de adivinarse: no hay OCR ni motor de PDF todavía.
 
 ## Estructura del repositorio
 
