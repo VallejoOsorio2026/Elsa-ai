@@ -302,7 +302,7 @@ Se registran aquí porque quien continúe el proyecto tiene que conocerlas.
 | Sin OCR | Un documento escaneado no se ingiere | Cuando se decida entre Docling y PaddleOCR |
 | Estimación de tokens por caracteres | Los límites son aproximados | Con el tokenizador real del modelo de embeddings (4.2) |
 | `structural_key` posicional | Insertar un párrafo marca como modificados los chunks siguientes de esa sección | Es deliberado; la alternativa validaría de más |
-| Sin adaptador PostgreSQL del repositorio | El puerto solo tiene implementación en memoria | Cuando haya endpoints o recuperación que persistir |
+| Cierre PostgreSQL pendiente | Adaptador implementado; falta resolver la garantía relacional permanente | Ver [estado de 4.1.b](postgres-documents-4-1b.md) |
 | Sin endpoints HTTP | La ingesta documental se ejerce por la herramienta de aceptación | Cuando el Centro de Control los necesite |
 | Una tabla dentro de un manual no se interpreta | Se conserva como texto, no como datos | No previsto: interpretarla duplicaría el BOM |
 
