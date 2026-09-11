@@ -114,7 +114,7 @@ tener ninguno. Ver [ADR 0012](adr/0012-ciclo-de-vida-documental-propio.md).
 
 | Fase | Qué traerá | Por qué no ahora |
 |---|---|---|
-| **4.2 Embeddings** | Modelo de embeddings, columna vectorial, pgvector, índice | La dimensión del vector depende del modelo; declararla ahora obligaría a migrar la tabla entera al elegirlo |
+| **4.2 Embeddings** | Modelo de embeddings, almacenamiento vectorial, pgvector, índice | La dimensión del vector depende del modelo; declararla ahora obligaría a migrar la tabla entera al elegirlo. Planificado en [`bloque-4-2-plan.md`](bloque-4-2-plan.md); dónde vive el vector lo decide [ADR 0013](adr/0013-arquitectura-de-almacenamiento-vectorial.md) |
 | **4.3 Recuperación híbrida** | Búsqueda léxica + vectorial, reranking | Sin embeddings no hay nada que combinar |
 | **4.4 Orquestador** | Ensamblado de contexto, presupuesto de tokens, citas | Depende de qué devuelva la recuperación |
 | **4.5 LLM** | Generación con evidencia recuperada | Depende del orquestador |
