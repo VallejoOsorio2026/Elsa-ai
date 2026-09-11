@@ -1,0 +1,45 @@
+{
+  "note": "Corpus sintetico del banco de embeddings. Todo inventado: ningun dato de PAPELSA. Los metadatos de activo y version describen el escenario que se mide; NO implican que el modelo aplique autorizacion, que es responsabilidad del filtro de la consulta.",
+  "documents": [
+    {
+      "code": "prensa-manual",
+      "file": "prensa-ejemplo-v1.md",
+      "title": "Manual de mantenimiento de la prensa de ejemplo PR-100",
+      "domain": "mantenimiento",
+      "asset": "prensa-ejemplo",
+      "version": 1,
+      "published": true,
+      "language": "es"
+    },
+    {
+      "code": "prensa-manual",
+      "file": "prensa-ejemplo-v2.md",
+      "title": "Manual de mantenimiento de la prensa de ejemplo PR-100",
+      "domain": "mantenimiento",
+      "asset": "prensa-ejemplo",
+      "version": 2,
+      "published": false,
+      "language": "es"
+    },
+    {
+      "code": "prensa-nota-en",
+      "file": "prensa-ejemplo-en-v1.md",
+      "title": "Press PR-100 technical note",
+      "domain": "mantenimiento",
+      "asset": "prensa-ejemplo",
+      "version": 1,
+      "published": true,
+      "language": "en"
+    },
+    {
+      "code": "bomba-manual",
+      "file": "bomba-ejemplo-v1.md",
+      "title": "Manual de mantenimiento de la bomba de ejemplo BO-200",
+      "domain": "mantenimiento",
+      "asset": "bomba-ejemplo",
+      "version": 1,
+      "published": true,
+      "language": "es"
+    }
+  ]
+}

@@ -81,6 +81,14 @@ warn_unused_ignores = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
+# `sentence-transformers` es dependencia **opcional del banco de pruebas**,
+# no del runtime: no esta en `dependencies` porque pesa cientos de megas y
+# ELSA no la necesita para funcionar. El adaptador la importa dentro de una
+# funcion y traduce su ausencia a `ModelUnavailableError`.
+module = ["sentence_transformers.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # Ni asyncpg ni openpyxl publican marcador `py.typed`; sus tipos se anotan
 # en el adaptador o en el parser que los usa.
 module = ["asyncpg.*", "openpyxl.*", "defusedxml.*"]
