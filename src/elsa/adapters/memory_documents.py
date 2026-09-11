@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
-from elsa.core.authorization import Scope
+from elsa.core.authorization import Scope, covers
 from elsa.ports.documents import (
     ChunkProvenance,
     DocumentAlreadyExistsError,
@@ -421,6 +421,12 @@ class InMemoryDocumentRepository:
                 raise NotPublishableError(
                     f"a version cannot be moved to {state.value} through this operation"
                 )
+            # Rechazar cierra el trabajo de alguien: tiene que decir por que.
+            # La base lo impone con `ck_document_event_reason`; aqui se impone
+            # igual, porque un doble que acepta lo que el almacen real rechaza
+            # deja pasar en los tests justo el fallo que importa.
+            if state is DocumentVersionState.REJECTED and not (reason or "").strip():
+                raise ValueError("rejecting a version requires a reason")
             updated = self._replace(version, state=state)
             self._versions[version_id] = updated
             self._record(version_id, VersionEvent(state.value), actor, reason, request_id)
@@ -472,15 +478,34 @@ class InMemoryDocumentRepository:
     ) -> tuple[ChunkProvenance, ...]:
         if not scopes:
             return ()
-        allowed = set(scopes)
+
+        # `covers` es la unica autoridad sobre que alcance cubre a cual: un
+        # permiso de dominio cubre el dominio y cualquiera de sus equipos, y
+        # uno de equipo cubre solo ese. Comparar por igualdad exacta hacia
+        # que un permiso de dominio no devolviera nada.
+        def allowed(scope: Scope) -> bool:
+            return any(covers(granted, scope) for granted in scopes)
+
+        # Orden canonico del puerto: documento, version y posicion del chunk.
+        # Es el mismo que produce el `order by` del adaptador PostgreSQL. Un
+        # orden distinto en cada almacen haria que `limit` devolviera cosas
+        # distintas segun donde corra, y eso no es una diferencia aceptable.
+        published = sorted(
+            (
+                version
+                for version in self._versions.values()
+                if version.state is DocumentVersionState.PUBLISHED
+                and allowed(self._documents[version.document_id].scope)
+            ),
+            key=lambda version: (
+                self._documents[version.document_id].domain,
+                self._documents[version.document_id].code,
+                version.version_number,
+            ),
+        )
         results: list[ChunkProvenance] = []
-        for version in sorted(self._versions.values(), key=lambda v: v.version_number):
-            if version.state is not DocumentVersionState.PUBLISHED:
-                continue
-            document = self._documents[version.document_id]
-            if document.scope not in allowed:
-                continue
-            for chunk in self._chunks.get(version.id, ()):
+        for version in published:
+            for chunk in sorted(self._chunks.get(version.id, ()), key=lambda c: c.ordinal):
                 results.append(self._provenance(version.id, chunk))
                 if len(results) >= limit:
                     return tuple(results)
