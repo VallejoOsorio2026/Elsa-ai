@@ -697,3 +697,129 @@ async def test_the_documental_tables_have_no_policies(
     )
 
     assert list(policies) == []
+
+
+async def _run_for(connection: asyncpg.Connection, document_id: str, digest: str) -> tuple[str, str]:
+    """Corrida coherente y todavía no citada por ninguna versión."""
+    artifact_id = await connection.fetchval(
+        "insert into elsa.source_artifacts (kind, sha256, byte_size, storage_key, uploaded_by) "
+        "values ('document_markdown', $1, 100, $2, $3) returning id",
+        digest,
+        f"document_source/{digest}",
+        ACTOR,
+    )
+    run_id = await connection.fetchval(
+        "insert into elsa.document_ingestion_runs "
+        "(document_id, source_artifact_id, status, started_by) values ($1, $2, 'completed', $3) "
+        "returning id",
+        document_id,
+        artifact_id,
+        ACTOR,
+    )
+    return str(run_id), str(artifact_id)
+
+
+async def _insert_version(
+    connection: asyncpg.Connection, document_id: str, run_id: str, artifact_id: str, number: int
+) -> None:
+    await connection.execute(
+        "insert into elsa.document_versions "
+        "(document_id, run_id, source_artifact_id, version_number, content_sha256, "
+        " structure_sha256, chunking_profile, extractor, extractor_version) "
+        "values ($1, $2, $3, $4, $5, $5, 'structural-v1', 'structured-text', '1')",
+        document_id,
+        run_id,
+        artifact_id,
+        number,
+        HASH_A,
+    )
+
+
+async def test_a_version_cannot_cite_the_run_of_another_document(
+    connection: asyncpg.Connection,
+) -> None:
+    """Caso A: la corrida citada tiene que ser de este documento.
+
+    La corrida usada aquí no la cita ninguna versión, así que `unique(run_id)`
+    no interviene: quien rechaza es la clave foránea compuesta.
+    """
+    mine = await make_document(connection, code="manual-a", asset="asset-a")
+    theirs = await make_document(connection, code="manual-b", asset="asset-b")
+    run_id, artifact_id = await _run_for(connection, theirs, HASH_B)
+
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await _insert_version(connection, mine, run_id, artifact_id, 1)
+
+
+async def test_a_version_cannot_cite_a_file_its_run_did_not_process(
+    connection: asyncpg.Connection,
+) -> None:
+    """Caso B: el archivo citado tiene que ser el que procesó esa corrida."""
+    document_id = await make_document(connection, code="manual-a", asset="asset-a")
+    run_id, _ = await _run_for(connection, document_id, HASH_A)
+    other_artifact = await connection.fetchval(
+        "insert into elsa.source_artifacts (kind, sha256, byte_size, storage_key, uploaded_by) "
+        "values ('document_markdown', $1, 100, $2, $3) returning id",
+        HASH_B,
+        f"document_source/{HASH_B}",
+        ACTOR,
+    )
+
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await _insert_version(connection, document_id, run_id, str(other_artifact), 1)
+
+
+async def test_a_coherent_version_is_still_accepted(connection: asyncpg.Connection) -> None:
+    """La restricción no estorba lo que sí es coherente."""
+    document_id = await make_document(connection, code="manual-a", asset="asset-a")
+    run_id, artifact_id = await _run_for(connection, document_id, HASH_A)
+    await _insert_version(connection, document_id, run_id, artifact_id, 1)
+    assert await connection.fetchval("select count(*) from elsa.document_versions") == 1
+
+
+async def test_a_cited_run_cannot_be_moved_to_another_document_or_file(
+    connection: asyncpg.Connection,
+) -> None:
+    """Caso D: lo que era cierto no puede volverse falso con un UPDATE."""
+    document_id = await make_document(connection, code="manual-a", asset="asset-a")
+    other = await make_document(connection, code="manual-b", asset="asset-b")
+    run_id, artifact_id = await _run_for(connection, document_id, HASH_A)
+    await _insert_version(connection, document_id, run_id, artifact_id, 1)
+    stray = await connection.fetchval(
+        "insert into elsa.source_artifacts (kind, sha256, byte_size, storage_key, uploaded_by) "
+        "values ('document_markdown', $1, 100, $2, $3) returning id",
+        HASH_B,
+        f"document_source/{HASH_B}",
+        ACTOR,
+    )
+
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await connection.execute(
+            "update elsa.document_ingestion_runs set document_id = $1 where id = $2",
+            other,
+            run_id,
+        )
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await connection.execute(
+            "update elsa.document_ingestion_runs set source_artifact_id = $1 where id = $2",
+            stray,
+            run_id,
+        )
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await connection.execute(
+            "update elsa.document_versions set document_id = $1", other
+        )
+
+
+async def test_the_identity_constraints_exist_after_the_migrations(
+    connection: asyncpg.Connection,
+) -> None:
+    """El blindaje viene del esquema versionado, no del adaptador."""
+    names = {
+        row["conname"]
+        for row in await connection.fetch(
+            "select conname from pg_constraint where conname = any($1::text[])",
+            ["uq_document_run_identity", "fk_document_version_run_identity"],
+        )
+    }
+    assert names == {"uq_document_run_identity", "fk_document_version_run_identity"}
