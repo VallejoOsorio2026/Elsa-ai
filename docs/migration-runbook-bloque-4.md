@@ -208,9 +208,11 @@ No revierte el Bloque 2.
 - **Cargar documentos.** No hay endpoints HTTP de ingesta documental en este
   bloque; la ingesta se ejerce con
   [`document-acceptance.md`](document-acceptance.md), que trabaja en memoria.
-- **El adaptador PostgreSQL del repositorio documental.** Su implementación,
-  pruebas locales y propuesta de garantía relacional pendiente se documentan
-  en [el informe de 4.1.b](postgres-documents-4-1b.md). Este runbook no autoriza
-  ni aplica esa propuesta.
+- **El adaptador PostgreSQL del repositorio documental.** Su implementación y
+  pruebas locales se documentan en
+  [el informe de 4.1.b](postgres-documents-4-1b.md). La garantía relacional
+  documento ↔ corrida ↔ archivo se resolvió con la migración
+  `20260912010000`, **probada solo en local**: este runbook cubre
+  `20260908010000` y no autoriza ni aplica la nueva a ningún proyecto remoto.
 - **Embeddings y pgvector.** No forman parte de esta migración
   ([ADR 0010](adr/0010-conocimiento-estructurado-vs-documental.md)).

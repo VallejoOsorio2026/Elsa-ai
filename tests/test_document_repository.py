@@ -752,7 +752,5 @@ async def test_scope_coverage_matches_covers_exactly(
     ]
     for granted in grants:
         expected = {doc_id for doc_id, scope in documents.items() if covers(granted, scope)}
-        actual = {
-            p.document.id for p in await repository.list_published_chunks(scopes=[granted])
-        }
+        actual = {p.document.id for p in await repository.list_published_chunks(scopes=[granted])}
         assert actual == expected, granted

@@ -74,7 +74,7 @@ emulación de todos los tipos, constraints o errores del servidor SQL.
 Todos los documentos son fixtures sintéticas. No se ensaya carga de producción,
 un servicio remoto ni una recuperación tras caída abrupta del servidor.
 
-## Decisión SQL pendiente: identidad de la corrida
+## Identidad de la corrida: resuelta por migración
 
 ### Problema y prueba del esquema actual
 
@@ -105,7 +105,7 @@ mismatches_after_rollback: 0
 Se insertaron solo metadatos sintéticos dentro de `BEGIN`/`ROLLBACK`. No se
 ejecutó DDL adicional ni quedó el dato inconsistente.
 
-### SQL propuesto, no ejecutado
+### SQL aplicado en local
 
 Tablas y columnas afectadas:
 
@@ -164,7 +164,7 @@ Esta FK garantiza la relación entre IDs; no convierte en inmutable todo el
 contenido ni impone igualdad de hashes entre tablas. El adaptador verifica
 el hash original al crear la versión.
 
-### Rollback propuesto, no ejecutado
+### Rollback, probado en local
 
 ```sql
 BEGIN;
@@ -178,7 +178,7 @@ COMMIT;
 No borra filas ni cambia las FKs previas. Devuelve la brecha original; primero
 se retira la FK dependiente y después la unicidad.
 
-### Pruebas necesarias si se autoriza
+### Pruebas escritas
 
 1. Migración desde esquema vacío y desde fixtures válidas ya pobladas; comprobar
    que la FK quede validada. Con datos incompatibles, fallo y rollback íntegro.
@@ -193,7 +193,9 @@ se retira la FK dependiente y después la unicidad.
 6. Repetir contrato compartido, rollback/concurrencia y suite completa sobre
    PostgreSQL 16, además de los controles de calidad.
 
-Hasta resolver esta decisión no se considera cerrado 4.1.b ni listo para PR.
+Resuelto. La migración vive en `supabase/migrations/20260912010000_enforce_document_run_artifact_identity.sql`, con su reversión en `supabase/rollback/`. Se probó **solo en local** contra PostgreSQL 16.13; **no se aplicó a ningún Supabase remoto**. La versión publicada de la propuesta usaba `NOT VALID` + `VALIDATE`; la migración final valida directamente, porque sobre una base con datos incoherentes debe negarse a aplicarse, y así lo hizo en la prueba.
+
+Lo que **no** queda blindado, y no es un olvido: `elsa.source_artifacts` no tiene dominio, activo ni documento, así que el esquema no puede exigir que un archivo «pertenezca» a un documento. El cruce entre dominios ya lo impide `fk_document_asset`.
 
 ## Registro de ejecución
 

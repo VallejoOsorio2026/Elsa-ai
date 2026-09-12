@@ -699,7 +699,9 @@ async def test_the_documental_tables_have_no_policies(
     assert list(policies) == []
 
 
-async def _run_for(connection: asyncpg.Connection, document_id: str, digest: str) -> tuple[str, str]:
+async def _run_for(
+    connection: asyncpg.Connection, document_id: str, digest: str
+) -> tuple[str, str]:
     """Corrida coherente y todavía no citada por ninguna versión."""
     artifact_id = await connection.fetchval(
         "insert into elsa.source_artifacts (kind, sha256, byte_size, storage_key, uploaded_by) "
@@ -806,9 +808,7 @@ async def test_a_cited_run_cannot_be_moved_to_another_document_or_file(
             run_id,
         )
     with pytest.raises(asyncpg.ForeignKeyViolationError):
-        await connection.execute(
-            "update elsa.document_versions set document_id = $1", other
-        )
+        await connection.execute("update elsa.document_versions set document_id = $1", other)
 
 
 async def test_the_identity_constraints_exist_after_the_migrations(
