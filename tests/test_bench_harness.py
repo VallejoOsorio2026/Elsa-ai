@@ -5,13 +5,17 @@ El banco tiene que ser ejecutable y reproducible **sin red y sin GPU**: es la
 informe. Eso es lo que se comprueba aquí.
 """
 
+import importlib
 import json
 import re
+import sys
 from collections.abc import Sequence
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
+from elsa.bench import runner
 from elsa.bench.adapters.hashing import HashingEmbedder
 from elsa.bench.adapters.sentence_transformers import (
     CANDIDATES,
@@ -364,3 +368,65 @@ def test_the_cli_is_reproducible(tmp_path: Path) -> None:
 
 def test_an_unknown_candidate_is_refused(tmp_path: Path) -> None:
     assert main(["--out", str(tmp_path / "x"), "--candidates", "no-existe"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Portabilidad: el banco tiene que arrancar donde no existe `resource`.
+#
+# `resource` es POSIX. En Windows no existe, y un `import` incondicional hacía
+# fallar incluso `--help`, antes de ejecutar nada.
+# ---------------------------------------------------------------------------
+
+
+def test_peak_memory_is_measured_where_the_posix_api_exists() -> None:
+    """En Linux se sigue midiendo, exactamente como antes."""
+    assert runner.resource is not None
+    measured = runner._peak_rss_mb()
+
+    assert isinstance(measured, float) and measured > 0
+
+
+def test_peak_memory_is_reported_as_unavailable_instead_of_failing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sin `resource` y sin la API de Windows, el dato falta; no revienta."""
+    monkeypatch.setattr(runner, "resource", None)
+    monkeypatch.setattr(runner, "_windows_peak_rss_mb", lambda: None)
+
+    assert runner._peak_rss_mb() is None
+
+
+def test_a_run_without_memory_measurement_still_produces_its_report(
+    corpus: BenchCorpus, golden: GoldenSet, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Lo que decide el ganador no depende de poder medir la memoria.
+
+    `peak_rss_mb` es dato de máquina y queda fuera de `identity()`, así que una
+    corrida sin esa medición sigue siendo comparable con una que sí la tiene.
+    """
+    monkeypatch.setattr(runner, "resource", None)
+    monkeypatch.setattr(runner, "_windows_peak_rss_mb", lambda: None)
+    run = run_dense(HashingEmbedder(), corpus, golden)
+
+    assert run.metadata.peak_rss_mb is None
+    assert run.scoreboard.primary.queries > 0
+    assert "peak_rss_mb" not in run.metadata.identity()
+    assert "—" in render_markdown([run])
+
+
+def test_the_benchmark_imports_where_resource_does_not_exist() -> None:
+    """Simula Windows: `import resource` falla y el módulo debe cargar igual.
+
+    Es lo que hacía fallar `--help` en Windows, así que se comprueba el módulo
+    de la herramienta, que es el punto de entrada real.
+    """
+    blocked = dict.fromkeys(
+        [name for name in sys.modules if name.startswith(("elsa.bench", "elsa.tools"))]
+    )
+    with mock.patch.dict(sys.modules, {**blocked, "resource": None}):
+        for name in list(blocked):
+            sys.modules.pop(name, None)
+        module = importlib.import_module("elsa.tools.embedding_benchmark")
+
+        assert module.main is not None
+        assert importlib.import_module("elsa.bench.runner").resource is None
