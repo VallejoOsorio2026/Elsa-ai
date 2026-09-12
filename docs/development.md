@@ -239,6 +239,11 @@ Este bloque **no expone endpoints HTTP todavía**: la ingesta documental se
 ejerce con la herramienta de aceptación, que trabaja con adaptadores en
 memoria y no toca ningún Supabase.
 
+El adaptador `PostgresDocumentRepository` de 4.1.b se verifica por separado
+contra PostgreSQL 16 local. Contrato, regresiones y propuesta de restricción
+pendiente: [`postgres-documents-4-1b.md`](postgres-documents-4-1b.md). Todavía
+no está conectado al contenedor HTTP ni a esta herramienta de aceptación.
+
 ```bash
 # Un documento sintético cualquiera (texto plano o Markdown)
 uv run python -m elsa.tools.document_acceptance \

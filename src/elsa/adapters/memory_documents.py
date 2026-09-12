@@ -15,14 +15,24 @@ la configuración solo la permite en DEV.
 import asyncio
 import uuid
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from datetime import UTC, datetime
 
-from elsa.core.authorization import Scope
+from elsa.core.authorization import Scope, covers
+from elsa.documents.persistence import (
+    content_records,
+    require_open_run,
+    require_publishable,
+    validate_retry,
+    validate_source,
+    validate_transition,
+)
 from elsa.ports.documents import (
     ChunkProvenance,
     DocumentAlreadyExistsError,
     DocumentChunkRecord,
     DocumentIngestionRunRecord,
+    DocumentIntegrityError,
     DocumentNotFoundError,
     DocumentRecord,
     DocumentSectionRecord,
@@ -33,7 +43,6 @@ from elsa.ports.documents import (
     DocumentVersionState,
     DuplicateSourceError,
     IngestionRunStatus,
-    NotPublishableError,
     VersionEvent,
     VersionNotFoundError,
 )
@@ -156,8 +165,8 @@ class InMemoryDocumentRepository:
         source_id = self._source_by_hash.get(sha256)
         if source_id is None:
             return None
-        return next(
-            (run for run in self._runs.values() if run.source_artifact_id == source_id), None
+        return deepcopy(
+            next((run for run in self._runs.values() if run.source_artifact_id == source_id), None)
         )
 
     async def start_ingestion_run(
@@ -185,6 +194,8 @@ class InMemoryDocumentRepository:
                     "this exact file has already been ingested",
                     existing_import_id=None if previous is None else previous.id,
                 )
+            if any(source.storage_key == storage_key for source in self._sources.values()):
+                raise DocumentIntegrityError("source storage key already belongs to an original")
             source = _Source(
                 identifier=_identifier(),
                 sha256=sha256,
@@ -205,7 +216,7 @@ class InMemoryDocumentRepository:
                 request_id=request_id,
             )
             self._runs[run.id] = run
-            return run
+            return deepcopy(run)
 
     async def fail_ingestion_run(
         self,
@@ -219,6 +230,7 @@ class InMemoryDocumentRepository:
             run = self._runs.get(run_id)
             if run is None:
                 raise VersionNotFoundError(run_id)
+            require_open_run(run)
             # Cerrar como fallida no toca ninguna versión: la publicada sigue
             # publicada y la anterior sigue siendo la última válida.
             updated = DocumentIngestionRunRecord(
@@ -232,20 +244,20 @@ class InMemoryDocumentRepository:
                 failure_message=failure_message,
                 request_id=run.request_id,
                 finished_at=_now(),
-                stats=dict(stats or {}),
+                stats=deepcopy(dict(stats or {})),
             )
             self._runs[run.id] = updated
-            return updated
+            return deepcopy(updated)
 
     async def get_ingestion_run(self, run_id: str) -> DocumentIngestionRunRecord | None:
-        return self._runs.get(run_id)
+        return deepcopy(self._runs.get(run_id))
 
     async def list_ingestion_runs(
         self, document_id: str, *, limit: int = 50
     ) -> tuple[DocumentIngestionRunRecord, ...]:
         runs = [run for run in self._runs.values() if run.document_id == document_id]
-        runs.sort(key=lambda run: run.started_at, reverse=True)
-        return tuple(runs[:limit])
+        runs.sort(key=lambda run: (-run.started_at.timestamp(), run.id))
+        return deepcopy(tuple(runs[: max(0, limit)]))
 
     # -----------------------------------------------------------------
     # Versiones
@@ -260,6 +272,23 @@ class InMemoryDocumentRepository:
             run = self._runs.get(data.run_id)
             if run is None:
                 raise VersionNotFoundError(data.run_id)
+
+            prior = next((v for v in self._versions.values() if v.run_id == run.id), None)
+            if prior is not None:
+                validate_retry(
+                    data,
+                    prior,
+                    run,
+                    self._sections[prior.id],
+                    self._chunks[prior.id],
+                    next(e for e in self._events if e.version_id == prior.id),
+                    actor=actor,
+                    request_id=request_id,
+                )
+                return deepcopy(prior)
+            require_open_run(run)
+            source = self._sources.get(data.source_artifact_id)
+            validate_source(data, run, None if source is None else source.sha256)
 
             existing = [
                 version
@@ -286,68 +315,7 @@ class InMemoryDocumentRepository:
                 chunk_count=len(data.structure.chunks),
             )
 
-            # Las secciones llegan en orden de lectura, asi que el padre
-            # siempre esta ya registrado cuando se procesa un hijo.
-            section_ids: dict[str, str] = {}
-            sections: list[DocumentSectionRecord] = []
-            for section in data.structure.sections:
-                identifier = _identifier()
-                section_ids[section.path] = identifier
-                sections.append(
-                    DocumentSectionRecord(
-                        id=identifier,
-                        version_id=version.id,
-                        ordinal=section.ordinal,
-                        path=section.path,
-                        depth=section.depth,
-                        title=section.title,
-                        parent_id=(
-                            None
-                            if section.parent_path is None
-                            else section_ids.get(section.parent_path)
-                        ),
-                        parent_path=section.parent_path,
-                        number_label=section.number_label,
-                        page_start=section.page_start,
-                        page_end=section.page_end,
-                        char_start=section.char_start,
-                        char_end=section.char_end,
-                        is_preamble=section.is_preamble,
-                    )
-                )
-
-            chunks = [
-                DocumentChunkRecord(
-                    id=_identifier(),
-                    version_id=version.id,
-                    ordinal=chunk.ordinal,
-                    structural_key=chunk.structural_key,
-                    content=chunk.content,
-                    content_sha256=chunk.content_sha256,
-                    kind=chunk.kind,
-                    section_id=(
-                        None if chunk.section_path is None else section_ids.get(chunk.section_path)
-                    ),
-                    section_path=chunk.section_path,
-                    section_title=chunk.section_title,
-                    index_in_section=chunk.index_in_section,
-                    heading_trail=chunk.heading_trail,
-                    page_start=chunk.page_start,
-                    page_end=chunk.page_end,
-                    block_start=chunk.block_start,
-                    block_end=chunk.block_end,
-                    char_start=chunk.char_start,
-                    char_end=chunk.char_end,
-                    token_estimate=chunk.token_estimate,
-                    char_length=chunk.char_length,
-                    overlap_chars=chunk.overlap_chars,
-                    boundary_reason=chunk.boundary_reason,
-                    oversized=chunk.oversized,
-                    warnings=chunk.warnings,
-                    change_kind=data.changes.get(chunk.structural_key),
-                )
-                for chunk in data.structure.chunks
-            ]
+            sections, chunks = content_records(data, version.id)
 
             self._versions[version.id] = version
             self._sections[version.id] = sections
@@ -361,29 +329,31 @@ class InMemoryDocumentRepository:
                 started_at=run.started_at,
                 request_id=run.request_id,
                 finished_at=_now(),
-                stats=dict(data.stats),
+                stats=deepcopy(dict(data.stats)),
             )
             self._record(version.id, VersionEvent.CREATED, actor, None, request_id)
-            return version
+            return deepcopy(version)
 
     async def get_version(self, version_id: str) -> DocumentVersionRecord | None:
-        return self._versions.get(version_id)
+        return deepcopy(self._versions.get(version_id))
 
     async def list_versions(self, document_id: str) -> tuple[DocumentVersionRecord, ...]:
         versions = [
             version for version in self._versions.values() if version.document_id == document_id
         ]
-        return tuple(sorted(versions, key=lambda version: version.version_number))
+        return deepcopy(tuple(sorted(versions, key=lambda version: version.version_number)))
 
     async def get_published_version(self, document_id: str) -> DocumentVersionRecord | None:
-        return next(
-            (
-                version
-                for version in self._versions.values()
-                if version.document_id == document_id
-                and version.state is DocumentVersionState.PUBLISHED
-            ),
-            None,
+        return deepcopy(
+            next(
+                (
+                    version
+                    for version in self._versions.values()
+                    if version.document_id == document_id
+                    and version.state is DocumentVersionState.PUBLISHED
+                ),
+                None,
+            )
         )
 
     async def list_sections(self, version_id: str) -> tuple[DocumentSectionRecord, ...]:
@@ -412,19 +382,11 @@ class InMemoryDocumentRepository:
             version = self._versions.get(version_id)
             if version is None:
                 raise VersionNotFoundError(version_id)
-            if version.state is DocumentVersionState.PUBLISHED:
-                raise NotPublishableError("a published version cannot change state directly")
-            # Solo las dos decisiones que toma una persona. `published` tiene
-            # su propia operacion porque ademas reemplaza a la anterior, y
-            # `superseded` no lo decide nadie: es consecuencia de publicar.
-            if state not in (DocumentVersionState.APPROVED, DocumentVersionState.REJECTED):
-                raise NotPublishableError(
-                    f"a version cannot be moved to {state.value} through this operation"
-                )
+            validate_transition(version.state, state, reason)
             updated = self._replace(version, state=state)
             self._versions[version_id] = updated
             self._record(version_id, VersionEvent(state.value), actor, reason, request_id)
-            return updated
+            return deepcopy(updated)
 
     async def publish_version(
         self, *, version_id: str, actor: str, request_id: str | None = None
@@ -433,12 +395,7 @@ class InMemoryDocumentRepository:
             version = self._versions.get(version_id)
             if version is None:
                 raise VersionNotFoundError(version_id)
-            if version.state is not DocumentVersionState.APPROVED:
-                # Publicar sin aprobar saltaría la validación entera. El
-                # estado no es decoración: es el permiso para publicar.
-                raise NotPublishableError(
-                    f"only an approved version can be published; this one is {version.state.value}"
-                )
+            require_publishable(version.state)
             moment = _now()
             for other in list(self._versions.values()):
                 if (
@@ -458,7 +415,7 @@ class InMemoryDocumentRepository:
             )
             self._versions[version_id] = published
             self._record(version_id, VersionEvent.PUBLISHED, actor, None, request_id)
-            return published
+            return deepcopy(published)
 
     async def list_version_events(self, version_id: str) -> tuple[DocumentVersionEventRecord, ...]:
         return tuple(event for event in self._events if event.version_id == version_id)
@@ -470,15 +427,26 @@ class InMemoryDocumentRepository:
     async def list_published_chunks(
         self, *, scopes: Sequence[Scope], limit: int = 100
     ) -> tuple[ChunkProvenance, ...]:
-        if not scopes:
+        if not scopes or limit <= 0:
             return ()
-        allowed = set(scopes)
+        granted = tuple(scopes)
         results: list[ChunkProvenance] = []
-        for version in sorted(self._versions.values(), key=lambda v: v.version_number):
+        for version in sorted(
+            self._versions.values(),
+            key=lambda v: (
+                v.version_number,
+                self._documents[v.document_id].created_at,
+                v.document_id,
+            ),
+        ):
             if version.state is not DocumentVersionState.PUBLISHED:
                 continue
             document = self._documents[version.document_id]
-            if document.scope not in allowed:
+            # `covers` es la unica autoridad sobre cobertura de alcance: un
+            # permiso de dominio completo cubre cualquier equipo de ese
+            # dominio, y uno de equipo cubre solo ese equipo. Comparar por
+            # igualdad aqui negaria lo que el permiso si concede.
+            if not any(covers(g, document.scope) for g in granted):
                 continue
             for chunk in self._chunks.get(version.id, ()):
                 results.append(self._provenance(version.id, chunk))
@@ -508,7 +476,7 @@ class InMemoryDocumentRepository:
         return ChunkProvenance(
             chunk=chunk,
             document=document,
-            version=version,
+            version=deepcopy(version),
             section=section,
             source_sha256=source.sha256,
             source_storage_key=source.storage_key,

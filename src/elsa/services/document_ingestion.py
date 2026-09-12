@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from elsa.core.versioning import ChangeKind, VersionedItem, classify_versions
 from elsa.documents.chunking import chunk_document
 from elsa.documents.model import ChunkingPolicy, DocumentStructure
+from elsa.documents.persistence import require_reason
 from elsa.documents.validation import ValidationReport, validate_structure
 from elsa.ports.artifact_storage import (
     ArtifactAlreadyExistsError,
@@ -286,6 +287,7 @@ class DocumentIngestionService:
         self, *, version_id: str, actor: str, reason: str, request_id: str | None = None
     ) -> DocumentVersionRecord:
         """Rechaza una versión. La publicada, si la hay, sigue publicada."""
+        require_reason(reason)
         return await self._repository.set_version_state(
             version_id=version_id,
             state=DocumentVersionState.REJECTED,

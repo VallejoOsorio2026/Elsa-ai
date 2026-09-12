@@ -41,6 +41,8 @@ from elsa.ports.knowledge import (
 __all__ = [
     "ChunkProvenance",
     "DocumentAlreadyExistsError",
+    "DocumentIntegrityError",
+    "VersionConflictError",
     "DocumentChunkRecord",
     "DocumentIngestionRunRecord",
     "DocumentNotFoundError",
@@ -76,6 +78,14 @@ class DocumentAlreadyExistsError(Exception):
 
 class VersionNotFoundError(Exception):
     """No existe esa versión o esa ejecución de ingesta."""
+
+
+class DocumentIntegrityError(ValueError):
+    """Documento, corrida, original o estructura no corresponden entre sí."""
+
+
+class VersionConflictError(DocumentIntegrityError):
+    """La corrida ya produjo una versión con otra operación de escritura."""
 
 
 # ---------------------------------------------------------------------
@@ -422,14 +432,20 @@ class DocumentRepositoryPort(Protocol):
         failure_message: str,
         stats: Mapping[str, object] | None = None,
     ) -> DocumentIngestionRunRecord:
-        """Cierra la ingesta como fallida. No toca la versión publicada."""
+        """Cierra una ingesta abierta como fallida, sin tocar la versión publicada.
+
+        Una corrida completed/failed no puede cambiar su resultado; intentar
+        cerrarla otra vez lanza DocumentIntegrityError.
+        """
         ...
 
     async def get_ingestion_run(self, run_id: str) -> DocumentIngestionRunRecord | None: ...
 
     async def list_ingestion_runs(
         self, document_id: str, *, limit: int = 50
-    ) -> tuple[DocumentIngestionRunRecord, ...]: ...
+    ) -> tuple[DocumentIngestionRunRecord, ...]:
+        """Más recientes primero (empate por id ascendente); limit <= 0 devuelve ()."""
+        ...
 
     # -- Versiones ----------------------------------------------------
 
@@ -440,6 +456,17 @@ class DocumentRepositoryPort(Protocol):
 
         La versión entra siempre como ``pending_validation``: nunca se
         publica sola.
+
+        Solo una corrida abierta puede crearla; una corrida failed no se
+        reactiva mediante esta operación.
+
+        Una corrida produce como máximo una versión. Repetir los mismos
+        campos persistibles, stats, actor y request_id devuelve la versión
+        existente en su estado actual, sin eventos ni timestamps nuevos.
+        Los campos transitorios de extracción no forman parte de esa igualdad.
+        Reutilizar la corrida con otros datos lanza VersionConflictError.
+        Documento, corrida, original y hash deben corresponder; una combinación
+        incompatible lanza DocumentIntegrityError sin escrituras parciales.
         """
         ...
 
@@ -466,7 +493,10 @@ class DocumentRepositoryPort(Protocol):
         reason: str | None = None,
         request_id: str | None = None,
     ) -> DocumentVersionRecord:
-        """Aprueba o rechaza una versión que aún no está publicada."""
+        """Aprueba o rechaza una versión aún no publicada ni reemplazada.
+
+        Rechazar exige un motivo no vacío; de lo contrario NotPublishableError.
+        """
         ...
 
     async def publish_version(
