@@ -13,6 +13,7 @@ from elsa.adapters.postgres_documents import PostgresDocumentRepository
 from elsa.core.authorization import Scope
 from elsa.ports.documents import (
     DocumentIntegrityError,
+    DocumentSourceKind,
     DocumentVersionRecord,
     DocumentVersionState,
     IngestionRunStatus,
@@ -364,3 +365,50 @@ async def test_failure_and_store_serialize_without_mixed_outcomes(
             assert versions == ()
     finally:
         await other.close()
+
+
+class _ClosedPool:
+    """Pool cuyo uso falla como falla asyncpg con el pool ya cerrado.
+
+    `InterfaceError` no desciende de `PostgresError`, así que una traducción
+    de errores que solo capture esa rama la deja escapar sin traducir.
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def _closed(self) -> asyncpg.InterfaceError:
+        self.calls += 1
+        return asyncpg.InterfaceError("pool is closed")
+
+    async def fetch(self, *args: Any, **kwargs: Any) -> list[Any]:
+        raise self._closed()
+
+    def acquire(self, *args: Any, **kwargs: Any) -> Any:
+        raise self._closed()
+
+
+async def test_a_closed_pool_is_reported_as_unavailable_not_as_an_asyncpg_error() -> None:
+    """El pool cerrado llega al llamador como error del puerto, no de asyncpg.
+
+    Quien consume el puerto solo conoce `KnowledgeUnavailableError`; dejar
+    escapar `asyncpg.InterfaceError` filtra el adaptador y ningún llamador lo
+    captura.
+    """
+    pool = _ClosedPool()
+    repository = PostgresDocumentRepository(pool)
+
+    # Camino de lectura: pool.fetch.
+    with pytest.raises(KnowledgeUnavailableError):
+        await repository.list_published_chunks(scopes=[Scope("mantenimiento", "asset-a")])
+
+    # Camino de escritura: pool.acquire.
+    with pytest.raises(KnowledgeUnavailableError):
+        await repository.create_document(
+            domain="mantenimiento",
+            code="doc-a",
+            title="A",
+            source_kind=DocumentSourceKind.MANUAL,
+        )
+
+    assert pool.calls == 2

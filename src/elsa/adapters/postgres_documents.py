@@ -101,7 +101,11 @@ def _json(value: Mapping[str, object]) -> str:
 def _database_errors():
     try:
         yield
-    except (asyncpg.PostgresError, OSError, TimeoutError) as error:
+    # `InterfaceError` se nombra aparte a propósito: no desciende de
+    # `PostgresError` ni de `OSError`, sino de `InterfaceMessage`. Es lo que
+    # asyncpg lanza al usar un pool ya cerrado, y sin nombrarlo escaparía sin
+    # traducir hasta el llamador, que solo conoce los errores del puerto.
+    except (asyncpg.PostgresError, asyncpg.InterfaceError, OSError, TimeoutError) as error:
         _logger.warning("document store failure", extra={"error": type(error).__name__})
         raise KnowledgeUnavailableError("the ELSA document store is unavailable") from None
 
