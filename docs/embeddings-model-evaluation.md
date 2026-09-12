@@ -325,10 +325,18 @@ por bueno que sea su `Recall`:
 
 | Guardarraíl | Criterio |
 |---|---|
-| Fuga de alcance | **0** chunks de un alcance no autorizado en los resultados, sobre un corpus con dos activos y un usuario autorizado a uno |
-| Fuga de versión | **0** chunks de versiones no publicadas |
 | Determinismo | Dos corridas del mismo corpus producen vectores idénticos |
 | Truncamiento | **0** chunks truncados con los límites elegidos, o el número declarado explícitamente |
+
+**Esta tabla tenía dos guardarraíles más, «fuga de alcance» y «fuga de
+versión», y se retiraron.** No son propiedades del modelo de embeddings: el
+aislamiento entre activos y entre versiones lo imponen los filtros
+obligatorios de la consulta de recuperación, y el modelo no tiene ninguna vía
+por la que imponerlos. Lo registra
+[ADR 0014](adr/0014-confusabilidad-no-es-autorizacion.md), **aceptado**, que
+los sustituye por la **confusabilidad** (`confusion@5`) como diagnóstico de
+calidad —nunca como mecanismo de autorización— y señala dónde se prueba de
+verdad el aislamiento: en el repositorio documental del Bloque 4.1.
 
 ### 7.6 Métricas de operación, en la misma corrida
 
@@ -370,6 +378,7 @@ fuentes secundarias porque el egreso a los sitios de origen estaba bloqueado.
 ## Ver también
 
 - [ADR 0013](adr/0013-arquitectura-de-almacenamiento-vectorial.md) — arquitectura vectorial **aceptada**
+- [ADR 0014](adr/0014-confusabilidad-no-es-autorizacion.md) — por qué «fuga de alcance» y «fuga de versión» dejaron de ser guardarraíles del modelo
 - [`bloque-4-2-plan.md`](bloque-4-2-plan.md) — alcance, exclusiones y criterios de aceptación del bloque
 - [ADR 0010](adr/0010-conocimiento-estructurado-vs-documental.md) — por qué los códigos no se embeben
 - [ADR 0011](adr/0011-chunking-estructural-deterministico.md) — qué se embebe, y por qué es determinista

@@ -17,6 +17,15 @@ dependencies = [
     "python-multipart>=0.0.9",
 ]
 
+[project.optional-dependencies]
+# Solo para el banco de pruebas del modelo de embeddings (Bloque 4.2.a).
+# NO es dependencia del runtime: ELSA no necesita torch para funcionar, y un
+# clon limpio tiene que pasar los tests sin instalar cientos de megas
+# (regla 24). Se instala con `uv sync --extra bench`.
+bench = [
+    "sentence-transformers>=3.0,<6",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",
@@ -79,6 +88,14 @@ no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_ignores = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+# `sentence-transformers` es dependencia **opcional del banco de pruebas**,
+# no del runtime: no esta en `dependencies` porque pesa cientos de megas y
+# ELSA no la necesita para funcionar. El adaptador la importa dentro de una
+# funcion y traduce su ausencia a `ModelUnavailableError`.
+module = ["sentence_transformers.*"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # Ni asyncpg ni openpyxl publican marcador `py.typed`; sus tipos se anotan
