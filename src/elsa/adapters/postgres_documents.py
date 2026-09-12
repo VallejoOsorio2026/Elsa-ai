@@ -489,8 +489,14 @@ class PostgresDocumentRepository:
             + """
             where p.version_state='published' and exists (
                 select 1 from unnest($1::text[],$2::text[]) as allowed(domain,equipment)
+                -- Traduccion literal de `core.authorization.covers`: un permiso
+                -- sin equipo cubre todo el dominio; uno con equipo cubre solo
+                -- ese equipo. Comparar por igualdad estricta negaria lo que el
+                -- permiso si concede, y hacerlo solo por dominio concederia de
+                -- mas. La regla vive en un sitio y el SQL la reproduce.
                 where p.scope_domain=allowed.domain
-                  and p.scope_equipment is not distinct from allowed.equipment)
+                  and (allowed.equipment is null
+                       or p.scope_equipment=allowed.equipment))
             order by v.version_number,d.created_at,d.id,c.ordinal limit $3
             """,
             [s.domain for s in scopes],

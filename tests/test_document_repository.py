@@ -13,7 +13,7 @@ from elsa.adapters.memory_artifact_storage import InMemoryArtifactStorage
 from elsa.adapters.memory_documents import InMemoryDocumentRepository
 from elsa.adapters.postgres_documents import PostgresDocumentRepository
 from elsa.adapters.structured_text_extractor import StructuredTextExtractor
-from elsa.core.authorization import Scope
+from elsa.core.authorization import Scope, covers
 from elsa.core.versioning import ChangeKind
 from elsa.documents.chunking import chunk_document
 from elsa.ports.artifact_storage import sha256_hex
@@ -413,9 +413,15 @@ async def test_lifecycle_history_provenance_and_scope_isolation(
     allowed = await repository.list_published_chunks(scopes=[docs[0].scope, docs[0].scope])
     assert {p.chunk.id for p in allowed} == {c.id for c in chunks}
     assert len(allowed) == len(chunks)
-    assert {
+    # `docs[3].scope` no tiene equipo: es un permiso de **dominio completo**, y
+    # por `core.authorization.covers` cubre todo el dominio, no solo el
+    # documento sin equipo. Lo que esta prueba vigila es el aislamiento entre
+    # dominios, y ese sigue en pie.
+    domain_wide = {
         p.document.id for p in await repository.list_published_chunks(scopes=[docs[3].scope])
-    } == {docs[3].id}
+    }
+    assert {docs[0].id, docs[3].id} <= domain_wide
+    assert docs[2].id not in domain_wide
     second_data = await version_input(repository, docs[0], fx.MANUAL_V2)
     second = await repository.store_version(second_data, actor=ACTOR)
     still_published = await repository.get_published_version(docs[0].id)
@@ -654,3 +660,99 @@ async def test_mutable_metadata_cannot_rewrite_a_stored_operation(
         )
         == saved
     )
+
+
+async def _published(
+    repo: DocumentRepositoryPort, code: str, *, domain: str = "mantenimiento", asset: str | None
+) -> DocumentRecord:
+    """Documento con una versión publicada, para poder recuperarlo."""
+    doc = await document(repo, code, domain=domain, asset=asset)
+    # Contenido distinto por documento: un mismo archivo se deduplica, y
+    # aqui lo que se mide es el alcance, no la deduplicacion.
+    data = await version_input(repo, doc, fx.MANUAL_V1 + f"\nDocumento {code}")
+    version = await repo.store_version(data, actor=ACTOR)
+    await service(repo).approve(version_id=version.id, actor=ACTOR)
+    await service(repo).publish(version_id=version.id, actor=ACTOR)
+    return doc
+
+
+async def test_scope_coverage_follows_the_authorization_rule_not_exact_equality(
+    repository: DocumentRepositoryPort,
+) -> None:
+    """La recuperación cubre el alcance igual que `core.authorization.covers`.
+
+    Un permiso de dominio completo cubre cualquier equipo de ese dominio; uno
+    de equipo cubre solo ese equipo. Comparar por igualdad estricta negaría lo
+    que el permiso sí concede, y comparar solo por dominio concedería de más.
+    La regla vive en `covers`, y ambos adaptadores deben reproducirla.
+    """
+    asset_a = await _published(repository, "manual-a", asset="asset-a")
+    asset_b = await _published(repository, "manual-b", asset="asset-b")
+    domain_wide = await _published(repository, "manual-dom", asset=None)
+    other_domain = await _published(repository, "manual-lab", domain="laboratorio", asset="asset-c")
+
+    async def visible(*scopes: Scope) -> set[str]:
+        return {p.document.id for p in await repository.list_published_chunks(scopes=list(scopes))}
+
+    # Permiso de dominio: alcanza equipo A, equipo B y el documento sin equipo
+    # del mismo dominio, y nada de otro dominio.
+    assert await visible(Scope("mantenimiento", None)) == {
+        asset_a.id,
+        asset_b.id,
+        domain_wide.id,
+    }
+
+    # Permiso de equipo A: solo A. Ni B, ni el documento de dominio completo.
+    assert await visible(Scope("mantenimiento", "asset-a")) == {asset_a.id}
+
+    # Otro dominio: denegado, aunque el equipo se llame igual en el otro dominio.
+    assert await visible(Scope("laboratorio", None)) == {other_domain.id}
+    assert await visible(Scope("laboratorio", "asset-a")) == set()
+
+    # Documento de dominio completo frente a permiso específico: denegado.
+    # `covers(Scope(d,'asset-a'), Scope(d,None))` es falso, y aquí también.
+    assert domain_wide.id not in await visible(Scope("mantenimiento", "asset-a"))
+
+    # Varios permisos se suman sin ampliarse entre sí.
+    assert await visible(Scope("mantenimiento", "asset-a"), Scope("laboratorio", "asset-c")) == {
+        asset_a.id,
+        other_domain.id,
+    }
+
+
+async def test_scope_coverage_matches_covers_exactly(
+    repository: DocumentRepositoryPort,
+) -> None:
+    """Ningún caso en el que el adaptador y `covers` discrepen.
+
+    La comprobación se hace contra la función, no contra una lista escrita a
+    mano: si alguien cambia `covers`, esta prueba lo detecta en vez de
+    perpetuar una segunda semántica.
+    """
+    documents = {
+        (await _published(repository, "m-a", asset="asset-a")).id: Scope(
+            "mantenimiento", "asset-a"
+        ),
+        (await _published(repository, "m-b", asset="asset-b")).id: Scope(
+            "mantenimiento", "asset-b"
+        ),
+        (await _published(repository, "m-dom", asset=None)).id: Scope("mantenimiento", None),
+        (await _published(repository, "l-c", domain="laboratorio", asset="asset-c")).id: Scope(
+            "laboratorio", "asset-c"
+        ),
+    }
+    grants = [
+        Scope("mantenimiento", None),
+        Scope("mantenimiento", "asset-a"),
+        Scope("mantenimiento", "asset-b"),
+        Scope("mantenimiento", "asset-c"),
+        Scope("laboratorio", None),
+        Scope("laboratorio", "asset-c"),
+        Scope("laboratorio", "asset-a"),
+    ]
+    for granted in grants:
+        expected = {doc_id for doc_id, scope in documents.items() if covers(granted, scope)}
+        actual = {
+            p.document.id for p in await repository.list_published_chunks(scopes=[granted])
+        }
+        assert actual == expected, granted

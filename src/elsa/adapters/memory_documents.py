@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import UTC, datetime
 
-from elsa.core.authorization import Scope
+from elsa.core.authorization import Scope, covers
 from elsa.documents.persistence import (
     content_records,
     require_open_run,
@@ -429,7 +429,7 @@ class InMemoryDocumentRepository:
     ) -> tuple[ChunkProvenance, ...]:
         if not scopes or limit <= 0:
             return ()
-        allowed = set(scopes)
+        granted = tuple(scopes)
         results: list[ChunkProvenance] = []
         for version in sorted(
             self._versions.values(),
@@ -442,7 +442,11 @@ class InMemoryDocumentRepository:
             if version.state is not DocumentVersionState.PUBLISHED:
                 continue
             document = self._documents[version.document_id]
-            if document.scope not in allowed:
+            # `covers` es la unica autoridad sobre cobertura de alcance: un
+            # permiso de dominio completo cubre cualquier equipo de ese
+            # dominio, y uno de equipo cubre solo ese equipo. Comparar por
+            # igualdad aqui negaria lo que el permiso si concede.
+            if not any(covers(g, document.scope) for g in granted):
                 continue
             for chunk in self._chunks.get(version.id, ()):
                 results.append(self._provenance(version.id, chunk))
