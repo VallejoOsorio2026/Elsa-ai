@@ -8,10 +8,14 @@ independientes.
 
 import dataclasses
 import platform
-import resource
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+
+try:  # `resource` es POSIX. En Windows no existe, y el banco debe arrancar igual.
+    import resource
+except ImportError:  # pragma: no cover - depende del sistema operativo
+    resource = None  # type: ignore[assignment]
 
 from elsa.bench.metrics import QueryResult, Scoreboard, score_run
 from elsa.bench.model import BenchCorpus, GoldenSet, RunMetadata
@@ -60,9 +64,60 @@ def hardware_description() -> dict[str, object]:
     return {"cpu": model or cpu, "ram_gb": ram_gb, "gpu": "none"}
 
 
-def _peak_rss_mb() -> float:
+def _peak_rss_mb() -> float | None:
+    """Pico de memoria residente en MB, o `None` donde no pueda medirse.
+
+    Es un dato de la máquina, no del modelo: `RunMetadata.identity()` lo
+    excluye, así que no medirlo no vuelve incomparables dos corridas. Por eso
+    esta función nunca lanza. Un banco que se cae por no poder leer una cifra
+    de coste sería peor que uno que declara no tenerla.
+    """
+    if resource is None:
+        return _windows_peak_rss_mb()
     # `ru_maxrss` viene en kibibytes en Linux.
     return round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
+
+
+def _windows_peak_rss_mb() -> float | None:
+    """`PeakWorkingSetSize` por `ctypes`: el análogo de `ru_maxrss` en Windows.
+
+    Se lee la API del sistema en vez de añadir `psutil`, que hoy no es
+    dependencia del proyecto ni está en `uv.lock`: sería una dependencia nueva
+    para un único número informativo, y aquí no se construye por anticipación
+    (regla 23).
+
+    `tracemalloc` no sirve como alternativa: mide lo que asigna Python, no la
+    memoria residente del proceso, y daría una cifra con la misma etiqueta que
+    la de Linux sin ser comparable con ella.
+    """
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _ProcessMemoryCounters(ctypes.Structure):
+            _fields_ = (
+                ("cb", wintypes.DWORD),
+                ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            )
+
+        counters = _ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(_ProcessMemoryCounters)
+        windll = ctypes.windll  # type: ignore[attr-defined]
+        if not windll.psapi.GetProcessMemoryInfo(
+            windll.kernel32.GetCurrentProcess(), ctypes.byref(counters), counters.cb
+        ):
+            return None
+        return round(counters.PeakWorkingSetSize / 1024 / 1024, 1)
+    except (ImportError, AttributeError, OSError):  # pragma: no cover - solo en Windows
+        return None
 
 
 def _vectors_mb_per_1000(dimension: int) -> float | None:
