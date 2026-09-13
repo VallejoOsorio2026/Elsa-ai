@@ -100,10 +100,24 @@ Decisión provisional tomada: **tres candidatos entran a medirse.**
 | 2 | **Qwen3-Embedding-0.6B** | Apache-2.0; las puntuaciones multilingües públicas más altas de su tamaño; dimensión reducible y ventana de 32 k | — |
 | 3 | **EmbeddingGemma-300m** | Candidato **orientado a bajo consumo**: la mejor calidad por MB de los tres y el único que cabe con holgura en una huella pequeña. Es la respuesta si la RAM acaba siendo la restricción vinculante | **Aprobado para el banco; no elegible para producción** hasta que se valide formalmente que sus términos de licencia y uso son aceptables para un despliegue corporativo de PAPELSA (decisión D1). Los *Gemma Terms of Use* no son una licencia OSI ⚠ |
 
-**No se declara ganador.** La elección se hace con las mediciones del §7 sobre
-nuestro corpus, aplicando los filtros duros y el orden de preferencia del §3,
-ambos fijados antes de medir. Las razones de la tabla explican por qué cada uno
-merece el gasto de medirlo, no quién gana.
+**Ya se midió, y hay ganador técnico.** La tabla de arriba es la selección de
+candidatos previa a medir; se conserva porque explica por qué cada uno merecía
+el gasto. El resultado real está en
+[ADR 0015](adr/0015-eleccion-del-modelo-de-embeddings.md):
+
+| Puesto | Modelo | R@1 | R@5 | MRR@10 | `synonyms` R@5 | Latencia p50 |
+|---|---|---|---|---|---|---|
+| **1.º técnico** | `google/embeddinggemma-300m` | **0,831** | **0,905** | **0,878** | **0,625** | **103 ms** |
+| **2.º · candidato productivo** | `BAAI/bge-m3` | 0,678 | 0,893 | 0,783 | 0,500 | 183 ms |
+| 3.º | `Qwen/Qwen3-Embedding-0.6B` | 0,559 | 0,860 | 0,706 | 0,375 | 1753 ms |
+
+El orden de preferencia del §3 se respetó: EmbeddingGemma gana el eje
+`synonyms`, que es el que mide lo que aporta un vector, y no gana por los
+códigos, que quedan fuera de la puntuación principal.
+
+**La condición de D1 sigue sin cumplirse**, así que el ganador técnico no es
+todavía el modelo productivo. Hasta validar formalmente su licencia, el
+candidato productivo es BGE-M3.
 
 **Medir no habilita.** Si EmbeddingGemma resultara el mejor y su validación de
 licencia no estuviera resuelta, el resultado se **reporta** y se elige el mejor

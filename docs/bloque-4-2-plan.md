@@ -156,7 +156,7 @@ serían tres unidades de revisión, no una.
 | Orden | Subbloque | Qué entrega | Depende de |
 |---|---|---|---|
 | **1.º** | **4.1.b — Adaptador PostgreSQL documental** | `postgres_documents.py` contra el esquema ya aplicado en el remoto | Nada nuevo: el esquema ya está aplicado y validado (§0.1) |
-| **2.º** | **4.2.a — Banco de evaluación y selección de modelo** | Se entrega en tres etapas (§2): **A** infraestructura y banco, **B** ejecución real de los modelos, **C** integración productiva | Nada. Es independiente de 4.1.b |
+| **2.º** | **4.2.a — Banco de evaluación y selección de modelo** | Tres etapas (§2): **A** infraestructura y banco ✅, **B** ejecución real y selección técnica ✅ ([ADR 0015](adr/0015-eleccion-del-modelo-de-embeddings.md)), **C** integración productiva — no iniciada | Nada. Es independiente de 4.1.b |
 | **3.º** | **4.2.b — Persistencia vectorial** | Migración vectorial, registro de modelos, corridas de embedding | **4.2.a** (la dimensión) y **4.1.b** (dónde viven los chunks) |
 
 ### Por qué este orden es el correcto
@@ -254,7 +254,7 @@ Añadido que la lista original no preveía y que la etapa necesitaba:
   modo que la corrida de la etapa B sea reproducible desde el manifiesto y un
   clon limpio siga pasando sin instalar nada (regla 24).
 
-### 2.B — Ejecución real de los modelos (pendiente, causa externa)
+### 2.B — Ejecución real de los modelos (cerrada)
 
 4. *(parte de medición)* Medir los **tres** candidatos con el mismo conjunto
    dorado y las mismas reglas: BGE-M3, Qwen3-Embedding-0.6B y
@@ -266,14 +266,22 @@ Añadido que la lista original no preveía y que la etapa necesitaba:
 11. Documentación: `docs/embeddings-model-evaluation.md` actualizado con las
     cifras **verificadas contra las tarjetas de los modelos**.
 
-Bloqueo: la política de egreso del entorno de trabajo responde `403` al
-`CONNECT` para `huggingface.co`, `hf.co` y `cdn-lfs.huggingface.co`. No se
-pueden descargar los pesos ni leer las tarjetas. El procedimiento para
-completarlo en un entorno habilitado está en
-[`embedding-benchmark.md`](embedding-benchmark.md) §7.
+Se completó en **PC1** —Windows, Python 3.12.13, CPU AMD64, ~7,9 GB de RAM,
+sin GPU—, porque la política de egreso de este entorno responde `403` al
+`CONNECT` para `huggingface.co`. Los tres candidatos se midieron con el mismo
+corpus, el mismo conjunto dorado y la misma plantilla `context-v1`; la
+comparabilidad se verificó exigiendo que las líneas base reproduzcan cifras
+idénticas en los tres informes.
 
-**Sin esta etapa no hay ganador, ni provisional.** Un candidato sin medir no
-se descarta ni se elige, y una puntuación pública no sustituye la medición.
+**Resultado:** ganador técnico `google/embeddinggemma-300m`, segunda opción
+`BAAI/bge-m3`, tercero `Qwen/Qwen3-Embedding-0.6B`. Registrado en
+[ADR 0015](adr/0015-eleccion-del-modelo-de-embeddings.md), con la selección
+**condicionada**: EmbeddingGemma no es elegible para producción hasta validar
+formalmente su licencia para uso corporativo (decisión D1).
+
+Del ítem **11** queda pendiente reverificar las cifras declaradas de los
+modelos contra sus tarjetas, que este entorno sigue sin poder leer. No bloquea
+la decisión: se tomó con mediciones propias.
 
 ### 2.C — Integración productiva (diferida)
 
@@ -478,11 +486,10 @@ recomendación vigente y se cierra donde corresponda.
 |---|---|---|
 | [0013](adr/0013-arquitectura-de-almacenamiento-vectorial.md) | **Aceptado** | Arquitectura vectorial: tabla aparte, registro de modelos, «generar no activa», filtros obligatorios, motor reemplazable. Lo respaldan D2, D3 y D5 |
 | [0014](adr/0014-confusabilidad-no-es-autorizacion.md) | **Aceptado** | El aislamiento lo aplica el retrieval con filtros obligatorios; el banco mide **confusabilidad** como diagnóstico de calidad, nunca como autorización. Reescribe los criterios 6 y 7 de §5 |
-| `0015-eleccion-del-modelo-de-embeddings.md` | Pendiente | El modelo elegido y por qué. **No se escribe hasta tener mediciones** (regla 21). Recogerá D1, D7 y D11 |
+| [0015](adr/0015-eleccion-del-modelo-de-embeddings.md) | **Aceptado en lo técnico · condicionado en lo legal** | El modelo elegido y por qué, con las mediciones reales. Ganador técnico EmbeddingGemma-300m; candidato productivo BGE-M3 hasta validar la licencia. Recoge D1, D7 y D11 |
 
-El ADR de la elección pasa de 0014 a **0015**: el número 0014 lo ocupa la
-decisión que sí se pudo cerrar en la etapa A. La elección sigue sin escribirse,
-y no se escribe hasta medir.
+El ADR de la elección es el **0015**: el número 0014 lo ocupa la decisión que
+se cerró en la etapa A. Se escribió después de medir, como exigía la regla 21.
 
 ---
 

@@ -1,10 +1,10 @@
-# Bloque 4.2.a — infraestructura y banco de evaluación de embeddings
+# Bloque 4.2.a — banco de evaluación y selección del modelo de embeddings
 
-Cómo se mide, qué se midió, **qué no se pudo medir y por qué**, y qué hace
-falta para cerrar la selección.
+Cómo se mide, qué se midió y qué se decidió con ello.
 
-Este documento cubre la **etapa A** de 4.2.a: la infraestructura con la que
-se elegirá el modelo. No es la selección del modelo, que es la etapa B.
+Cubre las etapas **A** (infraestructura del banco) y **B** (ejecución real de
+los tres candidatos y selección técnica), ambas cerradas. La decisión está en
+[ADR 0015](adr/0015-eleccion-del-modelo-de-embeddings.md).
 
 | Pieza | Estado |
 |---|---|
@@ -15,16 +15,27 @@ se elegirá el modelo. No es la selección del modelo, que es la etapa B.
 | Líneas base | **Medidas** |
 | Adaptadores exclusivos del banco | **Completos** |
 | Reinterpretación de los criterios 6 y 7 | **Registrada** en [ADR 0014](adr/0014-confusabilidad-no-es-autorizacion.md) |
-| Ejecución de BGE-M3 | **Pendiente** |
-| Ejecución de Qwen3-Embedding-0.6B | **Pendiente** |
-| Ejecución de EmbeddingGemma-300m | **Pendiente** |
-| Selección del ganador | **Pendiente** |
+| Ejecución de BGE-M3 | **Medida** en PC1 |
+| Ejecución de Qwen3-Embedding-0.6B | **Medida** en PC1 |
+| Ejecución de EmbeddingGemma-300m | **Medida** en PC1 |
+| Selección técnica del ganador | **Cerrada** en [ADR 0015](adr/0015-eleccion-del-modelo-de-embeddings.md) |
+| Validación legal de EmbeddingGemma | **Pendiente** — bloquea su uso productivo |
+| Etapa C · integración productiva | **No iniciada** |
+| 4.2.b · persistencia vectorial | **No iniciada** |
 
-> **La selección NO está cerrada, y este bloque no pretende cerrarla.** De
-> los tres candidatos obligatorios, **ninguno se pudo ejecutar**: la política
-> de egreso del entorno bloquea `huggingface.co`. La causa es externa y está
-> documentada en §5. No hay ganador provisional y no se propone uno: elegir
-> con puntuaciones públicas sería exactamente lo que el protocolo prohíbe.
+> **Ganador técnico: `google/embeddinggemma-300m`.** Encabeza las seis
+> métricas de calidad, es el único que supera a la línea léxica en el eje
+> discriminante `synonyms`, el más rápido en consulta y el único que abstiene
+> cuando el corpus no contiene la respuesta.
+>
+> **Pero no está aprobado para producción.** Su licencia (Gemma Terms of Use)
+> y su repositorio *gated* exigen una validación formal para uso corporativo
+> de PAPELSA que sigue pendiente. Hasta que exista, el candidato productivo
+> sin dependencia legal es **BGE-M3**, segundo en todas las métricas.
+>
+> Las tres corridas se ejecutaron en PC1, fuera de este entorno: la política
+> de egreso aquí bloquea `huggingface.co`. Sus artefactos están versionados en
+> `bench/resultados/`, uno por candidato.
 
 Implementación: `src/elsa/bench/`. Herramienta:
 `elsa.tools.embedding_benchmark`. Protocolo aprobado:
@@ -248,36 +259,67 @@ real. Están para que la columna exista y se llene en la corrida de verdad.
 
 ---
 
-## 5. Lo que NO se pudo medir, y por qué
+## 5. Los tres candidatos, medidos
 
-**Los tres candidatos obligatorios quedaron sin medir.**
+Ejecutados en **PC1** —Windows, Python 3.12.13, CPU AMD64 Family 23 Model 17,
+~7,9 GB de RAM, **sin GPU**—, porque la política de egreso de este entorno
+responde `403` al `CONNECT` para `huggingface.co`. Artefactos en
+`bench/resultados/`, uno por candidato.
 
-| Candidato | Licencia | Estado |
-|---|---|---|
-| `BAAI/bge-m3` | MIT | **Sin medir** |
-| `Qwen/Qwen3-Embedding-0.6B` | Apache-2.0 | **Sin medir** |
-| `google/embeddinggemma-300m` | Gemma Terms of Use | **Sin medir** |
+### Puntuación principal (59 consultas; los códigos no puntúan)
 
-Causa, comprobada y no supuesta: la política de egreso de este entorno
-**bloquea `huggingface.co`**. El gateway responde `403` al `CONNECT` para
-`huggingface.co`, `hf.co` y `cdn-lfs.huggingface.co`, de modo que no se
-pueden descargar los pesos ni leer las tarjetas de modelo. `pypi.org` sí es
-accesible.
+| Corrida | R@1 | R@5 | R@10 | MRR@10 | nDCG@10 | conf@5 | Abstención |
+|---|---|---|---|---|---|---|---|
+| **`google/embeddinggemma-300m`** | **0,831** | **0,905** | **0,958** | **0,878** | **0,847** | 0,200 | **1,000** |
+| `BAAI/bge-m3` | 0,678 | 0,893 | 0,915 | 0,783 | 0,783 | 0,213 | 0,000 |
+| `Qwen/Qwen3-Embedding-0.6B` | 0,559 | 0,860 | 0,898 | 0,706 | 0,719 | **0,173** | 0,000 |
+| `lexical-bm25` | 0,661 | 0,763 | 0,822 | 0,742 | 0,709 | 0,187 | 0,000 |
+| `control-hashing-ngrams` | 0,458 | 0,774 | 0,873 | 0,630 | 0,653 | 0,160 | 0,000 |
 
-Consecuencias que hay que aceptar tal cual:
+### El eje que decidía, y decidió
 
-1. **No hay ganador provisional ni segunda opción.** Un candidato sin medir
-   no se descarta ni se elige.
-2. **Los datos de los modelos siguen sin verificar.** Dimensión, ventana de
-   contexto, revisión recomendada y —sobre todo— **los prefijos** vienen de
-   la investigación de `embeddings-model-evaluation.md`, marcada allí como
-   no verificada contra fuente primaria por el mismo bloqueo. Están
-   centralizados en `CANDIDATES`
-   (`src/elsa/bench/adapters/sentence_transformers.py`) para que sea **un
-   solo sitio** que corregir. Reverificarlos contra la tarjeta del modelo es
-   el primer paso de cualquier corrida real.
-3. **Las puntuaciones públicas no sustituyen la medición.** Un número de
-   MTEB y un `Recall@5` sobre este corpus no son comparables.
+La etapa A dejó dicho, **antes de medir**, que `synonyms` sería el
+discriminante. Lo fue:
+
+| Eje (R@5) | Gemma | BGE-M3 | Qwen3 | BM25 |
+|---|---|---|---|---|
+| **`synonyms`** | **0,625** | 0,500 | 0,375 | 0,500 |
+| `cross_language` | 0,875 | 0,875 | 0,875 | 0,500 |
+| `narrative` | 1,000 | 1,000 | 0,750 | 0,500 |
+| `component_names` | 0,667 | 0,542 | 0,625 | **0,875** |
+
+Solo EmbeddingGemma supera a la línea léxica en `synonyms`; Qwen3 queda por
+debajo de ella. En `cross_language` los tres empatan y ganan claramente a BM25:
+confirma que los tres son multilingües reales, pero no separa a uno de otro.
+
+**`component_names` es el único eje donde BM25 gana a los tres densos.** Es la
+señal más clara de que el canal léxico del Bloque 4.3 no sobra.
+
+### Coste real
+
+| | Gemma | BGE-M3 | Qwen3 |
+|---|---|---|---|
+| Dimensión | **768** | 1024 | 1024 |
+| Embeber 42 chunks | **12,3 s** | 61,6 s | 348,2 s |
+| Latencia p50 · p95 | **103 · 115 ms** | 183 · 231 ms | 1753 · 2410 ms |
+| MB por 1000 vectores | **2,93** | 3,91 | 3,91 |
+
+Qwen3 es **17× más lento** que Gemma por consulta en CPU. Para un asistente
+interactivo sin GPU, eso lo descarta con independencia de su calidad.
+
+**La memoria no se midió**: `peak_rss_mb` es `None` en las tres corridas
+—la lectura por `psapi` en Windows devolvió `None`—. El banco degradó como
+estaba previsto y no se rompió, pero el dato no existe.
+
+### Lo que sigue sin verificarse
+
+Las cifras declaradas de los modelos —dimensión, ventana, revisión y **los
+prefijos**— vienen de `embeddings-model-evaluation.md` y siguen **sin cotejar
+contra las tarjetas**, que este entorno no puede leer. No afectan a la
+decisión, tomada con mediciones propias, pero hay que corregirlas en
+`CANDIDATES` (`src/elsa/bench/adapters/sentence_transformers.py`) antes de
+cualquier corrida productiva. `revision = "main"` sigue siendo una referencia
+**móvil** (ADR 0013 §2).
 
 ### Procedimiento para completarlo en un entorno habilitado
 
@@ -332,14 +374,19 @@ aislamiento lo aplica el retrieval con filtros obligatorios y el banco mide
 confusabilidad como diagnóstico de calidad, nunca como autorización— que
 reescribe los criterios 6 y 7 de la lista de aceptación.
 
-### B — Ejecución real de los modelos · **pendiente por causa externa**
+### B — Ejecución real de los modelos · **cerrada**
 
-Ítems **4** (parte de medición), **9**, **10** y **11**. Medir los tres
-candidatos, elegir con evidencia, escribir ADR 0015 y reverificar las cifras
-contra las tarjetas de modelo.
+Ítems **4** (parte de medición), **9** y **10**. Los tres candidatos se
+midieron en PC1 —Windows, Python 3.12.13, CPU AMD64, sin GPU— con este mismo
+banco, y la selección técnica quedó registrada en
+[ADR 0015](adr/0015-eleccion-del-modelo-de-embeddings.md). Los artefactos están
+en `bench/resultados/`, uno por candidato, con su
+[trazabilidad](../bench/resultados/README.md).
 
-Bloqueado por la política de egreso (§5). El procedimiento reproducible para
-completarlo está en §7. **Sin esta etapa no hay ganador, ni provisional.**
+Queda abierto del ítem **11**: reverificar las cifras de los modelos
+—dimensión, ventana, revisión y prefijos— contra sus tarjetas, que este
+entorno sigue sin poder leer. No bloquea la decisión, que se tomó con
+mediciones propias y no con datos declarados.
 
 ### C — Integración productiva · **diferida**
 
