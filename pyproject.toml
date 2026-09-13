@@ -18,12 +18,26 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Solo para el banco de pruebas del modelo de embeddings (Bloque 4.2.a).
-# NO es dependencia del runtime: ELSA no necesita torch para funcionar, y un
-# clon limpio tiene que pasar los tests sin instalar cientos de megas
-# (regla 24). Se instala con `uv sync --extra bench`.
-bench = [
+# Ejecutar un modelo de embeddings en local: el adaptador productivo
+# `SentenceTransformerEmbeddings` y las herramientas de operación.
+#
+# NO es dependencia del runtime. ELSA arranca, sirve y pasa sus tests sin
+# esto: el servicio web nunca carga un modelo —en Render Free no caben los
+# pesos ni la CPU para cargarlos (ADR 0013 §8)— y un clon limpio no debe
+# descargar cientos de megas para ejecutar la suite (regla 24).
+#
+# Se instala solo donde se va a generar o consultar de verdad:
+#   uv sync --extra embeddings
+embeddings = [
     "sentence-transformers>=3.0,<6",
+]
+
+# El banco de pruebas de 4.2.a necesita exactamente el mismo motor. Se declara
+# por referencia en vez de repetir el requisito: dos listas con el mismo
+# paquete acaban divergiendo, y entonces el banco mediría con una versión y
+# producción embebería con otra.
+bench = [
+    "elsa[embeddings]",
 ]
 
 [dependency-groups]

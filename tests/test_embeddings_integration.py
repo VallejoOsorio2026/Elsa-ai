@@ -508,3 +508,26 @@ def test_the_descriptor_carries_everything_needed_to_reproduce_the_space() -> No
         "similarity",
     ):
         assert getattr(descriptor, field) is not None
+
+
+def test_the_embedding_runtime_is_an_optional_extra_not_a_base_dependency() -> None:
+    """Ejecutar un modelo es infraestructura operativa, no requisito de arranque.
+
+    Se comprueba la declaración de empaquetado, no lo que haya instalado en
+    esta máquina: un clon limpio tiene que poder instalar la base, arrancar y
+    pasar la suite sin descargar el motor (regla 24, ADR 0013 §8).
+    """
+    import tomllib
+    from pathlib import Path
+
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+    base = " ".join(project["dependencies"])
+    extras = project["optional-dependencies"]
+
+    assert "sentence-transformers" not in base and "torch" not in base
+    assert any("sentence-transformers" in item for item in extras["embeddings"])
+
+    # El banco declara el motor por referencia al extra productivo, no con una
+    # copia del requisito: dos listas con el mismo paquete acaban divergiendo,
+    # y entonces el banco mediría con una versión y producción con otra.
+    assert extras["bench"] == ["elsa[embeddings]"]

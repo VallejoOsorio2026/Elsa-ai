@@ -305,6 +305,9 @@ dependencies = [
 bench = [
     { name = "sentence-transformers" },
 ]
+embeddings = [
+    { name = "sentence-transformers" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -322,16 +325,17 @@ dev = [
 requires-dist = [
     { name = "asyncpg", specifier = ">=0.29" },
     { name = "defusedxml", specifier = ">=0.7" },
+    { name = "elsa", extras = ["embeddings"], marker = "extra == 'bench'" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "openpyxl", specifier = ">=3.1" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "pyjwt", extras = ["crypto"], specifier = ">=2.9" },
     { name = "python-multipart", specifier = ">=0.0.9" },
-    { name = "sentence-transformers", marker = "extra == 'bench'", specifier = ">=3.0,<6" },
+    { name = "sentence-transformers", marker = "extra == 'embeddings'", specifier = ">=3.0,<6" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
-provides-extras = ["bench"]
+provides-extras = ["embeddings", "bench"]
 
 [package.metadata.requires-dev]
 dev = [
