@@ -24,6 +24,7 @@ import sys
 from collections.abc import Sequence
 
 from elsa.adapters.postgres_documents import PostgresDocumentRepository
+from elsa.adapters.postgres_lexical import PostgresLexicalSearch
 from elsa.adapters.postgres_vectors import PostgresVectorStore
 from elsa.adapters.sentence_transformer_embeddings import SentenceTransformerEmbeddings
 from elsa.config import Settings, load_settings
@@ -31,6 +32,7 @@ from elsa.core.authorization import Scope
 from elsa.ports.embeddings import EmbeddingConfigurationError, EmbeddingsPort
 from elsa.ports.vectors import EmbeddingModelSpec
 from elsa.services.embedding_generation import EmbeddingGenerationService
+from elsa.services.hybrid_retrieval import HybridRetrievalService
 from elsa.services.semantic_retrieval import SemanticRetrievalService
 
 
@@ -194,6 +196,38 @@ async def _search(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+async def _hybrid(settings: Settings, args: argparse.Namespace) -> int:
+    """Recuperación híbrida: exacto + léxico + semántico, fusionados por RRF."""
+    embeddings = build_embeddings(settings)
+    url = _database_url(settings)
+    store = await PostgresVectorStore.connect(url)
+    lexical = await PostgresLexicalSearch.connect(url)
+    try:
+        service = HybridRetrievalService(lexical=lexical, vectors=store, embeddings=embeddings)
+        found = await service.search(
+            query=args.question, scopes=_scopes(args.scope), limit=args.limit
+        )
+    finally:
+        await lexical.close()
+        await store.close()
+
+    canales = ", ".join(c.value for c in found.channels_queried) or "ninguno"
+    print(f"canales consultados: {canales}")
+    if found.identifiers_detected:
+        print(f"identificadores detectados: {', '.join(found.identifiers_detected)}")
+    print(f"evidencia: {found.strength.value}")
+    if found.is_empty:
+        print("sin resultados dentro de los alcances autorizados")
+        return 0
+    print()
+    for item in found.evidence:
+        marcas = " + ".join(f"{hit.channel.value}#{hit.rank}({hit.score:.4f})" for hit in item.hits)
+        print(f"{item.rank:>2}. rrf={item.fused_score:.6f}  [{marcas}]")
+        print(f"    {item.citation()}")
+        print(f"    {item.provenance.chunk.content[:140].replace(chr(10), ' ')}")
+    return 0
+
+
 def _scopes(raw: Sequence[str]) -> list[Scope]:
     """`dominio` o `dominio:equipo`. Sin alcances no se recupera nada."""
     scopes: list[Scope] = []
@@ -241,6 +275,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     search.add_argument("--limit", type=int, default=10)
     search.set_defaults(run=_search)
+
+    hybrid = sub.add_parser(
+        "hybrid-search",
+        help="Recuperación híbrida: exacto + léxico + semántico, fusionados por RRF",
+    )
+    hybrid.add_argument("question")
+    hybrid.add_argument(
+        "--scope",
+        action="append",
+        required=True,
+        metavar="DOMINIO[:EQUIPO]",
+        help="Alcance autorizado. Repetible. Sin alcances no se recupera nada",
+    )
+    hybrid.add_argument("--limit", type=int, default=10)
+    hybrid.set_defaults(run=_hybrid)
     return parser
 
 
