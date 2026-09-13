@@ -261,8 +261,13 @@ create trigger trg_embedding_models_immutable
 
 -- ============================================================
 -- VISTA DE RECUPERACION
--- Deja lista la procedencia para citar. No incluye el vector: quien recupera
--- ya lo tiene, y sacarlo por aqui solo abultaria cada fila.
+-- Deja lista la procedencia para citar, junto al vector: la consulta de
+-- recuperacion ordena por distancia sobre el, asi que tiene que estar aqui.
+--
+-- La vista no decide nada sobre permisos. El alcance lo aplica el WHERE de
+-- quien consulta, y por eso la vista expone `scope_domain` y
+-- `scope_equipment`: para que ese filtro sea escribible sin volver a unir
+-- documentos y activos.
 --
 -- `security_invoker = true` es obligatorio: sin el, la vista se ejecutaria
 -- con los privilegios de su propietario y saltaria el RLS de sus tablas base.
