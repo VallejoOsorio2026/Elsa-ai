@@ -120,8 +120,27 @@ pública de ELSA sigue siendo FastAPI.
 Una URL que no sea loopback detiene el arranque con un error explícito.
 `0.0.0.0` no cuenta como loopback: no es una dirección de destino, es «todas
 las interfaces», que es exactamente lo que no puede ocurrir por descuido.
-Exponerlo exige `ELSA_LLM_ALLOW_REMOTE=true`, y entonces la decisión —y la
-obligación de protegerlo— es de quien la declara.
+`ELSA_LLM_ALLOW_REMOTE=true` lo permite **solo en DEV**, igual que `debug`.
+Fuera de DEV el prompt es evidencia técnica autorizada de una persona concreta
+viajando por la red hacia un servidor que no pregunta quién llama; habilitarlo
+ahí es una decisión de arquitectura y necesita su propio ADR, no una variable
+de entorno. Cuando está activo, `/health/ready` lo declara en el detalle de la
+dependencia `llm`: una decisión de seguridad invisible es una que nadie revisa.
+
+Dos endpoints más se cierran al arrancar, y el segundo importa más de lo que
+parece:
+
+- `--no-webui`, que si no serviría una interfaz de chat sobre el mismo modelo.
+- **`--no-slots`.** El endpoint de ranuras viene **activado por defecto** en
+  llama.cpp y publica el estado de cada ranura, prompt en curso incluido —es
+  decir, el bloque de evidencias que ELSA acaba de enviar—, legible con un
+  `GET` y sin credencial. Loopback protege de la LAN, no de otro proceso ni de
+  otra sesión de la misma máquina, y PC1 es un equipo de planta compartido.
+
+Por el mismo motivo, `Stop-ElsaLlm.ps1` borra el log del servidor salvo que se
+pida conservarlo: `llama-server` vuelca el prompt que procesa, y dejarlo en el
+perfil de quien lo arrancó sería un archivo de texto plano con contenido de
+planta fuera de toda política de retención.
 
 ### 6. Phi no es la barrera de seguridad, y el diseño lo asume
 
@@ -145,7 +164,19 @@ publicar, y no decide ningún permiso porque no recibe ninguno que decidir.
 
 Cambiar de modelo no cambia nada de esto. Ese es el punto.
 
-### 7. Los límites operativos son configuración, no código
+### 7. El sondeo de salud tiene su propio plazo, corto
+
+`/health/ready` es público, no lleva autenticación y evalúa las dependencias
+en serie. Si el sondeo del runtime heredara el plazo de generación —120 s—,
+cualquiera podría retener un worker dos minutos con una sola petición anónima,
+y encima por una dependencia declarada **no crítica**. Y no haría falta que el
+runtime estuviera caído: ahí la conexión se rechaza al instante. El caso malo
+es el runtime colgado, que es justo el que se queda esperando.
+
+`ELSA_LLM_HEALTH_TIMEOUT_SECONDS` vale 5 s por defecto, el mismo orden de
+magnitud que el resto de sondeos del proyecto.
+
+### 8. Los límites operativos son configuración, no código
 
 Contexto, tokens de salida, plazo y concurrencia entran por configuración y se
 aplican en el adaptador. Hoy no hay coste por token —Phi es local— así que no
@@ -158,6 +189,13 @@ número**. `llama-server` sirve tantas peticiones a la vez como ranuras se le
 pidieran con `--parallel`, y cada ranura reparte el mismo contexto: mandarle
 más no acelera nada y en 4 GB de VRAM reparte la memoria entre trabajos que
 compiten.
+
+El adaptador **devuelve** las métricas de cada generación —duración, tokens de
+entrada y salida, tokens/s y espera por el semáforo— en vez de guardarlas en
+un campo suyo. Un `last_metrics` compartido sería correcto solo con una
+generación a la vez: en cuanto la concurrencia sube, quien lo leyera obtendría
+las cifras de la última que terminó presentadas como si fueran las suyas, y un
+número medido y mal atribuido es peor que ninguno.
 
 ## Consecuencias
 
@@ -209,7 +247,15 @@ plantillado, solo genera peor.
 **Añadir autenticación al `llama-server`.** Protegería algo que no está
 expuesto. Mientras escuche solo en loopback, la única superficie que hay que
 proteger es FastAPI, y añadir un mecanismo de credenciales aquí sugeriría que
-sí es seguro exponerlo.
+sí es seguro exponerlo. Lo que sí se hace es cerrar lo que el propio servidor
+abre por defecto (`/slots`, interfaz web) y restringir a DEV la posibilidad de
+sacarlo de loopback.
+
+**Registrar el cuerpo del error que devuelve el runtime.** Ayudaría a
+diagnosticar y metería en el log de aplicación la ruta del GGUF y, en fallos
+de validación del prompt, fragmentos del propio prompt —que aquí es evidencia
+de planta—. Se registran el estado HTTP y las etiquetas `type` y `code` del
+error, que son cerradas; el mensaje libre se descarta.
 
 **Dejar que el modelo escriba las referencias.** Cerrado en ADR 0017 y no se
 reabre: ningún modelo, por bueno que sea, puede garantizar que el documento y

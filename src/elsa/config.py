@@ -255,6 +255,16 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 120.0
     """Plazo de una generación. En PC1 una respuesta RAG tarda decenas de segundos."""
 
+    llm_health_timeout_seconds: float = 5.0
+    """Plazo del sondeo de salud. **Corto, y aparte del de generación.**
+
+    Lo usa ``/health/ready``, que es público, no lleva autenticación y evalúa
+    las dependencias en serie. Heredar el plazo de una generación dejaría que
+    cualquiera retuviera un worker dos minutos con una sola petición, y
+    encima por una dependencia declarada no crítica. Es el mismo orden de
+    magnitud que ``auth_timeout_seconds``.
+    """
+
     llm_context_tokens: int = 2048
     """Contexto con el que se arranca el servidor. Lo aplica él, no la app.
 
@@ -273,12 +283,18 @@ class Settings(BaseSettings):
     """Generaciones simultáneas permitidas. Debe coincidir con ``--parallel``."""
 
     llm_allow_remote: bool = False
-    """Permite apuntar a un ``llama-server`` que no sea loopback.
+    """Permite apuntar a un ``llama-server`` que no sea loopback. **Solo en DEV.**
 
     ``llama-server`` no lleva autenticación y este bloque no se la añade,
     porque mientras solo escuche en 127.0.0.1 no la necesita. Sacarlo de ahí
-    cambia esa premisa, así que exige declararlo y no puede ocurrir por
-    escribir mal una URL.
+    cambia esa premisa entera: el prompt —que es evidencia técnica autorizada
+    de una persona concreta— pasaría a viajar por la red hacia un servidor
+    que no pregunta quién llama.
+
+    Por eso queda restringido a DEV, igual que ``debug``: en DEV sirve para
+    probar contra otra máquina de laboratorio, y fuera de DEV habilitarlo es
+    una decisión de arquitectura que necesita su propio ADR, no una variable
+    de entorno.
     """
 
     # ---------------------------------------------------------------
@@ -604,6 +620,14 @@ class Settings(BaseSettings):
             )
         if self.llm_timeout_seconds <= 0:
             raise ValueError("ELSA_LLM_TIMEOUT_SECONDS must be greater than zero")
+        if self.llm_health_timeout_seconds <= 0:
+            raise ValueError("ELSA_LLM_HEALTH_TIMEOUT_SECONDS must be greater than zero")
+        if self.llm_allow_remote and not is_dev:
+            raise ValueError(
+                "a non-loopback llama-server is only allowed in the DEV environment; "
+                "llama-server has no authentication, so the prompt —authorised plant "
+                "evidence— would travel to a server that does not ask who is calling"
+            )
         if self.llm_temperature < 0:
             raise ValueError("ELSA_LLM_TEMPERATURE cannot be negative")
         if self.llm_max_output_tokens >= self.llm_context_tokens:

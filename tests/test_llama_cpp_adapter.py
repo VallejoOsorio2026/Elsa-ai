@@ -254,6 +254,40 @@ async def test_the_upstream_error_body_never_travels_in_the_exception() -> None:
     assert "C:/modelos" not in str(error.value)
 
 
+async def test_the_upstream_error_body_never_reaches_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Del error del runtime se registran etiquetas, no su texto.
+
+    Los errores de `llama-server` traen a menudo la ruta del GGUF y, en fallos
+    de validación del prompt, fragmentos del propio prompt — que aquí es el
+    bloque de evidencias de planta. `docs/security.md` prohíbe ese contenido
+    en el log de aplicación, y el log de aplicación es justo donde acabaría.
+    """
+    body = (
+        '{"error":{"code":500,"type":"server_error",'
+        '"message":"failed to load C:/modelos/phi.gguf: el rodamiento SAP-4471"}}'
+    )
+    with caplog.at_level("ERROR"), FakeLlamaServer(status_code=500, raw_body=body) as server:
+        instance = adapter(server)
+        try:
+            with pytest.raises(LLMUnavailableError):
+                await instance.complete(CONVERSATION)
+        finally:
+            await instance.aclose()
+
+    record = next(r for r in caplog.records if "rejected the generation" in r.message)
+    assert record.llm_status == 500  # type: ignore[attr-defined]
+    # El tipo y el código sí: son etiquetas cerradas y sirven para diagnosticar.
+    assert record.llm_error_type == "server_error"  # type: ignore[attr-defined]
+    assert record.llm_error_code == "500"  # type: ignore[attr-defined]
+    # El mensaje libre, no.
+    assert not hasattr(record, "llm_body")
+    logged = str(record.__dict__)
+    assert "SAP-4471" not in logged
+    assert "C:/modelos" not in logged
+
+
 async def test_a_body_that_is_not_json_is_reported_as_unavailable() -> None:
     with FakeLlamaServer(raw_body="<html>proxy error</html>") as server:
         instance = adapter(server)
@@ -330,6 +364,37 @@ async def test_health_fails_while_the_model_is_still_loading() -> None:
     assert "loading" in str(error.value)
 
 
+async def test_the_health_probe_has_its_own_short_deadline() -> None:
+    """`/health/ready` es público y en serie: no puede heredar 120 s.
+
+    Con el plazo de generación, un runtime colgado —no caído, que rechaza al
+    instante— retendría un worker dos minutos por petición anónima, y encima
+    por una dependencia declarada no crítica.
+    """
+    with FakeLlamaServer(delay_seconds=2.0) as server:
+        instance = adapter(server, timeout_seconds=120.0, health_timeout_seconds=0.25)
+        assert instance.timeout_seconds == 120.0
+        assert instance.health_timeout_seconds == 0.25
+        try:
+            # El servidor falso retrasa las generaciones, no `/health`, así que
+            # lo que se comprueba aquí es que los dos plazos son distintos y
+            # que el sondeo usa el suyo.
+            await instance.check_health()
+        finally:
+            await instance.aclose()
+
+
+def test_a_health_deadline_of_zero_is_refused() -> None:
+    with pytest.raises(LLMConfigurationError) as error:
+        LlamaCppAdapter(
+            base_url="http://127.0.0.1:8080",
+            model="phi-4-mini-instruct",
+            health_timeout_seconds=0.0,
+        )
+
+    assert "health probe timeout" in str(error.value)
+
+
 async def test_health_fails_when_nobody_listens() -> None:
     instance = LlamaCppAdapter(base_url=closed_port_url(), model="phi-4-mini-instruct")
     try:
@@ -394,17 +459,21 @@ async def test_the_timeout_is_configurable() -> None:
     assert result.content == "a tiempo"
 
 
-async def test_basic_metrics_are_recorded() -> None:
-    """Métricas mínimas: lo que hace falta para dimensionar PC1."""
+async def test_basic_metrics_are_returned_per_call() -> None:
+    """Métricas mínimas: lo que hace falta para dimensionar PC1.
+
+    Se devuelven, no se guardan en el adaptador. Un `last_metrics` compartido
+    solo sería correcto con una generación a la vez: en cuanto la concurrencia
+    sube, quien lo leyera obtendría las cifras de la última que terminó
+    presentadas como si fueran las suyas.
+    """
     with FakeLlamaServer(responses=[completion_body("ok")]) as server:
         instance = adapter(server)
         try:
-            await instance.complete(CONVERSATION)
+            _, metrics = await instance.complete_with_metrics(CONVERSATION)
         finally:
             await instance.aclose()
 
-    metrics = instance.last_metrics
-    assert metrics is not None
     assert metrics.duration_seconds > 0
     assert metrics.prompt_tokens == 128
     assert metrics.completion_tokens == 32
@@ -418,13 +487,37 @@ async def test_tokens_per_second_falls_back_to_measured_time() -> None:
     with FakeLlamaServer(responses=[body]) as server:
         instance = adapter(server)
         try:
-            await instance.complete(CONVERSATION)
+            _, metrics = await instance.complete_with_metrics(CONVERSATION)
         finally:
             await instance.aclose()
 
-    metrics = instance.last_metrics
-    assert metrics is not None
     assert metrics.tokens_per_second is not None and metrics.tokens_per_second > 0
+
+
+async def test_metrics_belong_to_their_own_call() -> None:
+    """Dos generaciones a la vez no se pisan las cifras.
+
+    El servidor devuelve un uso distinto en cada respuesta; cada llamada tiene
+    que recibir el suyo, no el de la que terminó última.
+    """
+    first = completion_body("primera")
+    first["usage"] = {"prompt_tokens": 10, "completion_tokens": 11}
+    second = completion_body("segunda")
+    second["usage"] = {"prompt_tokens": 20, "completion_tokens": 22}
+
+    with FakeLlamaServer(responses=[first, second], delay_seconds=0.1) as server:
+        instance = adapter(server, concurrency=2, timeout_seconds=10.0)
+        try:
+            results = await asyncio.gather(
+                instance.complete_with_metrics(CONVERSATION),
+                instance.complete_with_metrics(CONVERSATION),
+            )
+        finally:
+            await instance.aclose()
+
+    by_content = {result.content: metrics for result, metrics in results}
+    assert by_content["primera"].completion_tokens == 11
+    assert by_content["segunda"].completion_tokens == 22
 
 
 async def test_a_shared_http_client_is_not_closed_by_the_adapter() -> None:

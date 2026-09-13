@@ -58,6 +58,26 @@ class LLMConfigurationError(ValueError):
 
 
 @runtime_checkable
+class ProbeableLLM(Protocol):
+    """Un motor al que se le puede preguntar si está listo.
+
+    Es una capacidad, no un puerto: sondear la salud no es parte de generar, y
+    un adaptador que no pueda hacerlo sigue cumpliendo :class:`LLMPort`. Existe
+    para que el reporte de salud pregunte **por lo que el adaptador sabe
+    hacer** en vez de por su clase concreta. Discriminar por clase obligaría a
+    tocar el contenedor cada vez que apareciera otro runtime real, que es justo
+    lo que ADR 0003 quiere que no haga falta.
+    """
+
+    async def check_health(self) -> None:
+        """Devuelve normalmente si el motor puede generar ahora mismo.
+
+        Lanza :class:`LLMUnavailableError` en cualquier otro caso.
+        """
+        ...
+
+
+@runtime_checkable
 class LLMPort(Protocol):
     """Generación de texto a partir de una conversación."""
 

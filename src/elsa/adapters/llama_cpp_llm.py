@@ -111,6 +111,7 @@ class LlamaCppAdapter:
         base_url: str = DEFAULT_BASE_URL,
         model: str,
         timeout_seconds: float = 120.0,
+        health_timeout_seconds: float = 5.0,
         max_output_tokens: int = 512,
         temperature: float = 0.0,
         concurrency: int = 1,
@@ -136,6 +137,8 @@ class LlamaCppAdapter:
             raise LLMConfigurationError("the logical model identifier cannot be empty")
         if timeout_seconds <= 0:
             raise LLMConfigurationError("the llama-server timeout must be greater than zero")
+        if health_timeout_seconds <= 0:
+            raise LLMConfigurationError("the health probe timeout must be greater than zero")
         if max_output_tokens <= 0:
             raise LLMConfigurationError("the maximum output tokens must be greater than zero")
         if temperature < 0:
@@ -146,6 +149,7 @@ class LlamaCppAdapter:
         self._base_url = base
         self._model = model.strip()
         self._timeout_seconds = timeout_seconds
+        self._health_timeout_seconds = health_timeout_seconds
         self._max_output_tokens = max_output_tokens
         self._temperature = temperature
         self._concurrency = concurrency
@@ -159,7 +163,6 @@ class LlamaCppAdapter:
         self._gate = asyncio.Semaphore(concurrency)
         self._http = http_client or httpx.AsyncClient()
         self._owns_http = http_client is None
-        self.last_metrics: GenerationMetrics | None = None
 
     # -----------------------------------------------------------------
     # Identidad y ciclo de vida
@@ -181,6 +184,10 @@ class LlamaCppAdapter:
     def timeout_seconds(self) -> float:
         return self._timeout_seconds
 
+    @property
+    def health_timeout_seconds(self) -> float:
+        return self._health_timeout_seconds
+
     async def aclose(self) -> None:
         """Cierra el cliente HTTP si lo creó este adaptador."""
         if self._owns_http:
@@ -197,10 +204,18 @@ class LlamaCppAdapter:
         tarda segundos. Un 503 es «todavía no», no «no hay nadie»: se
         distingue en el mensaje porque la acción es distinta —esperar, no
         arrancar—, pero las dos son indisponibilidad para quien pregunta.
+
+        **El plazo de este sondeo es el suyo propio, no el de generación.**
+        Quien llama a esto es ``/health/ready``, que es público, no lleva
+        autenticación y evalúa las dependencias en serie: heredar los 120 s de
+        una generación dejaría que cualquiera retuviera un worker durante dos
+        minutos con una sola petición. Y no haría falta que el runtime
+        estuviera caído —ahí la conexión se rechaza al instante— sino colgado,
+        que es el caso que sí se queda esperando.
         """
         try:
             response = await self._http.get(
-                f"{self._base_url}{HEALTH_PATH}", timeout=self._timeout_seconds
+                f"{self._base_url}{HEALTH_PATH}", timeout=self._health_timeout_seconds
             )
         except httpx.TimeoutException as error:
             raise LLMTimeoutError(f"llama-server did not answer {HEALTH_PATH} in time") from error
@@ -233,6 +248,26 @@ class LlamaCppAdapter:
         en PC1 no es un gasto de dinero, es un minuto de espera y un
         ventilador. El menor de los dos gana.
         """
+        result, _ = await self.complete_with_metrics(
+            messages, max_tokens=max_tokens, temperature=temperature
+        )
+        return result
+
+    async def complete_with_metrics(
+        self,
+        messages: Sequence[ChatMessage],
+        *,
+        max_tokens: int = 1024,
+        temperature: float = 0.0,
+    ) -> tuple[ChatResult, GenerationMetrics]:
+        """Lo mismo, devolviendo además las métricas **de esta llamada**.
+
+        Las métricas se devuelven en vez de guardarse en el adaptador. Un
+        `last_metrics` compartido sería correcto solo con una generación a la
+        vez: en cuanto la concurrencia sube, quien lo leyera obtendría las
+        cifras de la última que terminó, presentadas como si fueran las suyas.
+        Un número medido y mal atribuido es peor que ninguno.
+        """
         payload = self._request_payload(messages, max_tokens=max_tokens, temperature=temperature)
 
         queue_started = time.monotonic()
@@ -250,7 +285,6 @@ class LlamaCppAdapter:
             tokens_per_second=_tokens_per_second(data, completion_tokens, duration),
             queued_seconds=queued,
         )
-        self.last_metrics = metrics
         _logger.info(
             "llama-server generation finished",
             extra={
@@ -270,12 +304,13 @@ class LlamaCppAdapter:
         # convertirlo aquí en una disculpa redactada sería inventar una
         # respuesta, y decidir qué significa una salida vacía es del
         # servicio, que es quien sabe qué evidencia había detrás.
-        return ChatResult(
+        result = ChatResult(
             content=content,
             model=model,
             input_tokens=prompt_tokens,
             output_tokens=completion_tokens,
         )
+        return result, metrics
 
     def _request_payload(
         self,
@@ -329,12 +364,16 @@ class LlamaCppAdapter:
             )
 
         if response.status_code != 200:
-            # El cuerpo del error se registra pero no viaja en la excepción:
-            # puede traer la ruta del GGUF en disco y el mensaje acaba en un
-            # log de aplicación (regla 14).
+            # Del error del runtime se registra el estado y, si el cuerpo trae
+            # un error con forma conocida, su tipo y su código. **El cuerpo
+            # crudo no se registra.** Los errores de `llama-server` traen a
+            # menudo la ruta del GGUF en disco y, en fallos de validación del
+            # prompt, fragmentos del propio prompt — que aquí es el bloque de
+            # evidencias de planta. El log de aplicación no es sitio para eso
+            # (`docs/security.md`, sección «Logs»).
             _logger.error(
                 "llama-server rejected the generation request",
-                extra={"llm_status": response.status_code, "llm_body": response.text[:500]},
+                extra={"llm_status": response.status_code, **_upstream_error_fields(response)},
             )
             raise LLMUnavailableError(f"llama-server answered HTTP {response.status_code}")
 
@@ -347,6 +386,31 @@ class LlamaCppAdapter:
         if not isinstance(data, dict):
             raise LLMUnavailableError("llama-server answered with an unexpected JSON shape")
         return data
+
+
+def _upstream_error_fields(response: httpx.Response) -> dict[str, str]:
+    """Tipo y código del error del runtime, nunca su mensaje.
+
+    `llama-server` responde `{"error": {"code": …, "type": …, "message": …}}`.
+    El tipo y el código son etiquetas cerradas y sirven para diagnosticar; el
+    mensaje es texto libre que puede arrastrar rutas o prompt, así que se
+    descarta aquí y no en el sitio de llamada.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return {}
+    if not isinstance(body, dict):
+        return {}
+    error = body.get("error")
+    if not isinstance(error, dict):
+        return {}
+    fields: dict[str, str] = {}
+    for key in ("type", "code"):
+        value = error.get(key)
+        if isinstance(value, str | int) and not isinstance(value, bool):
+            fields[f"llm_error_{key}"] = str(value)
+    return fields
 
 
 def _read_completion(

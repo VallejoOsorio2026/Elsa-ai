@@ -31,15 +31,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from elsa.adapters.llama_cpp_llm import LlamaCppAdapter
+from elsa.adapters.llama_cpp_llm import GenerationMetrics, LlamaCppAdapter
 from elsa.adapters.postgres_lexical import PostgresLexicalSearch
 from elsa.adapters.postgres_vectors import PostgresVectorStore
 from elsa.config import LLMBackend, Settings, load_settings
-from elsa.core.answers import GroundedAnswer
+from elsa.container import build_llm_adapter
+from elsa.core.answers import AnswerStatus, GroundedAnswer
 from elsa.core.authorization import Scope
-from elsa.core.context_builder import build_context
-from elsa.core.generation_policy import SYSTEM_PROMPT, build_messages
-from elsa.core.grounding import check_grounding
 from elsa.ports.documents import (
     ChunkKind,
     ChunkProvenance,
@@ -67,20 +65,19 @@ __all__ = ["build_llm", "build_parser", "main", "synthetic_evidence_set"]
 
 
 def build_llm(settings: Settings) -> LlamaCppAdapter:
-    """Construye el adaptador desde la configuración, o explica qué falta."""
-    if settings.llm_backend is not LLMBackend.LLAMA_CPP:
+    """Construye el adaptador desde la configuración, o explica qué falta.
+
+    El mapeo configuración → adaptador es uno solo, el del contenedor. Aquí
+    solo cambia qué significa «no hay motor»: para la aplicación es un estado
+    válido —recupera y cita sin redactar—, y para esta herramienta es el
+    final del camino, porque no hace otra cosa.
+    """
+    adapter = build_llm_adapter(settings)
+    if adapter is None:
         raise LLMConfigurationError(
             "no generation runtime is configured; set ELSA_LLM_BACKEND=llama_cpp"
         )
-    return LlamaCppAdapter(
-        base_url=settings.llm_base_url,
-        model=settings.llm_model,
-        timeout_seconds=settings.llm_timeout_seconds,
-        max_output_tokens=settings.llm_max_output_tokens,
-        temperature=settings.llm_temperature,
-        concurrency=settings.llm_concurrency,
-        allow_remote=settings.llm_allow_remote,
-    )
+    return adapter
 
 
 def _database_url(settings: Settings) -> str:
@@ -146,20 +143,21 @@ async def _generate(settings: Settings, args: argparse.Namespace) -> int:
     messages = (ChatMessage(role="user", content=args.prompt),)
     started = time.monotonic()
     try:
-        result = await llm.complete(messages, max_tokens=settings.llm_max_output_tokens)
+        result, metrics = await llm.complete_with_metrics(
+            messages, max_tokens=settings.llm_max_output_tokens
+        )
     finally:
         await llm.aclose()
     elapsed = time.monotonic() - started
 
     print(result.content.strip() or "(salida vacía)")
     print()
-    _print_metrics(llm, elapsed)
+    _print_metrics(metrics, elapsed)
     return 0
 
 
-def _print_metrics(llm: LlamaCppAdapter, elapsed: float) -> None:
+def _print_metrics(metrics: GenerationMetrics | None, elapsed: float) -> None:
     print(f"latencia total : {elapsed:.2f} s")
-    metrics = llm.last_metrics
     if metrics is None:
         return
     print(f"tokens entrada : {metrics.prompt_tokens}")
@@ -187,6 +185,7 @@ class _SyntheticPassage:
 
 _DEMO_DOMAIN = "mantenimiento"
 _DEMO_ASSET = "demo-prensa"
+_DEMO_SCOPE = Scope(_DEMO_DOMAIN, _DEMO_ASSET)
 
 # Equipo, códigos y cifras **inventados**. No proceden de la planta y no
 # pretenden parecerse a nada real: el objetivo es comprobar que el runtime
@@ -310,49 +309,64 @@ def synthetic_evidence_set() -> EvidenceSet:
     )
 
 
-async def _demo(settings: Settings, args: argparse.Namespace) -> int:
-    """Contexto sintético → runtime real → verificación de citas.
+class _FixedEvidence:
+    """Devuelve siempre la misma evidencia sintética. No autoriza nada.
 
-    Sin base de datos y sin embeddings: es el comando del primer día, el que
-    dice si `llama-server` y Phi están haciendo su parte. Lo que no hace es
-    saltarse la verificación: si el modelo cita un marcador que no se le dio,
-    aquí sale igual que saldría en producción.
+    Implementa `EvidenceRetrievalPort` para poder enchufarlo al servicio real
+    del Bloque 4.4 en vez de rehacer el camino a mano. Y **no comprueba los
+    alcances**, a propósito: aquí no hay corpus, ni permisos, ni base de
+    datos. Comprobar el aislamiento es de `ask`, que recupera de verdad, y de
+    `tests/test_rag_llama_cpp_end_to_end.py`. Fingir autorización en un
+    comando de demostración sería peor que no tenerla, porque saldría bien.
+    """
+
+    def __init__(self, evidence: EvidenceSet) -> None:
+        self._evidence = evidence
+
+    async def search(self, *, query: str, scopes: Sequence[Scope], limit: int = 10) -> EvidenceSet:
+        return self._evidence
+
+
+async def _demo(settings: Settings, args: argparse.Namespace) -> int:
+    """Evidencia sintética → el servicio real del 4.4 → runtime real.
+
+    Pasa por `GroundedGenerationService`, no por una copia suya. Eso importa:
+    lo que se quiere comprobar en PC1 no es que el modelo responda, sino que
+    **el sistema completo hace con esa respuesta lo que promete** —descartar
+    los marcadores inventados, decidir el estado, tratar una salida vacía
+    como fallo técnico y no como ausencia de información—. Una segunda
+    implementación de esa política aquí acabaría divergiendo de la de
+    producción, y esta herramienta diría que todo está bien mientras el
+    sistema real hace otra cosa.
+
+    Lo único que se sustituye es la recuperación. Sin base de datos y sin
+    embeddings: es el comando del primer día.
     """
     llm = build_llm(settings)
-    context = build_context(synthetic_evidence_set())
-    messages = build_messages(args.question, context)
+    retrieval: EvidenceRetrievalPort = _FixedEvidence(synthetic_evidence_set())
+    assistant = GroundedGenerationService(
+        retrieval=retrieval,
+        llm=llm,
+        timeout_seconds=settings.llm_timeout_seconds + 5.0,
+        max_tokens=settings.llm_max_output_tokens,
+    )
 
     started = time.monotonic()
     try:
-        result = await llm.complete(messages, max_tokens=settings.llm_max_output_tokens)
-    except LLMUnavailableError as error:
-        print(f"el runtime no respondió: {error}", file=sys.stderr)
-        return 1
+        answer = await assistant.answer(
+            question=args.question,
+            scopes=[_DEMO_SCOPE],
+            request_id=args.request_id,
+        )
     finally:
         await llm.aclose()
     elapsed = time.monotonic() - started
 
-    report = check_grounding(result.content, context)
-
-    print(f"pregunta       : {args.question}")
-    print(f"evidencias     : {len(context)} (SINTÉTICAS, no proceden de la planta)")
-    print(f"contexto       : {context.characters} caracteres")
-    print(f"sistema        : {len(SYSTEM_PROMPT)} caracteres de instrucciones de ELSA")
+    print("evidencia      : SINTÉTICA, no procede de la planta")
+    print("recuperación   : omitida (este comando no autoriza nada; para eso está `ask`)")
     print()
-    print("--- respuesta del modelo ---")
-    print(result.content.strip() or "(salida vacía)")
-    print()
-    if report.citations:
-        print("citas resueltas contra la procedencia real:")
-        for citation in report.citations:
-            print(f"  [{citation.marker}] {citation.reference}")
-    else:
-        print("citas resueltas: ninguna")
-    print(f"citas inventadas y descartadas: {', '.join(report.invalid_markers) or 'ninguna'}")
-    print(f"el modelo se declaró insuficiente: {'sí' if report.declared_insufficient else 'no'}")
-    print()
-    _print_metrics(llm, elapsed)
-    return 0
+    _print_answer(answer, elapsed)
+    return 0 if answer.status is not AnswerStatus.ERROR else 1
 
 
 # ---------------------------------------------------------------------
@@ -395,13 +409,13 @@ async def _ask(settings: Settings, args: argparse.Namespace) -> int:
 
     if args.json:
         print(json.dumps(_as_dict(answer, elapsed), ensure_ascii=False, indent=2))
-        return 0 if answer.status.value != "error" else 1
+        return 0 if answer.status is not AnswerStatus.ERROR else 1
 
-    _print_answer(answer, elapsed, llm)
-    return 0 if answer.status.value != "error" else 1
+    _print_answer(answer, elapsed)
+    return 0 if answer.status is not AnswerStatus.ERROR else 1
 
 
-def _print_answer(answer: GroundedAnswer, elapsed: float, llm: LlamaCppAdapter) -> None:
+def _print_answer(answer: GroundedAnswer, elapsed: float) -> None:
     print(f"estado         : {answer.status.value}")
     print(f"suficiencia    : {answer.sufficiency.value}")
     print()
@@ -416,7 +430,14 @@ def _print_answer(answer: GroundedAnswer, elapsed: float, llm: LlamaCppAdapter) 
     print()
     audit = answer.audit
     print(f"request_id     : {audit.request_id or '(sin identificador)'}")
-    print(f"modelo         : {audit.model or '(no se llamó)'}")
+    # `audit.model` solo se rellena cuando el modelo llegó a responder, así
+    # que por sí solo no distingue «no se le llamó» de «se le llamó y falló».
+    # Quien lo distingue es `llm_called`, y confundirlos aquí haría creer que
+    # un runtime caído es una abstención.
+    if not audit.llm_called:
+        print("modelo         : no se llamó (no había evidencia autorizada)")
+    else:
+        print(f"modelo         : {audit.model or 'sin respuesta del runtime'}")
     print(
         f"evidencia      : {audit.evidence_retrieved} recuperadas, "
         f"{audit.evidence_in_context} en contexto"
@@ -424,9 +445,11 @@ def _print_answer(answer: GroundedAnswer, elapsed: float, llm: LlamaCppAdapter) 
     print(f"contexto       : {audit.context_characters} caracteres")
     if audit.error_code:
         print(f"error          : {audit.error_code}")
+    if audit.invalid_markers:
+        # Lo que el modelo se inventó y el backend descartó. Es el número que
+        # hay que mirar en PC1 para saber si Phi está citando de más.
+        print(f"citas inventadas y descartadas: {', '.join(audit.invalid_markers)}")
     print(f"latencia RAG   : {elapsed:.2f} s (recuperación + generación + verificación)")
-    if audit.llm_called:
-        _print_metrics(llm, elapsed)
 
 
 def _as_dict(answer: GroundedAnswer, elapsed: float) -> dict[str, object]:
@@ -480,6 +503,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Camino RAG sobre evidencia SINTÉTICA: no necesita base ni embeddings",
     )
     demo.add_argument("question")
+    demo.add_argument("--request-id", default=None, help="Identificador para cruzar con los logs")
     demo.set_defaults(run=_demo)
 
     ask = sub.add_parser(

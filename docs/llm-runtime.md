@@ -140,6 +140,7 @@ ELSA_LLM_MAX_OUTPUT_TOKENS=512
 ELSA_LLM_TEMPERATURE=0
 ELSA_LLM_CONCURRENCY=1
 ELSA_LLM_TIMEOUT_SECONDS=120
+ELSA_LLM_HEALTH_TIMEOUT_SECONDS=5
 
 # Rutas de esta máquina. Solo las leen los scripts de arranque.
 ELSA_LLM_MODEL_PATH=C:\modelos\microsoft_Phi-4-mini-instruct-Q4_K_M.gguf
@@ -169,9 +170,23 @@ fuerza y no reorganizan nada. Eso es otro bloque.
 ```
 
 Lee el `.env`, valida que existan el binario y el modelo, arranca
-`llama-server` con Vulkan0, contexto 2048, una ranura y cuatro hilos,
-**espera a que `/health` devuelva 200** y entonces informa del PID y del
-tiempo que tardó en quedar listo.
+`llama-server` con Vulkan0 y cuatro hilos, **espera a que `/health` devuelva
+200** y entonces informa del PID y del tiempo que tardó en quedar listo.
+
+**El contexto, las ranuras, el puerto y el alias salen del mismo `.env` que
+lee la aplicación**, no de valores propios del script. Tenerlos duplicados
+haría que arrancar con `-ContextSize 4096` dejara a ELSA creyendo 2048: la
+validación `ELSA_LLM_MAX_OUTPUT_TOKENS < ELSA_LLM_CONTEXT_TOKENS` pasaría a no
+significar nada, porque la ventana real la fija el servidor, y este truncaría
+en silencio. Un parámetro explícito sigue ganando, para poder probar.
+
+El servidor arranca con `--no-webui` y con **`--no-slots`**. Lo segundo no es
+opcional: el endpoint de ranuras viene **activado por defecto** en llama.cpp y
+publica el estado de cada ranura, prompt en curso incluido —es decir, el
+bloque de evidencias que ELSA acaba de enviar—, legible con un `GET` y sin
+credencial. Loopback protege de la LAN, no de otro proceso ni de otra sesión
+de la misma máquina, y PC1 es un equipo de planta. `Test-ElsaLlm.ps1`
+comprueba que la versión instalada efectivamente lo respeta.
 
 Esperar al 200 importa: `/health` devuelve 503 mientras carga los pesos, y
 devolver el control antes dejaría a quien lance la primera consulta creyendo
@@ -188,8 +203,9 @@ hubiera arrancado el servidor.
 .\scripts\Test-ElsaLlm.ps1
 ```
 
-Salud, `/props` y una generación mínima, con latencia y tokens/s. Es una
-comprobación **del runtime**: no hay recuperación ni citas.
+Salud, `/props`, que `/slots` esté cerrado, y una generación mínima con
+latencia y tokens/s. Es una comprobación **del runtime**: no hay recuperación
+ni citas.
 
 ### Detener
 
@@ -202,6 +218,13 @@ arranque antes de tocar nada, porque Windows reutiliza los identificadores de
 proceso: matar un PID a ciegas puede detener un proceso ajeno. Tampoco hace
 `Get-Process llama-server | Stop-Process`, porque en esa máquina puede haber
 otro llama.cpp que no es nuestro.
+
+**Y borra el log del servidor.** `llama-server` vuelca por su salida el prompt
+que procesa, y el prompt de ELSA es el bloque de evidencias: documentación
+interna de planta. Dejarlo en el perfil de quien arrancó el servidor sería un
+archivo de texto plano con contenido de planta fuera de toda política de
+retención. Para una sesión de medición, `-KeepLog` lo conserva, y entonces
+borrarlo es responsabilidad de quien lo pidió.
 
 ## Probar el camino de ELSA
 
@@ -236,9 +259,19 @@ cuando todavía no hay corpus. Ninguno de los dos toca datos de planta: los
 códigos del corpus sintético llevan `DEMO` dentro para que nadie confunda su
 salida con un dato real al leerla meses después.
 
-`demo` **verifica**, no se limita a imprimir lo que dijo el modelo: si Phi
-cita un marcador que no se le dio, la salida lo dice. Es lo que hace falta
-para saber si el modelo está inventando citas en esta máquina.
+`demo` pasa por **`GroundedGenerationService`, el servicio real**, no por una
+copia suya: solo sustituye la recuperación. Eso importa, porque lo que hay que
+comprobar en PC1 no es que el modelo conteste, sino que el sistema completo
+hace con esa respuesta lo que promete —descartar los marcadores inventados,
+decidir el estado, tratar una salida vacía como fallo técnico y no como
+ausencia de información—. Una segunda implementación de esa política aquí
+acabaría divergiendo de la de producción, y la herramienta diría que todo está
+bien mientras el sistema real hace otra cosa.
+
+Lo que `demo` **no** hace es autorizar: no hay corpus, ni permisos, ni base de
+datos, así que los alcances no se comprueban. Eso es de `ask`, que recupera de
+verdad, y de `tests/test_rag_llama_cpp_end_to_end.py`. Fingir autorización en
+un comando de demostración sería peor que no tenerla, porque saldría bien.
 
 ## Qué pasa cuando el runtime falla
 
@@ -279,9 +312,22 @@ caído, `/health/ready` reporta el sistema como `degraded`, no como `down`.
 | `0.0.0.0` | **no** cuenta como loopback: es «todas las interfaces» |
 
 Apuntar ELSA a un `llama-server` que no sea loopback detiene el arranque con
-un error explícito. Para hacerlo hay que declarar
-`ELSA_LLM_ALLOW_REMOTE=true`, y entonces la decisión —y la necesidad de
-protegerlo— es de quien lo declara.
+un error explícito. `ELSA_LLM_ALLOW_REMOTE=true` lo permite **solo en DEV**,
+igual que `ELSA_DEBUG`, y cuando está activo `/health/ready` lo declara en el
+detalle de la dependencia `llm`, para que la decisión no sea invisible. Fuera
+de DEV el prompt es evidencia técnica autorizada de una persona concreta
+viajando hacia un servidor que no pregunta quién llama: eso necesita su propio
+ADR, no una variable de entorno.
+
+Dos cosas más que el arranque cierra por defecto:
+
+| Endpoint de llama.cpp | Por defecto | Con `Start-ElsaLlm.ps1` |
+|---|---|---|
+| `GET /slots` — estado de cada ranura, **prompt en curso incluido** | activado | `--no-slots` |
+| Interfaz web de chat sobre el mismo modelo | activada | `--no-webui` |
+
+Loopback protege de la LAN, no de otro proceso ni de otra sesión de la misma
+máquina, y PC1 es un equipo de planta compartido.
 
 ## Límites operativos
 
@@ -296,7 +342,8 @@ presupuesto operativo cuando haga falta:
 |---|---|---|
 | Contexto | `ELSA_LLM_CONTEXT_TOKENS` | `llama-server`, al arrancar |
 | Tokens de salida | `ELSA_LLM_MAX_OUTPUT_TOKENS` | El adaptador, en cada petición |
-| Plazo | `ELSA_LLM_TIMEOUT_SECONDS` | El adaptador y el servicio |
+| Plazo de generación | `ELSA_LLM_TIMEOUT_SECONDS` | El adaptador y el servicio |
+| Plazo del sondeo de salud | `ELSA_LLM_HEALTH_TIMEOUT_SECONDS` | El adaptador, en `/health/ready` |
 | Generaciones simultáneas | `ELSA_LLM_CONCURRENCY` | Un semáforo en el adaptador |
 | Evidencia por respuesta | `DEFAULT_MAX_ITEMS` (Bloque 4.4) | El Context Builder |
 | Caracteres de contexto | `DEFAULT_BUDGET_CHARS` (Bloque 4.4) | El Context Builder |
@@ -359,6 +406,10 @@ para decidir si merece la pena ampliar la RAM.
 `Start-ElsaLlm.ps1` informa del tiempo hasta listo; `Test-ElsaLlm.ps1` y
 `llm_runtime demo` informan de latencia y tokens/s. La RAM y la VRAM se leen
 con el Administrador de tareas y con `Test-ElsaLlm.ps1`.
+
+Y una advertencia antes de medir: si conservas el log con `-KeepLog` para
+diagnosticar algo, **bórralo al terminar**. Contiene el prompt, es decir las
+evidencias.
 
 | Medida | Valor |
 |---|---|

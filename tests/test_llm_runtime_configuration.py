@@ -65,6 +65,36 @@ async def test_health_declares_the_runtime_as_not_configured() -> None:
 # ---------------------------------------------------------------------
 
 
+def test_the_settings_to_adapter_mapping_lives_in_one_place() -> None:
+    """El contenedor y la herramienta comparten el mismo factory.
+
+    Dos raíces de composición es correcto; dos copias del mapeo no: añadir un
+    parámetro obligaría a tocar ambas y solo una está cubierta por pruebas.
+    """
+    from elsa.container import build_llm_adapter
+    from elsa.tools.llm_runtime import build_llm
+
+    settings = make_test_settings(
+        llm_backend=LLMBackend.LLAMA_CPP,
+        llm_base_url="http://127.0.0.1:9090",
+        llm_timeout_seconds=45.0,
+        llm_health_timeout_seconds=3.0,
+        llm_concurrency=2,
+    )
+
+    from_container = Container(settings).llm
+    from_factory = build_llm_adapter(settings)
+    from_tool = build_llm(settings)
+
+    assert isinstance(from_container, LlamaCppAdapter)
+    assert from_factory is not None
+    for built in (from_container, from_factory, from_tool):
+        assert built.base_url == "http://127.0.0.1:9090"
+        assert built.timeout_seconds == 45.0
+        assert built.health_timeout_seconds == 3.0
+        assert built.concurrency == 2
+
+
 def test_the_container_builds_the_adapter_from_the_configuration() -> None:
     settings = make_test_settings(
         llm_backend=LLMBackend.LLAMA_CPP,
@@ -191,6 +221,7 @@ def test_the_web_application_never_reads_the_gguf_path() -> None:
         ({"llm_base_url": "http://:8080"}, "host"),
         ({"llm_model": "  "}, "identifier"),
         ({"llm_timeout_seconds": 0.0}, "TIMEOUT"),
+        ({"llm_health_timeout_seconds": 0.0}, "HEALTH_TIMEOUT"),
         ({"llm_temperature": -0.5}, "TEMPERATURE"),
         ({"llm_concurrency": 0}, "greater than zero"),
         ({"llm_context_tokens": 0}, "greater than zero"),
@@ -249,7 +280,7 @@ def test_a_non_loopback_runtime_stops_the_container() -> None:
     assert "loopback" in str(error.value)
 
 
-def test_a_non_loopback_runtime_is_allowed_once_declared() -> None:
+def test_a_non_loopback_runtime_is_allowed_once_declared_in_dev() -> None:
     settings = make_test_settings(
         llm_backend=LLMBackend.LLAMA_CPP,
         llm_base_url="http://192.168.1.40:8080",
@@ -262,6 +293,80 @@ def test_a_non_loopback_runtime_is_allowed_once_declared() -> None:
     assert llm.base_url == "http://192.168.1.40:8080"
 
 
+def test_a_non_loopback_runtime_is_refused_outside_dev() -> None:
+    """Fuera de DEV no se saca el runtime de loopback, como con `debug`.
+
+    `llama-server` no pregunta quién llama. Apuntarlo a otra máquina en TEST
+    pondría el prompt —que es evidencia técnica autorizada de una persona
+    concreta— a viajar por la red hacia un servidor abierto. Eso es una
+    decisión de arquitectura, y las decisiones de arquitectura se registran
+    en un ADR, no en una variable de entorno.
+    """
+    with pytest.raises(ValidationError) as error:
+        make_test_settings(
+            env=Environment.TEST,
+            llm_backend=LLMBackend.LLAMA_CPP,
+            llm_base_url="http://192.168.1.40:8080",
+            llm_allow_remote=True,
+            auth_provider="supabase",
+            materials_supabase_url="https://materials.example.test",
+            materials_api_key="sb_publishable_example",
+            permissions_backend="postgres",
+            database_url="postgresql://elsa@127.0.0.1/elsa",
+            artifact_storage_backend="local",
+            artifact_storage_root="/srv/elsa/artifacts",
+        )
+
+    assert "DEV environment" in str(error.value)
+
+
+async def test_health_says_so_when_the_runtime_is_not_on_loopback() -> None:
+    """Sacarlo de loopback tiene que dejar huella donde alguien mire.
+
+    Sin esto, la única forma de enterarse sería ejecutar la CLI `check`: ni el
+    arranque ni la salud lo mencionaban, y una decisión de seguridad invisible
+    es una que nadie revisa.
+    """
+    with FakeLlamaServer(health_status=200) as server:
+        port = server.base_url.rsplit(":", 1)[1]
+        container = Container(
+            make_test_settings(
+                llm_backend=LLMBackend.LLAMA_CPP,
+                # `localhost` sí es loopback, así que para esta comprobación
+                # hace falta que la configuración declare lo contrario.
+                llm_base_url=f"http://127.0.0.1:{port}",
+                llm_allow_remote=True,
+            )
+        )
+        try:
+            reports = {r.name: r for r in await container.health_reports()}
+        finally:
+            await container.aclose()
+
+    detail = reports["llm"].detail
+    assert detail is not None
+    assert "NOT loopback" in detail
+
+
+async def test_an_llm_adapter_that_cannot_be_probed_is_reported_as_a_double() -> None:
+    """La salud pregunta por la capacidad de sondeo, no por la clase.
+
+    Discriminar con `isinstance(..., LlamaCppAdapter)` obligaría a tocar el
+    contenedor cada vez que apareciera otro runtime real —lo que ADR 0003
+    quiere que no haga falta— y hasta entonces lo etiquetaría de fake.
+    """
+    from elsa.adapters.fake_llm import FakeLLMAdapter
+    from elsa.ports.llm import ProbeableLLM
+
+    fake = FakeLLMAdapter()
+    assert not isinstance(fake, ProbeableLLM)
+
+    reports = {r.name: r for r in await Container(make_test_settings(), llm=fake).health_reports()}
+
+    assert reports["llm"].status is DependencyStatus.DEGRADED
+    assert reports["llm"].critical is False
+
+
 def test_the_mvp_defaults_are_the_ones_the_block_fixed() -> None:
     """Los valores del MVP están en la configuración, no en el código."""
     settings: Settings = make_test_settings(env=Environment.DEV)
@@ -271,5 +376,9 @@ def test_the_mvp_defaults_are_the_ones_the_block_fixed() -> None:
     assert settings.llm_temperature == 0.0
     assert settings.llm_concurrency == 1
     assert settings.llm_allow_remote is False
+    # El sondeo de salud tiene su propio plazo, corto: `/health/ready` es
+    # público y evalúa las dependencias en serie.
+    assert settings.llm_health_timeout_seconds == 5.0
+    assert settings.llm_health_timeout_seconds < settings.llm_timeout_seconds
     assert settings.llm_model_path is None
     assert settings.llama_server_path is None

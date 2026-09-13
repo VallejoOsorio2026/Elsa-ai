@@ -33,6 +33,17 @@
     Interfaz de escucha. 127.0.0.1 por defecto, y cambiarlo exige -AllowRemote:
     llama-server no lleva autenticación y este bloque no se la añade.
 
+.PARAMETER ContextSize
+    Tokens de contexto. Por defecto, ELSA_LLM_CONTEXT_TOKENS del .env — NO un
+    valor propio del script. La aplicación decide cuánta evidencia enviar
+    creyendo ese número, así que un contexto de arranque distinto la dejaría
+    razonando sobre una ventana que no existe, y el servidor truncaría en
+    silencio.
+
+.PARAMETER Parallel
+    Ranuras simultáneas. Por defecto, ELSA_LLM_CONCURRENCY del .env, por el
+    mismo motivo: el adaptador limita su concurrencia a ese mismo número.
+
 .EXAMPLE
     .\scripts\Start-ElsaLlm.ps1
     .\scripts\Start-ElsaLlm.ps1 -ContextSize 4096 -Threads 4
@@ -43,9 +54,10 @@ param(
     [string] $ModelPath,
     [string] $LlamaServer,
     [string] $BindAddress = '127.0.0.1',
-    [int]    $Port = 8080,
-    [int]    $ContextSize = 2048,
-    [int]    $Parallel = 1,
+    [int]    $Port = 0,
+    [int]    $ContextSize = 0,
+    [int]    $Parallel = 0,
+    [string] $Alias,
     [int]    $Threads = 4,
     [int]    $GpuLayers = 99,
     [string] $Device = 'Vulkan0',
@@ -84,6 +96,18 @@ function Read-EnvFile {
     return $values
 }
 
+function Get-Setting {
+    <#
+        Valor de configuración, sin exigirlo. Devuelve $null si no está.
+    #>
+    param([hashtable] $EnvValues, [string] $Key)
+
+    $fromEnvironment = [Environment]::GetEnvironmentVariable($Key)
+    if ($fromEnvironment) { return $fromEnvironment }
+    if ($EnvValues.ContainsKey($Key)) { return $EnvValues[$Key] }
+    return $null
+}
+
 function Resolve-Setting {
     param([string] $Explicit, [hashtable] $EnvValues, [string] $Key, [string] $Label)
 
@@ -103,6 +127,31 @@ function Resolve-Setting {
 $envValues   = Read-EnvFile -Path $EnvFile
 $ModelPath   = Resolve-Setting $ModelPath   $envValues 'ELSA_LLM_MODEL_PATH'    'la ruta del modelo GGUF'
 $LlamaServer = Resolve-Setting $LlamaServer $envValues 'ELSA_LLAMA_SERVER_PATH' 'la ruta de llama-server'
+
+# Los parámetros del servidor salen de la MISMA configuración que lee la
+# aplicación. Tenerlos duplicados aquí como valores propios del script haría
+# que arrancar con `-ContextSize 4096` dejara a ELSA creyendo 2048: la
+# validación `ELSA_LLM_MAX_OUTPUT_TOKENS < ELSA_LLM_CONTEXT_TOKENS` pasaría a
+# no significar nada, porque la ventana real la fija el servidor. Un
+# parámetro explícito sigue ganando, para poder probar.
+if (-not $ContextSize) {
+    $value = Get-Setting $envValues 'ELSA_LLM_CONTEXT_TOKENS'
+    $ContextSize = if ($value) { [int] $value } else { 2048 }
+}
+if (-not $Parallel) {
+    $value = Get-Setting $envValues 'ELSA_LLM_CONCURRENCY'
+    $Parallel = if ($value) { [int] $value } else { 1 }
+}
+if (-not $Alias) {
+    $value = Get-Setting $envValues 'ELSA_LLM_MODEL'
+    $Alias = if ($value) { $value } else { 'phi-4-mini-instruct' }
+}
+if (-not $Port) {
+    # El puerto se deduce de la URL que la aplicación va a usar: dos puertos
+    # distintos serían un runtime al que ELSA no llama.
+    $baseUrl = Get-Setting $envValues 'ELSA_LLM_BASE_URL'
+    $Port = if ($baseUrl -and ([uri] $baseUrl).Port -gt 0) { ([uri] $baseUrl).Port } else { 8080 }
+}
 
 if (-not (Test-Path -LiteralPath $ModelPath)) {
     throw "No existe el modelo GGUF: $ModelPath"
@@ -143,9 +192,17 @@ $sizeGb = [math]::Round($modelInfo.Length / 1GB, 2)
 # ELSA_LLM_TEMPERATURE. Un valor de arranque distinto del de la aplicación
 # haría que la misma configuración diera resultados distintos según quién
 # arrancara el servidor.
+#
+# `--no-slots` no es opcional. El endpoint de ranuras viene ACTIVADO por
+# defecto en llama.cpp y publica el estado de cada ranura, prompt en curso
+# incluido: es decir, el bloque de evidencias que ELSA acaba de enviar,
+# legible con un GET y sin credencial. Loopback protege de la LAN, no de
+# otro proceso o de otra sesión de la misma máquina, y PC1 es un equipo de
+# planta. Lo mismo con `--no-webui`, que además serviría una interfaz de
+# chat sobre el mismo modelo.
 $arguments = @(
     '--model', $ModelPath,
-    '--alias', 'phi-4-mini-instruct',
+    '--alias', $Alias,
     '--host', $BindAddress,
     '--port', $Port,
     '--ctx-size', $ContextSize,
@@ -153,16 +210,18 @@ $arguments = @(
     '--threads', $Threads,
     '--n-gpu-layers', $GpuLayers,
     '--device', $Device,
-    '--no-webui'
+    '--no-webui',
+    '--no-slots'
 )
 
 Write-Host "ELSA — arranque del runtime de generación local"
 Write-Host "  llama-server : $LlamaServer"
-Write-Host "  modelo       : $($modelInfo.Name) ($sizeGb GB)"
+Write-Host "  modelo       : $($modelInfo.Name) ($sizeGb GB), alias $Alias"
 Write-Host "  escucha      : http://${BindAddress}:$Port"
 Write-Host "  contexto     : $ContextSize tokens   ranuras: $Parallel   hilos: $Threads"
 Write-Host "  dispositivo  : $Device (capas en GPU: $GpuLayers)"
-Write-Host "  log          : $LogFile"
+Write-Host "  endpoints    : /slots y la interfaz web, desactivados"
+Write-Host "  log          : $LogFile  (puede contener texto de evidencias)"
 Write-Host ""
 
 $startedAt = Get-Date
@@ -220,3 +279,6 @@ Write-Host "  endpoint           : http://${BindAddress}:$Port"
 Write-Host ""
 Write-Host "Comprueba una generación con:  .\scripts\Test-ElsaLlm.ps1"
 Write-Host "Detén el servidor con:         .\scripts\Stop-ElsaLlm.ps1"
+Write-Host ""
+Write-Host "Recuerda: el log del servidor queda en tu perfil y puede contener el texto" -ForegroundColor DarkYellow
+Write-Host "de las evidencias enviadas. Stop-ElsaLlm.ps1 lo borra salvo que pases -KeepLog." -ForegroundColor DarkYellow

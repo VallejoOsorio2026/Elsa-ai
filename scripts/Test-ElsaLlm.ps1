@@ -3,10 +3,11 @@
     Comprueba que el runtime responde y mide una generación mínima.
 
 .DESCRIPTION
-    Tres cosas, en orden, y cada una responde una pregunta distinta:
+    Cuatro cosas, en orden, y cada una responde una pregunta distinta:
 
       1. /health    — ¿escucha alguien y tiene el modelo cargado?
       2. /props     — ¿con qué contexto y qué modelo arrancó de verdad?
+      2b. /slots    — ¿está cerrado el endpoint que publicaría el prompt?
       3. generación — ¿cuánto tarda y a cuántos tokens por segundo?
 
     Es una comprobación del RUNTIME, no de ELSA: no hay recuperación, ni
@@ -26,6 +27,7 @@
 [CmdletBinding()]
 param(
     [string] $BaseUrl,
+    [string] $Model = 'phi-4-mini-instruct',
     [string] $Prompt = 'Responde solo con la palabra LISTO.',
     [int]    $MaxTokens = 64,
     [int]    $TimeoutSeconds = 120
@@ -84,13 +86,36 @@ try {
 }
 
 # --------------------------------------------------------------------
+# 2b. El endpoint de ranuras tiene que estar cerrado
+# --------------------------------------------------------------------
+
+# `/slots` viene ACTIVADO por defecto en llama.cpp y publica el prompt en
+# curso de cada ranura: en ELSA, el bloque de evidencias. Start-ElsaLlm.ps1
+# arranca con `--no-slots`, y esto comprueba que la versión instalada
+# efectivamente lo respeta en vez de darlo por hecho.
+try {
+    $slots = Invoke-WebRequest -Uri "$BaseUrl/slots" -UseBasicParsing -TimeoutSec 10
+    if ($slots.StatusCode -eq 200) {
+        Write-Warning @"
+GET $BaseUrl/slots responde 200: el endpoint de ranuras está ABIERTO y publica
+el prompt en curso, es decir el texto de las evidencias que ELSA envía.
+Arranca el servidor con .\scripts\Start-ElsaLlm.ps1, que añade --no-slots.
+"@
+    } else {
+        Write-Host "[2b/3] ranuras  : cerrado (HTTP $($slots.StatusCode))" -ForegroundColor Green
+    }
+} catch {
+    Write-Host "[2b/3] ranuras  : cerrado" -ForegroundColor Green
+}
+
+# --------------------------------------------------------------------
 # 3. Generación
 # --------------------------------------------------------------------
 
 # Misma interfaz que usa el adaptador de ELSA: si esto funciona y la
 # aplicación no, el problema no es el runtime.
 $body = @{
-    model       = 'phi-4-mini-instruct'
+    model       = $Model
     messages    = @(@{ role = 'user'; content = $Prompt })
     temperature = 0
     max_tokens  = $MaxTokens

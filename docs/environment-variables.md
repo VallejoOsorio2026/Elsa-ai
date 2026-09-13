@@ -152,11 +152,12 @@ Estas variables solo dicen dónde escucha y con qué límites se le habla.
 | `ELSA_LLM_BASE_URL` | no | `http://127.0.0.1:8080` | Dónde escucha `llama-server`. Debe ser loopback salvo que se declare lo contrario. |
 | `ELSA_LLM_MODEL` | no | `phi-4-mini-instruct` | Identificador **lógico**, el que queda en la auditoría de cada respuesta. |
 | `ELSA_LLM_TIMEOUT_SECONDS` | no | `120` | Plazo de una generación. Vencido, la respuesta es `ERROR` con código `llm_timeout`. |
+| `ELSA_LLM_HEALTH_TIMEOUT_SECONDS` | no | `5` | Plazo del sondeo de salud. **Corto, y aparte del de generación.** |
 | `ELSA_LLM_CONTEXT_TOKENS` | no | `2048` | Contexto con el que se arranca el servidor. Lo aplica él. |
 | `ELSA_LLM_MAX_OUTPUT_TOKENS` | no | `512` | Techo de la respuesta. Debe ser **menor** que el contexto. |
 | `ELSA_LLM_TEMPERATURE` | no | `0` | Cero: la misma evidencia debe dar la misma respuesta. |
 | `ELSA_LLM_CONCURRENCY` | no | `1` | Generaciones simultáneas. Debe coincidir con el `--parallel` del servidor. |
-| `ELSA_LLM_ALLOW_REMOTE` | no | `false` | Permite una URL que no sea loopback. |
+| `ELSA_LLM_ALLOW_REMOTE` | no | `false` | Permite una URL que no sea loopback. **Solo válido en DEV.** |
 | `ELSA_LLM_MODEL_PATH` | no | — | Ruta del `.gguf`. **Solo la leen los scripts de arranque.** |
 | `ELSA_LLAMA_SERVER_PATH` | no | — | Ruta del ejecutable `llama-server`. **Solo la leen los scripts.** |
 
@@ -168,8 +169,16 @@ Tres cosas que conviene no descubrir por las malas:
 - **Loopback no es una recomendación.** `llama-server` no lleva
   autenticación y este bloque no se la añade, porque mientras solo escuche en
   127.0.0.1 no la necesita. Una URL que no sea loopback detiene el arranque
-  con un error explícito; para exponerlo hay que declarar
-  `ELSA_LLM_ALLOW_REMOTE=true`, y entonces la decisión es de quien lo declara.
+  con un error explícito; `ELSA_LLM_ALLOW_REMOTE=true` lo permite **solo en
+  DEV**, igual que `ELSA_DEBUG`, y cuando está activo `/health/ready` lo dice
+  en el detalle de la dependencia `llm`. Fuera de DEV, el prompt es evidencia
+  técnica autorizada de una persona concreta viajando hacia un servidor que no
+  pregunta quién llama: eso necesita su propio ADR.
+- **El sondeo de salud no hereda el plazo de generación.** `/health/ready` es
+  público, no autenticado y evalúa las dependencias en serie. Con 120 s,
+  cualquiera podría retener un worker dos minutos por petición si el runtime
+  quedara colgado —no caído, que rechaza al instante— y encima por una
+  dependencia declarada no crítica.
 - **Las dos rutas locales no las lee la aplicación web.** Son de los scripts
   de `scripts/`. Una prueba lo comprueba por AST: el día que alguien las use
   en el arranque «solo para verificar que el archivo existe», el servicio web

@@ -143,24 +143,32 @@ async def test_health_fails_when_the_runtime_is_stopped(
 # ---------------------------------------------------------------------
 
 
-async def test_demo_travels_context_runtime_and_verification(
+async def test_demo_travels_the_real_service_not_a_copy_of_it(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """La cita la resuelve el verificador contra la procedencia sintética."""
+    """`demo` pasa por `GroundedGenerationService`, no por una copia suya.
+
+    Lo que se comprueba en PC1 no es que el modelo conteste, sino que el
+    sistema completo hace con esa respuesta lo que promete. Si este comando
+    reimplementara la política, diría que todo está bien mientras producción
+    hace otra cosa. Por eso la salida trae el estado y el `request_id` que
+    decide el servicio real.
+    """
     answer = "Se lubrica cada 500 horas de operación con grasa NLGI 2 [E1]."
     with FakeLlamaServer(responses=[completion_body(answer)]) as server:
         settings = make_test_settings(
             llm_backend=LLMBackend.LLAMA_CPP, llm_base_url=server.base_url
         )
-        args = parse("demo", "¿cada cuánto se lubrica el rodamiento?")
+        args = parse("demo", "¿cada cuánto se lubrica el rodamiento?", "--request-id", "pc1-001")
 
         assert await args.run(settings, args) == 0
         sent = server.last().role("user")
 
     out = capsys.readouterr().out
-    assert "SINTÉTICAS" in out
+    assert "SINTÉTICA" in out
+    assert "estado         : answered" in out
     assert "[E1] Manual de la prensa de demostración v1 · 3 Lubricación · p. 12" in out
-    assert "citas inventadas y descartadas: ninguna" in out
+    assert "pc1-001" in out
     # El contexto lo compuso el Context Builder real, con su valla.
     assert "----- EVIDENCIA E1 -----" in sent
 
@@ -181,12 +189,24 @@ async def test_demo_reports_a_citation_the_model_invented(
 
         assert await args.run(settings, args) == 0
 
-    assert "citas inventadas y descartadas: E9" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "citas inventadas y descartadas: E9" in out
+    # Y el marcador inventado no aparece en el texto que se muestra: eso lo
+    # hace `visible_answer`, que es del servicio. Reimplementar el camino aquí
+    # se saltaba ese borrado y enseñaba la cita falsa.
+    assert "[E9]" not in out.split("citas inventadas")[0]
+    assert "estado         : partial" in out
 
 
-async def test_demo_fails_cleanly_when_the_runtime_is_stopped(
+async def test_demo_reports_a_stopped_runtime_as_error_not_as_missing_evidence(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    """Con el runtime apagado, el comando dice lo mismo que diría el sistema.
+
+    Y eso incluye no llamarlo «no encontré información»: al pasar por el
+    servicio real, el runtime caído produce `ERROR` con su código de auditoría
+    y las evidencias siguen citadas.
+    """
     settings = make_test_settings(
         llm_backend=LLMBackend.LLAMA_CPP,
         llm_base_url=closed_port_url(),
@@ -195,7 +215,15 @@ async def test_demo_fails_cleanly_when_the_runtime_is_stopped(
     args = parse("demo", "¿cada cuánto se lubrica?")
 
     assert await args.run(settings, args) == 1
-    assert "el runtime no respondió" in capsys.readouterr().err
+    out = capsys.readouterr().out
+    assert "estado         : error" in out
+    assert "error          : llm_unavailable" in out
+    assert "no_evidence" not in out
+    # Se le llamó y no contestó. Decir «no se llamó» aquí sugeriría una
+    # abstención, que es justo la confusión que el bloque evita.
+    assert "modelo         : sin respuesta del runtime" in out
+    # Regla 9: lo recuperado se entrega aunque el modelo no esté.
+    assert "[E1]" in out
 
 
 # ---------------------------------------------------------------------

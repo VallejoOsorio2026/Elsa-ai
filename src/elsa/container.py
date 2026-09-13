@@ -41,7 +41,7 @@ from elsa.ports.artifact_storage import ArtifactStoragePort, ArtifactStorageUnav
 from elsa.ports.auth import AuthPort, IdentityProviderUnavailableError
 from elsa.ports.contributions import ContributionsRepositoryPort
 from elsa.ports.knowledge import KnowledgeRepositoryPort, KnowledgeUnavailableError
-from elsa.ports.llm import LLMPort, LLMTimeoutError, LLMUnavailableError
+from elsa.ports.llm import LLMPort, LLMTimeoutError, LLMUnavailableError, ProbeableLLM
 from elsa.ports.materials_identity import MaterialsIdentityPort
 from elsa.ports.permissions import PermissionsRepositoryPort, PermissionsUnavailableError
 from elsa.ports.transcription import TranscriptionPort
@@ -58,6 +58,32 @@ _PLANNED_DEPENDENCIES: tuple[str, ...] = ("embeddings", "ocr", "reranker", "mate
 
 _FAKE_DETAIL = "fake adapter (DEV only)"
 _PLANNED_DETAIL = "no adapter configured yet (planned for a later block)"
+
+
+def build_llm_adapter(settings: Settings) -> LlamaCppAdapter | None:
+    """Traduce la configuración al adaptador de generación, o a nada.
+
+    Vive aquí, y no en cada sitio que necesite un motor, porque este mapeo es
+    composición: es exactamente lo que hace el contenedor. La herramienta de
+    operación también lo necesita —construye su propio motor, sin levantar la
+    aplicación— y una segunda copia del mapeo divergiría a la primera variable
+    nueva, con solo una de las dos cubierta por pruebas.
+
+    Devolver ``None`` con el backend deshabilitado no es un fallo: es el valor
+    por defecto, y significa que ELSA recupera y cita pero no redacta.
+    """
+    if settings.llm_backend is not LLMBackend.LLAMA_CPP:
+        return None
+    return LlamaCppAdapter(
+        base_url=settings.llm_base_url,
+        model=settings.llm_model,
+        timeout_seconds=settings.llm_timeout_seconds,
+        health_timeout_seconds=settings.llm_health_timeout_seconds,
+        max_output_tokens=settings.llm_max_output_tokens,
+        temperature=settings.llm_temperature,
+        concurrency=settings.llm_concurrency,
+        allow_remote=settings.llm_allow_remote,
+    )
 
 
 class Container:
@@ -144,7 +170,7 @@ class Container:
         # eso FastAPI arranca igual con el modelo apagado, y por eso una URL
         # mal declarada sí falla aquí y ahora — eso es configuración, no
         # indisponibilidad.
-        self.llm: LLMPort | None = llm if llm is not None else self._build_llm(settings)
+        self.llm: LLMPort | None = llm if llm is not None else build_llm_adapter(settings)
 
         self.transcription_is_simulated: bool = isinstance(
             self.transcription, SimulatedTranscriptionAdapter
@@ -227,20 +253,6 @@ class Container:
         return self.llm
 
     @staticmethod
-    def _build_llm(settings: Settings) -> LLMPort | None:
-        if settings.llm_backend is not LLMBackend.LLAMA_CPP:
-            return None
-        return LlamaCppAdapter(
-            base_url=settings.llm_base_url,
-            model=settings.llm_model,
-            timeout_seconds=settings.llm_timeout_seconds,
-            max_output_tokens=settings.llm_max_output_tokens,
-            temperature=settings.llm_temperature,
-            concurrency=settings.llm_concurrency,
-            allow_remote=settings.llm_allow_remote,
-        )
-
-    @staticmethod
     def _build_artifact_storage(settings: Settings) -> ArtifactStoragePort:
         if settings.artifact_storage_backend is ArtifactStorageBackend.LOCAL:
             # La configuración garantiza la raíz para el backend local.
@@ -293,7 +305,12 @@ class Container:
                 critical=False,
                 detail="no generation runtime configured (ELSA_LLM_BACKEND=disabled)",
             )
-        if not isinstance(self.llm, LlamaCppAdapter):
+        if not isinstance(self.llm, ProbeableLLM):
+            # Se pregunta por la capacidad, no por la clase concreta. Un
+            # adaptador que no sabe sondearse es un doble de pruebas; decidirlo
+            # con `isinstance(..., LlamaCppAdapter)` obligaría a tocar esto
+            # cada vez que apareciera otro runtime real, y hasta entonces lo
+            # etiquetaría de fake aunque no lo fuera.
             return DependencyReport(
                 name="llm",
                 status=DependencyStatus.DEGRADED,
@@ -307,20 +324,25 @@ class Container:
                 name="llm",
                 status=DependencyStatus.DOWN,
                 critical=False,
-                detail="the local llama-server did not answer in time",
+                detail="the generation runtime did not answer in time",
             )
         except LLMUnavailableError:
             return DependencyReport(
                 name="llm",
                 status=DependencyStatus.DOWN,
                 critical=False,
-                detail="the local llama-server is not reachable",
+                detail="the generation runtime is not reachable",
             )
+        # El identificador lógico sale de la configuración, que es de donde lo
+        # toma también la auditoría de cada respuesta. Preguntárselo al
+        # adaptador exigiría que el puerto lo declarase, y no es asunto suyo.
+        detail = f"{self.settings.llm_backend.value} runtime, model {self.settings.llm_model}"
+        if self.settings.llm_allow_remote:
+            # Que el runtime esté fuera de loopback tiene que dejar huella en
+            # algún sitio que alguien mire. `/health/ready` es ese sitio.
+            detail += " (NOT loopback: ELSA_LLM_ALLOW_REMOTE is on)"
         return DependencyReport(
-            name="llm",
-            status=DependencyStatus.OK,
-            critical=False,
-            detail=f"llama.cpp runtime, model {self.llm.model}",
+            name="llm", status=DependencyStatus.OK, critical=False, detail=detail
         )
 
     async def _auth_report(self) -> DependencyReport:
