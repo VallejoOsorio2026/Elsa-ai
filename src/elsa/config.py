@@ -165,6 +165,36 @@ class Settings(BaseSettings):
     """Token del bootstrap del primer administrador. Sin él, queda deshabilitado."""
 
     # ---------------------------------------------------------------
+    # Motor de embeddings (Bloque 4.2.a etapa C)
+    #
+    # Todo opcional, y por una razón operativa: ELSA tiene que arrancar en
+    # Render Free **sin descargar ni cargar ningún modelo** (ADR 0013 §8).
+    # Estas variables solo las lee quien construye el adaptador productivo
+    # —las herramientas de operación—, nunca el arranque de la aplicación web.
+    # ---------------------------------------------------------------
+
+    embeddings_model_id: str | None = None
+    """Identificador del modelo, p. ej. `BAAI/bge-m3`. Sin él no hay adaptador."""
+
+    embeddings_revision: str | None = None
+    """Commit o digest concreto de los pesos. `main` no se acepta (ADR 0013 §2)."""
+
+    embeddings_dimension: int | None = None
+    """Dimensión declarada. Se verifica contra lo que emite el modelo."""
+
+    embeddings_normalized: bool = True
+    embeddings_device: str = "cpu"
+    """El piloto no tiene GPU; `cuda` se declara explícitamente o no se usa."""
+
+    embeddings_batch_size: int = 16
+    embeddings_document_prefix: str = ""
+    embeddings_query_prefix: str = ""
+    embeddings_composition_template: str = "context-v1"
+    embeddings_family: str = ""
+    embeddings_trust_remote_code: bool = False
+    """Ejecutar código del repositorio del modelo no puede ser un descuido."""
+
+    # ---------------------------------------------------------------
     # Almacenamiento privado de artefactos e ingesta
     # ---------------------------------------------------------------
 
