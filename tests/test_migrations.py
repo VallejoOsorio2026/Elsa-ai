@@ -61,6 +61,10 @@ DOCUMENT_TABLES = {
     "document_sections",
     "document_chunks",
     "document_version_events",
+    # Bloque 4.2.b
+    "embedding_models",
+    "embedding_runs",
+    "document_chunk_embeddings",
 }
 
 ELSA_TABLES = AUTHORIZATION_TABLES | KNOWLEDGE_TABLES | DOCUMENT_TABLES
