@@ -8,6 +8,7 @@ recuperación, no la calidad de ningún modelo — eso ya se midió en 4.2.a.
 import hashlib
 import math
 from collections.abc import AsyncIterator
+from dataclasses import replace
 
 import asyncpg
 import pytest
@@ -174,41 +175,18 @@ async def test_incompatible_or_duplicate_model_registrations_are_rejected(
 
     # `main` es una referencia móvil: ADR 0013 §2 la prohíbe.
     with pytest.raises(VectorIntegrityError):
-        await store.register_model(
-            EmbeddingModelSpec(**{**vars_of(BGE), "revision": "main"}), actor=ACTOR
-        )
+        await store.register_model(replace(BGE, revision="main"), actor=ACTOR)
 
     # Coseno exige vectores normalizados.
     with pytest.raises(VectorIntegrityError):
         await store.register_model(
-            EmbeddingModelSpec(**{**vars_of(BGE), "revision": "aaa111", "normalized": False}),
+            replace(BGE, revision="aaa111", normalized=False),
             actor=ACTOR,
         )
 
     # Cambiar un prefijo es OTRO espacio vectorial, y sí se admite.
-    other = await store.register_model(
-        EmbeddingModelSpec(**{**vars_of(BGE), "query_prefix": "q: "}), actor=ACTOR
-    )
+    other = await store.register_model(replace(BGE, query_prefix="q: "), actor=ACTOR)
     assert other.spec.query_prefix == "q: "
-
-
-def vars_of(spec: EmbeddingModelSpec) -> dict[str, object]:
-    return {
-        f: getattr(spec, f)
-        for f in (
-            "family",
-            "model_id",
-            "revision",
-            "dimension",
-            "normalized",
-            "composition_template",
-            "runtime",
-            "document_prefix",
-            "query_prefix",
-            "similarity",
-            "notes",
-        )
-    }
 
 
 async def test_a_registered_model_is_immutable_except_for_its_state(
@@ -671,8 +649,7 @@ async def test_direct_sql_cannot_break_the_critical_relations(
         )
         with pytest.raises(asyncpg.UniqueViolationError):
             await conn.execute(
-                "update elsa.embedding_models set state='active', activated_at=now() "
-                "where id=$1",
+                "update elsa.embedding_models set state='active', activated_at=now() where id=$1",
                 gemma.id,
             )
     finally:
