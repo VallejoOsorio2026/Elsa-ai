@@ -22,6 +22,14 @@ FORBIDDEN_PATHS = [
     "export-sap.xlsx",
     "ih06.xls",
     "model-weights.gguf",
+    # Bloque 4.5: runtime de generación local. El GGUF de Phi pesa más de
+    # 2 GB, los binarios dependen de la máquina y del backend de cómputo, y
+    # el log del servidor puede llegar a contener el texto de las evidencias.
+    "microsoft_Phi-4-mini-instruct-Q4_K_M.GGUF",
+    "models/phi-4-mini-instruct-Q4_K_M.gguf",
+    "llama.cpp/build/bin/llama-server",
+    "llama-server.exe",
+    "ggml-vulkan.dll",
     "model.safetensors",
     "model.onnx",
     "data/dataset.csv",

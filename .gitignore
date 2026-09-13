@@ -62,11 +62,27 @@ reports/
 
 # --- Pesos de modelos ---
 *.gguf
+*.GGUF
 *.safetensors
 *.pt
 *.pth
 *.onnx
 *.ckpt
+
+# --- Runtime de generación local (Bloque 4.5) ---
+# Ni los binarios de llama.cpp ni el modelo ni los logs del servidor entran
+# aquí. El GGUF de Phi-4-mini pesa más de 2 GB, los binarios dependen de la
+# máquina y del backend de cómputo (Vulkan, CPU, CUDA) y los logs del
+# servidor pueden llegar a contener el texto de las evidencias enviadas.
+llama.cpp/
+llama-server
+llama-cli
+*.exe
+*.dll
+models/
+# Caché de Hugging Face si alguien la apunta dentro del repositorio.
+.cache/
+huggingface/
 
 # --- Datasets y dumps de base de datos ---
 data/

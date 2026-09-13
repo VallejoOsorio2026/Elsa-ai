@@ -16,6 +16,7 @@ import httpx
 from elsa.adapters.fake_auth import FakeAuthAdapter
 from elsa.adapters.fake_materials_identity import FakeMaterialsIdentityAdapter
 from elsa.adapters.jwks import JwksCache
+from elsa.adapters.llama_cpp_llm import LlamaCppAdapter
 from elsa.adapters.local_artifact_storage import LocalArtifactStorage
 from elsa.adapters.memory_abuse_guard import InMemoryAbuseGuard
 from elsa.adapters.memory_artifact_storage import InMemoryArtifactStorage
@@ -27,13 +28,20 @@ from elsa.adapters.postgres_permissions import PostgresPermissionsRepository
 from elsa.adapters.simulated_transcription import SimulatedTranscriptionAdapter
 from elsa.adapters.supabase_auth import SupabaseJwtAuthAdapter
 from elsa.adapters.supabase_materials_identity import SupabaseMaterialsIdentityAdapter
-from elsa.config import ArtifactStorageBackend, AuthProvider, PermissionsBackend, Settings
+from elsa.config import (
+    ArtifactStorageBackend,
+    AuthProvider,
+    LLMBackend,
+    PermissionsBackend,
+    Settings,
+)
 from elsa.core.health import DependencyReport, DependencyStatus
 from elsa.ports.abuse import AbuseGuardPort, AbusePolicy
 from elsa.ports.artifact_storage import ArtifactStoragePort, ArtifactStorageUnavailableError
 from elsa.ports.auth import AuthPort, IdentityProviderUnavailableError
 from elsa.ports.contributions import ContributionsRepositoryPort
 from elsa.ports.knowledge import KnowledgeRepositoryPort, KnowledgeUnavailableError
+from elsa.ports.llm import LLMPort, LLMTimeoutError, LLMUnavailableError
 from elsa.ports.materials_identity import MaterialsIdentityPort
 from elsa.ports.permissions import PermissionsRepositoryPort, PermissionsUnavailableError
 from elsa.ports.transcription import TranscriptionPort
@@ -42,7 +50,11 @@ _logger = logging.getLogger("elsa.container")
 
 # Dependencias todavía sin adaptador real. No son deuda técnica: es el
 # diseño previsto (ADR 0003). Ninguna es crítica para operar.
-_PLANNED_DEPENDENCIES: tuple[str, ...] = ("llm", "embeddings", "ocr", "reranker", "materials")
+#
+# `llm` salió de esta lista en el Bloque 4.5: ya tiene adaptador real
+# (`LlamaCppAdapter`). Que esté conectado o no ahora depende de la
+# configuración, no de que falte código, y por eso tiene su propio reporte.
+_PLANNED_DEPENDENCIES: tuple[str, ...] = ("embeddings", "ocr", "reranker", "materials")
 
 _FAKE_DETAIL = "fake adapter (DEV only)"
 _PLANNED_DETAIL = "no adapter configured yet (planned for a later block)"
@@ -63,6 +75,7 @@ class Container:
         artifact_storage: ArtifactStoragePort | None = None,
         contributions: ContributionsRepositoryPort | None = None,
         transcription: TranscriptionPort | None = None,
+        llm: LLMPort | None = None,
     ) -> None:
         self.settings = settings
         self._http: httpx.AsyncClient | None = None
@@ -125,6 +138,14 @@ class Container:
         # declara en cada resultado en vez de inventar una transcripción.
         self.transcription: TranscriptionPort = transcription or SimulatedTranscriptionAdapter()
 
+        # El runtime de generación es un proceso APARTE (`llama-server`).
+        # Construir el adaptador abre un cliente HTTP y nada más: no descarga
+        # pesos, no reserva VRAM y no comprueba que el servidor exista. Por
+        # eso FastAPI arranca igual con el modelo apagado, y por eso una URL
+        # mal declarada sí falla aquí y ahora — eso es configuración, no
+        # indisponibilidad.
+        self.llm: LLMPort | None = llm if llm is not None else self._build_llm(settings)
+
         self.transcription_is_simulated: bool = isinstance(
             self.transcription, SimulatedTranscriptionAdapter
         )
@@ -168,6 +189,8 @@ class Container:
 
     async def aclose(self) -> None:
         """Cierra los recursos abiertos por :meth:`start`."""
+        if isinstance(self.llm, LlamaCppAdapter):
+            await self.llm.aclose()
         if self._postgres_knowledge is not None:
             await self._postgres_knowledge.close()
             self._postgres_knowledge = None
@@ -190,6 +213,33 @@ class Container:
             raise KnowledgeUnavailableError("the ELSA knowledge store is not connected")
         return self.knowledge
 
+    def require_llm(self) -> LLMPort:
+        """Devuelve el motor de generación o falla como indisponible.
+
+        Sin motor, ELSA no redacta. **No es lo mismo que no tener evidencia**:
+        quien llame a esto debe traducirlo a un error técnico, nunca a «no
+        encontré información» (ADR 0017).
+        """
+        if self.llm is None:
+            raise LLMUnavailableError(
+                "no generation runtime is configured; set ELSA_LLM_BACKEND=llama_cpp"
+            )
+        return self.llm
+
+    @staticmethod
+    def _build_llm(settings: Settings) -> LLMPort | None:
+        if settings.llm_backend is not LLMBackend.LLAMA_CPP:
+            return None
+        return LlamaCppAdapter(
+            base_url=settings.llm_base_url,
+            model=settings.llm_model,
+            timeout_seconds=settings.llm_timeout_seconds,
+            max_output_tokens=settings.llm_max_output_tokens,
+            temperature=settings.llm_temperature,
+            concurrency=settings.llm_concurrency,
+            allow_remote=settings.llm_allow_remote,
+        )
+
     @staticmethod
     def _build_artifact_storage(settings: Settings) -> ArtifactStoragePort:
         if settings.artifact_storage_backend is ArtifactStorageBackend.LOCAL:
@@ -208,6 +258,7 @@ class Container:
             await self._auth_report(),
             await self._database_report(),
             await self._storage_report(),
+            await self._llm_report(),
         ]
         reports.append(
             DependencyReport(
@@ -227,6 +278,50 @@ class Container:
             for name in _PLANNED_DEPENDENCIES
         )
         return tuple(reports)
+
+    async def _llm_report(self) -> DependencyReport:
+        """El motor de generación nunca es crítico (regla 9 de CLAUDE.md).
+
+        Con el modelo apagado ELSA sigue autorizando, recuperando y citando
+        evidencia: lo que pierde es la redacción. Tumbar la aplicación entera
+        por eso sería cambiar un servicio disminuido por ninguno.
+        """
+        if self.llm is None:
+            return DependencyReport(
+                name="llm",
+                status=DependencyStatus.NOT_CONFIGURED,
+                critical=False,
+                detail="no generation runtime configured (ELSA_LLM_BACKEND=disabled)",
+            )
+        if not isinstance(self.llm, LlamaCppAdapter):
+            return DependencyReport(
+                name="llm",
+                status=DependencyStatus.DEGRADED,
+                critical=False,
+                detail=_FAKE_DETAIL,
+            )
+        try:
+            await self.llm.check_health()
+        except LLMTimeoutError:
+            return DependencyReport(
+                name="llm",
+                status=DependencyStatus.DOWN,
+                critical=False,
+                detail="the local llama-server did not answer in time",
+            )
+        except LLMUnavailableError:
+            return DependencyReport(
+                name="llm",
+                status=DependencyStatus.DOWN,
+                critical=False,
+                detail="the local llama-server is not reachable",
+            )
+        return DependencyReport(
+            name="llm",
+            status=DependencyStatus.OK,
+            critical=False,
+            detail=f"llama.cpp runtime, model {self.llm.model}",
+        )
 
     async def _auth_report(self) -> DependencyReport:
         # La autenticación es dependencia crítica: sin proveedor de

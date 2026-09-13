@@ -34,6 +34,29 @@ class LLMUnavailableError(Exception):
     """El modelo no está disponible; el sistema debe degradarse, no caer."""
 
 
+class LLMTimeoutError(LLMUnavailableError):
+    """El modelo no respondió dentro del plazo.
+
+    Es una forma de indisponibilidad —por eso hereda de
+    :class:`LLMUnavailableError` y quien solo distinga «disponible o no»
+    sigue funcionando sin cambios— pero se declara aparte porque no se
+    diagnostica igual: un proveedor caído se arregla arrancándolo y un
+    proveedor lento se arregla con más plazo, menos contexto o menos
+    tokens de salida. Confundirlos en el rastro de auditoría borra justo
+    el dato que distingue esas dos decisiones.
+    """
+
+
+class LLMConfigurationError(ValueError):
+    """El runtime de generación está mal declarado.
+
+    Se lanza **antes** de intentar hablar con nadie. Una URL inventada, un
+    plazo negativo o una concurrencia de cero no son una indisponibilidad:
+    son un error de configuración, y tienen que fallar de forma ruidosa en
+    vez de disfrazarse de «el modelo no responde».
+    """
+
+
 @runtime_checkable
 class LLMPort(Protocol):
     """Generación de texto a partir de una conversación."""

@@ -42,7 +42,7 @@ from elsa.core.grounding import (
     visible_answer,
 )
 from elsa.ports.evidence import EvidenceRetrievalPort, EvidenceSet, EvidenceStrength
-from elsa.ports.llm import LLMPort, LLMUnavailableError
+from elsa.ports.llm import LLMPort, LLMTimeoutError, LLMUnavailableError
 
 _logger = logging.getLogger(__name__)
 
@@ -124,7 +124,12 @@ class GroundedGenerationService:
         try:
             async with asyncio.timeout(self._timeout_seconds):
                 result = await self._llm.complete(messages, max_tokens=self._max_tokens)
-        except TimeoutError:
+        except (TimeoutError, LLMTimeoutError):
+            # Dos caminos para el mismo hecho: el plazo del propio adaptador
+            # —el que conoce el transporte— y este, que es el techo del
+            # servicio y cubre también a un adaptador que no lo respete. Se
+            # registran con el mismo código porque para quien lee la
+            # auditoría son el mismo diagnóstico.
             return self._failure("llm_timeout", evidence, context, request_id)
         except LLMUnavailableError:
             return self._failure("llm_unavailable", evidence, context, request_id)

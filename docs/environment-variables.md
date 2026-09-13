@@ -140,6 +140,41 @@ los bytes recibidos, pero la **duración** del audio la declara el navegador.
 Verificarla exigiría decodificar el archivo en el servidor, con la dependencia
 de medios que eso arrastra. Lo que sí se comprueba de verdad es el tamaño.
 
+## Runtime de generación local (Bloque 4.5)
+
+El modelo **no se carga dentro del proceso de Python**: vive en
+`llama-server`, un proceso aparte (ver [`llm-runtime.md`](llm-runtime.md)).
+Estas variables solo dicen dónde escucha y con qué límites se le habla.
+
+| Variable | Obligatoria | Por defecto | Descripción |
+|---|---|---|---|
+| `ELSA_LLM_BACKEND` | no | `disabled` | `disabled` o `llama_cpp`. Con `disabled` ELSA autoriza, recupera y cita, pero no redacta. |
+| `ELSA_LLM_BASE_URL` | no | `http://127.0.0.1:8080` | Dónde escucha `llama-server`. Debe ser loopback salvo que se declare lo contrario. |
+| `ELSA_LLM_MODEL` | no | `phi-4-mini-instruct` | Identificador **lógico**, el que queda en la auditoría de cada respuesta. |
+| `ELSA_LLM_TIMEOUT_SECONDS` | no | `120` | Plazo de una generación. Vencido, la respuesta es `ERROR` con código `llm_timeout`. |
+| `ELSA_LLM_CONTEXT_TOKENS` | no | `2048` | Contexto con el que se arranca el servidor. Lo aplica él. |
+| `ELSA_LLM_MAX_OUTPUT_TOKENS` | no | `512` | Techo de la respuesta. Debe ser **menor** que el contexto. |
+| `ELSA_LLM_TEMPERATURE` | no | `0` | Cero: la misma evidencia debe dar la misma respuesta. |
+| `ELSA_LLM_CONCURRENCY` | no | `1` | Generaciones simultáneas. Debe coincidir con el `--parallel` del servidor. |
+| `ELSA_LLM_ALLOW_REMOTE` | no | `false` | Permite una URL que no sea loopback. |
+| `ELSA_LLM_MODEL_PATH` | no | — | Ruta del `.gguf`. **Solo la leen los scripts de arranque.** |
+| `ELSA_LLAMA_SERVER_PATH` | no | — | Ruta del ejecutable `llama-server`. **Solo la leen los scripts.** |
+
+Tres cosas que conviene no descubrir por las malas:
+
+- **El valor por defecto es `disabled`, y tiene que serlo.** Un clon limpio
+  debe levantar el servidor y pasar la suite sin descargar varios gigas de
+  pesos (regla 24), y Render Free no puede cargar ningún modelo.
+- **Loopback no es una recomendación.** `llama-server` no lleva
+  autenticación y este bloque no se la añade, porque mientras solo escuche en
+  127.0.0.1 no la necesita. Una URL que no sea loopback detiene el arranque
+  con un error explícito; para exponerlo hay que declarar
+  `ELSA_LLM_ALLOW_REMOTE=true`, y entonces la decisión es de quien lo declara.
+- **Las dos rutas locales no las lee la aplicación web.** Son de los scripts
+  de `scripts/`. Una prueba lo comprueba por AST: el día que alguien las use
+  en el arranque «solo para verificar que el archivo existe», el servicio web
+  pasaría a depender de que los pesos estén en disco.
+
 ## Solo para tests
 
 | Variable | Descripción |

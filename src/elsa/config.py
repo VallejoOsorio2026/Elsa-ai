@@ -14,6 +14,7 @@ imprimen al representar la configuración ni aparecen en los logs.
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from pydantic import SecretStr, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -64,6 +65,21 @@ class ArtifactStorageBackend(StrEnum):
 
     MEMORY = "memory"
     """En memoria, no persistente. Solo permitido en DEV."""
+
+
+class LLMBackend(StrEnum):
+    """Runtime de generación conectado al puerto ``llm``."""
+
+    DISABLED = "disabled"
+    """Sin motor de generación. ELSA arranca, recupera y cita igual.
+
+    Es el valor por defecto, y tiene que serlo: un clon limpio no puede
+    exigir varios gigas de pesos ni un servidor aparte para levantar el
+    backend y pasar la suite (regla 24).
+    """
+
+    LLAMA_CPP = "llama_cpp"
+    """``llama-server`` de llama.cpp, ya arrancado, escuchando en loopback."""
 
 
 class ConfigurationError(RuntimeError):
@@ -193,6 +209,77 @@ class Settings(BaseSettings):
     embeddings_family: str = ""
     embeddings_trust_remote_code: bool = False
     """Ejecutar código del repositorio del modelo no puede ser un descuido."""
+
+    # ---------------------------------------------------------------
+    # Runtime de generación (Bloque 4.5)
+    #
+    # El modelo NO se carga en este proceso. Vive en `llama-server`, que se
+    # arranca aparte (ver `docs/llm-runtime.md`); aquí solo se declara dónde
+    # escucha y con qué límites se le habla. Por eso el arranque de FastAPI
+    # no depende de que exista: con el backend `disabled` —el valor por
+    # defecto— no hay adaptador y el sistema lo declara en `/health/ready`.
+    # ---------------------------------------------------------------
+
+    llm_backend: LLMBackend = LLMBackend.DISABLED
+    """Adaptador del puerto ``llm``. Sin él, ELSA no redacta: recupera y cita."""
+
+    llm_base_url: str = "http://127.0.0.1:8080"
+    """Dónde escucha ``llama-server``. Loopback salvo decisión explícita."""
+
+    llm_model: str = "phi-4-mini-instruct"
+    """Identificador **lógico** del modelo, el que queda en la auditoría.
+
+    No es la ruta del archivo ni el nombre del repositorio de pesos: es el
+    nombre con el que se responde «esto lo redactó tal modelo». La ruta del
+    GGUF la conoce quien arranca el servidor, no la aplicación.
+    """
+
+    llm_model_path: Path | None = None
+    """Ruta local del GGUF. **Solo la leen los scripts de arranque.**
+
+    Depende de la máquina, así que nunca lleva valor en el repositorio, y el
+    archivo tampoco entra en Git (``*.gguf`` está en ``.gitignore``). La
+    aplicación web no la usa: si la usara, estaría a un paso de cargar el
+    modelo dentro del proceso, que es justo lo que este bloque prohíbe.
+    """
+
+    llama_server_path: Path | None = None
+    """Ruta del ejecutable ``llama-server``. **Solo la leen los scripts.**
+
+    Igual que ``llm_model_path``: depende de la máquina, no se versiona y la
+    aplicación web no la toca. Se declara aquí, y no solo en el script, para
+    que exista un único sitio donde mirar cómo está configurado el runtime en
+    esta máquina.
+    """
+
+    llm_timeout_seconds: float = 120.0
+    """Plazo de una generación. En PC1 una respuesta RAG tarda decenas de segundos."""
+
+    llm_context_tokens: int = 2048
+    """Contexto con el que se arranca el servidor. Lo aplica él, no la app.
+
+    Se declara aquí porque es el número que hay que pasarle a ``llama-server``
+    y porque limita cuánta evidencia tiene sentido enviar: con 4 GB de VRAM
+    subirlo no es gratis.
+    """
+
+    llm_max_output_tokens: int = 512
+    """Techo de la respuesta. Protege el tiempo de PC1, no una factura."""
+
+    llm_temperature: float = 0.0
+    """Cero: se quiere la misma respuesta ante la misma evidencia."""
+
+    llm_concurrency: int = 1
+    """Generaciones simultáneas permitidas. Debe coincidir con ``--parallel``."""
+
+    llm_allow_remote: bool = False
+    """Permite apuntar a un ``llama-server`` que no sea loopback.
+
+    ``llama-server`` no lleva autenticación y este bloque no se la añade,
+    porque mientras solo escuche en 127.0.0.1 no la necesita. Sacarlo de ahí
+    cambia esa premisa, así que exige declararlo y no puede ocurrir por
+    escribir mal una URL.
+    """
 
     # ---------------------------------------------------------------
     # Almacenamiento privado de artefactos e ingesta
@@ -389,6 +476,42 @@ class Settings(BaseSettings):
             return None
         return value
 
+    @field_validator("llm_base_url")
+    @classmethod
+    def _validate_llm_url(cls, value: str) -> str:
+        """Comprueba que la URL sea utilizable. **No decide si es loopback.**
+
+        Esa regla la aplica el adaptador, que es quien abre el socket: dejarla
+        en un solo sitio evita que las dos capas acaben con listas distintas
+        de lo que cuenta como «esta máquina».
+        """
+        url = value.strip()
+        if not url.startswith(("http://", "https://")):
+            raise ValueError(f"must include an http(s) scheme: {value!r}")
+        # El recorte va después de comprobar el esquema: hacerlo antes
+        # convierte `http://` en `http:` y el error dejaría de decir lo que
+        # de verdad falta, que es el anfitrión.
+        url = url.rstrip("/")
+        if not urlsplit(url).hostname:
+            raise ValueError(f"must include a host: {value!r}")
+        return url
+
+    @field_validator("llm_model")
+    @classmethod
+    def _validate_llm_model(cls, value: str) -> str:
+        model = value.strip()
+        if not model:
+            raise ValueError("the logical model identifier cannot be empty")
+        return model
+
+    @field_validator("llm_model_path", "llama_server_path", mode="before")
+    @classmethod
+    def _empty_model_path_is_none(cls, value: object) -> object:
+        """Declarada sin valor significa «esta máquina no lo declara»."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     @field_validator("artifact_storage_root", mode="before")
     @classmethod
     def _empty_path_is_none(cls, value: object) -> object:
@@ -407,6 +530,9 @@ class Settings(BaseSettings):
         "contribution_max_attachments",
         "contribution_max_attachment_bytes",
         "contribution_max_audio_seconds",
+        "llm_context_tokens",
+        "llm_max_output_tokens",
+        "llm_concurrency",
     )
     @classmethod
     def _positive(cls, value: int) -> int:
@@ -475,6 +601,20 @@ class Settings(BaseSettings):
         ):
             raise ValueError(
                 "ELSA_ARTIFACT_STORAGE_ROOT is required when the artifact storage is local"
+            )
+        if self.llm_timeout_seconds <= 0:
+            raise ValueError("ELSA_LLM_TIMEOUT_SECONDS must be greater than zero")
+        if self.llm_temperature < 0:
+            raise ValueError("ELSA_LLM_TEMPERATURE cannot be negative")
+        if self.llm_max_output_tokens >= self.llm_context_tokens:
+            # La ventana la comparten el prompt y la respuesta. Pedir una
+            # salida igual o mayor que el contexto no deja sitio para la
+            # pregunta ni para las evidencias: el servidor no lo rechaza,
+            # simplemente trunca, y el resultado es una respuesta sin
+            # fundamento que parece normal.
+            raise ValueError(
+                "ELSA_LLM_MAX_OUTPUT_TOKENS must be smaller than ELSA_LLM_CONTEXT_TOKENS: "
+                "the prompt and the answer share the same window"
             )
         if self.ingestion_max_uncompressed_bytes < self.ingestion_max_upload_bytes:
             raise ValueError(
