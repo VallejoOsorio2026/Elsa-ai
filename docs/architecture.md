@@ -391,7 +391,7 @@ segunda planta o un usuario con otro alcance.
 
 Dos capacidades del piloto no existen todavía, y ninguna se disfraza:
 
-- **Sin modelo de lenguaje.** `elsa.core.retrieval` busca literalmente los
+- **Sin modelo de lenguaje en el chat del piloto.** `elsa.core.retrieval` busca literalmente los
   términos de la pregunta en el BOM y el AMEF publicados, y la respuesta se
   compone con una plantilla. Cada resultado dice qué término lo produjo. La
   respuesta lleva `engine` e `is_generated` para que el cliente no tenga que
@@ -408,12 +408,19 @@ tiene que saber si el texto se reconoció o lo escribió una persona.
 
 ## Qué no existe todavía (a propósito)
 
-RAG, LLM real, OCR, embeddings, reranking, agentes, transcripción real, tablas
-de documentos, integración con el motor de búsqueda de Materiales, IH06/IW13,
-Centro de Control y despliegue. Los bloques anteriores dejan las fronteras
-preparadas (puertos, health por dependencia, migraciones versionadas, cadena
-de confianza y modelo de permisos) para que esos componentes lleguen sin
-romper la arquitectura.
+**LLM real**, OCR, reranking, agentes, transcripción real, integración con el
+motor de búsqueda de Materiales, IH06/IW13, Centro de Control y despliegue.
+Los bloques anteriores dejan las fronteras preparadas (puertos, health por
+dependencia, migraciones versionadas, cadena de confianza y modelo de
+permisos) para que esos componentes lleguen sin romper la arquitectura.
+
+La **capa de RAG sí existe** desde el Bloque 4.4
+([`rag-generacion.md`](rag-generacion.md), [ADR 0017](adr/0017-generacion-fundamentada-y-citas-verificables.md)):
+recuperación autorizada, contexto controlado, verificación de citas y contrato
+de respuesta. Lo que falta es el **proveedor**: no hay decisión registrada de
+modelo ni de dónde se ejecuta, así que el camino completo se prueba contra el
+puerto con un adaptador determinista y **no hay comando que responda preguntas
+de verdad**. Añadir uno contra el fake daría una demostración falsa.
 
 Los aportes del Bloque 3 se guardan **solo en memoria**: no hay adaptador de
 PostgreSQL ni migración, y por tanto no sobreviven a un reinicio. Es lo

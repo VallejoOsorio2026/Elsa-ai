@@ -18,6 +18,7 @@ __all__ = [
     "Channel",
     "ChannelHit",
     "Evidence",
+    "EvidenceRetrievalPort",
     "EvidenceSet",
     "EvidenceStrength",
     "LexicalSearchPort",
@@ -120,6 +121,26 @@ class EvidenceSet:
 
 ScoredProvenance = tuple[ChunkProvenance, float]
 """Un pasaje con la puntuación **propia** del canal que lo encontró."""
+
+
+@runtime_checkable
+class EvidenceRetrievalPort(Protocol):
+    """Recuperar evidencia autorizada para una consulta.
+
+    Lo implementa el servicio híbrido del Bloque 4.3. Existe como puerto para
+    que la capa de generación dependa del contrato y no de aquella clase: el
+    RAG no debe saber si detrás hay tres canales, uno o cinco, y menos aún
+    heredar sus dependencias de PostgreSQL para poder probarse.
+
+    Los alcances entran por la firma y no tienen valor por defecto, igual que
+    en los canales: quien recupera sin decir para quién, no recupera.
+    """
+
+    async def search(
+        self, *, query: str, scopes: Sequence[Scope], limit: int = 10
+    ) -> "EvidenceSet":
+        """Evidencia autorizada, ya fusionada y ordenada."""
+        ...
 
 
 @runtime_checkable
