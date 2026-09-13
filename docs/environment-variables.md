@@ -157,7 +157,7 @@ Estas variables solo dicen dónde escucha y con qué límites se le habla.
 | `ELSA_LLM_MAX_OUTPUT_TOKENS` | no | `512` | Techo de la respuesta. Debe ser **menor** que el contexto. |
 | `ELSA_LLM_TEMPERATURE` | no | `0` | Cero: la misma evidencia debe dar la misma respuesta. |
 | `ELSA_LLM_CONCURRENCY` | no | `1` | Generaciones simultáneas. Debe coincidir con el `--parallel` del servidor. |
-| `ELSA_LLM_ALLOW_REMOTE` | no | `false` | Permite una URL que no sea loopback. **Solo válido en DEV.** |
+| `ELSA_LLM_ALLOW_REMOTE` | no | `false` | Compatibilidad: `true` se rechaza; 4.5 es solo local. |
 | `ELSA_LLM_MODEL_PATH` | no | — | Ruta del `.gguf`. **Solo la leen los scripts de arranque.** |
 | `ELSA_LLAMA_SERVER_PATH` | no | — | Ruta del ejecutable `llama-server`. **Solo la leen los scripts.** |
 
@@ -169,11 +169,8 @@ Tres cosas que conviene no descubrir por las malas:
 - **Loopback no es una recomendación.** `llama-server` no lleva
   autenticación y este bloque no se la añade, porque mientras solo escuche en
   127.0.0.1 no la necesita. Una URL que no sea loopback detiene el arranque
-  con un error explícito; `ELSA_LLM_ALLOW_REMOTE=true` lo permite **solo en
-  DEV**, igual que `ELSA_DEBUG`, y cuando está activo `/health/ready` lo dice
-  en el detalle de la dependencia `llm`. Fuera de DEV, el prompt es evidencia
-  técnica autorizada de una persona concreta viajando hacia un servidor que no
-  pregunta quién llama: eso necesita su propio ADR.
+  con un error explícito. `ELSA_LLM_ALLOW_REMOTE=true` se rechaza también en
+  DEV. El cliente no usa proxies del entorno ni sigue redirecciones.
 - **El sondeo de salud no hereda el plazo de generación.** `/health/ready` es
   público, no autenticado y evalúa las dependencias en serie. Con 120 s,
   cualquiera podría retener un worker dos minutos por petición si el runtime

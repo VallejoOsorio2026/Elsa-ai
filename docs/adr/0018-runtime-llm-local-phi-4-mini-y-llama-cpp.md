@@ -120,12 +120,10 @@ pública de ELSA sigue siendo FastAPI.
 Una URL que no sea loopback detiene el arranque con un error explícito.
 `0.0.0.0` no cuenta como loopback: no es una dirección de destino, es «todas
 las interfaces», que es exactamente lo que no puede ocurrir por descuido.
-`ELSA_LLM_ALLOW_REMOTE=true` lo permite **solo en DEV**, igual que `debug`.
-Fuera de DEV el prompt es evidencia técnica autorizada de una persona concreta
-viajando por la red hacia un servidor que no pregunta quién llama; habilitarlo
-ahí es una decisión de arquitectura y necesita su propio ADR, no una variable
-de entorno. Cuando está activo, `/health/ready` lo declara en el detalle de la
-dependencia `llm`: una decisión de seguridad invisible es una que nadie revisa.
+Durante la validación de 4.5 se elimina la excepción remota: la instrucción de
+cierre exige generación local en todos los ambientes. `ELSA_LLM_ALLOW_REMOTE=true`
+se rechaza también en DEV. No se usan proxies del entorno ni redirecciones.
+El arranque exige `127.0.0.1` y restringe CORS al origen del propio runtime.
 
 Dos endpoints más se cierran al arrancar, y el segundo importa más de lo que
 parece:

@@ -280,72 +280,9 @@ def test_a_non_loopback_runtime_stops_the_container() -> None:
     assert "loopback" in str(error.value)
 
 
-def test_a_non_loopback_runtime_is_allowed_once_declared_in_dev() -> None:
-    settings = make_test_settings(
-        llm_backend=LLMBackend.LLAMA_CPP,
-        llm_base_url="http://192.168.1.40:8080",
-        llm_allow_remote=True,
-    )
-
-    llm = Container(settings).llm
-
-    assert isinstance(llm, LlamaCppAdapter)
-    assert llm.base_url == "http://192.168.1.40:8080"
-
-
-def test_a_non_loopback_runtime_is_refused_outside_dev() -> None:
-    """Fuera de DEV no se saca el runtime de loopback, como con `debug`.
-
-    `llama-server` no pregunta quién llama. Apuntarlo a otra máquina en TEST
-    pondría el prompt —que es evidencia técnica autorizada de una persona
-    concreta— a viajar por la red hacia un servidor abierto. Eso es una
-    decisión de arquitectura, y las decisiones de arquitectura se registran
-    en un ADR, no en una variable de entorno.
-    """
-    with pytest.raises(ValidationError) as error:
-        make_test_settings(
-            env=Environment.TEST,
-            llm_backend=LLMBackend.LLAMA_CPP,
-            llm_base_url="http://192.168.1.40:8080",
-            llm_allow_remote=True,
-            auth_provider="supabase",
-            materials_supabase_url="https://materials.example.test",
-            materials_api_key="sb_publishable_example",
-            permissions_backend="postgres",
-            database_url="postgresql://elsa@127.0.0.1/elsa",
-            artifact_storage_backend="local",
-            artifact_storage_root="/srv/elsa/artifacts",
-        )
-
-    assert "DEV environment" in str(error.value)
-
-
-async def test_health_says_so_when_the_runtime_is_not_on_loopback() -> None:
-    """Sacarlo de loopback tiene que dejar huella donde alguien mire.
-
-    Sin esto, la única forma de enterarse sería ejecutar la CLI `check`: ni el
-    arranque ni la salud lo mencionaban, y una decisión de seguridad invisible
-    es una que nadie revisa.
-    """
-    with FakeLlamaServer(health_status=200) as server:
-        port = server.base_url.rsplit(":", 1)[1]
-        container = Container(
-            make_test_settings(
-                llm_backend=LLMBackend.LLAMA_CPP,
-                # `localhost` sí es loopback, así que para esta comprobación
-                # hace falta que la configuración declare lo contrario.
-                llm_base_url=f"http://127.0.0.1:{port}",
-                llm_allow_remote=True,
-            )
-        )
-        try:
-            reports = {r.name: r for r in await container.health_reports()}
-        finally:
-            await container.aclose()
-
-    detail = reports["llm"].detail
-    assert detail is not None
-    assert "NOT loopback" in detail
+def test_remote_opt_in_is_rejected_in_dev() -> None:
+    with pytest.raises(ValidationError, match="ELSA_LLM_ALLOW_REMOTE"):
+        make_test_settings(llm_allow_remote=True)
 
 
 async def test_an_llm_adapter_that_cannot_be_probed_is_reported_as_a_double() -> None:

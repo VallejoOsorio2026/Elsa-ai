@@ -163,7 +163,12 @@ def _print_metrics(metrics: GenerationMetrics | None, elapsed: float) -> None:
     print(f"tokens entrada : {metrics.prompt_tokens}")
     print(f"tokens salida  : {metrics.completion_tokens}")
     if metrics.tokens_per_second is not None:
-        print(f"tokens/s       : {metrics.tokens_per_second:.1f} (medidos por llama-server)")
+        source = (
+            "medidos por llama-server"
+            if metrics.tokens_per_second_source == "server"
+            else "calculados con latencia HTTP, incluyen procesamiento del prompt"
+        )
+        print(f"tokens/s       : {metrics.tokens_per_second:.1f} ({source})")
 
 
 # ---------------------------------------------------------------------

@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Arranca el runtime de generación local de ELSA (llama-server + Phi-4-mini).
 
@@ -30,8 +30,7 @@
     Ruta de llama-server.exe. Por defecto, ELSA_LLAMA_SERVER_PATH del .env.
 
 .PARAMETER BindAddress
-    Interfaz de escucha. 127.0.0.1 por defecto, y cambiarlo exige -AllowRemote:
-    llama-server no lleva autenticación y este bloque no se la añade.
+    Interfaz de escucha. Solo se permite 127.0.0.1 en este bloque.
 
 .PARAMETER ContextSize
     Tokens de contexto. Por defecto, ELSA_LLM_CONTEXT_TOKENS del .env — NO un
@@ -62,8 +61,8 @@ param(
     [int]    $GpuLayers = 99,
     [string] $Device = 'Vulkan0',
     [string] $EnvFile = '.env',
-    [int]    $ReadyTimeoutSeconds = 180,
-    [switch] $AllowRemote
+    [ValidateRange(1, 3600)]
+    [int]    $ReadyTimeoutSeconds = 180
 )
 
 Set-StrictMode -Version Latest
@@ -160,16 +159,15 @@ if (-not (Test-Path -LiteralPath $LlamaServer)) {
     throw "No existe llama-server: $LlamaServer"
 }
 
-$loopback = @('127.0.0.1', 'localhost', '::1')
-if (($loopback -notcontains $BindAddress) -and (-not $AllowRemote)) {
-    throw @"
-$BindAddress no es loopback. llama-server NO lleva autenticación: exponerlo a
-la LAN deja la generación abierta a cualquiera que alcance el puerto. La
-superficie pública de ELSA es FastAPI, no este servidor.
-Si aun así hace falta, vuelve a ejecutar con -AllowRemote y declara también
-ELSA_LLM_ALLOW_REMOTE=true en el .env.
-"@
+if ($BindAddress -ne '127.0.0.1') {
+    throw 'Bloque 4.5: llama-server solo puede escuchar en 127.0.0.1.'
 }
+if ($Port -lt 1 -or $Port -gt 65535 -or $ContextSize -lt 1 -or $Parallel -lt 1 -or $Threads -lt 1) {
+    throw 'Puerto, contexto, concurrencia e hilos deben ser positivos y válidos.'
+}
+# Un puerto ocupado no debe confundirse con readiness de nuestro proceso.
+$listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
+try { $listener.Start() } finally { $listener.Stop() }
 
 if (Test-Path -LiteralPath $PidFile) {
     $previous = Get-Content -LiteralPath $PidFile -Raw | ConvertFrom-Json
@@ -205,11 +203,15 @@ $arguments = @(
     '--alias', $Alias,
     '--host', $BindAddress,
     '--port', $Port,
-    '--ctx-size', $ContextSize,
+    '--ctx-size', ($ContextSize * $Parallel),
     '--parallel', $Parallel,
     '--threads', $Threads,
     '--n-gpu-layers', $GpuLayers,
     '--device', $Device,
+    '--no-context-shift',
+    '--cors-origins', "http://127.0.0.1:$Port",
+    '--no-cors-credentials',
+    '--no-agent',
     '--no-webui',
     '--no-slots'
 )
@@ -225,13 +227,20 @@ Write-Host "  log          : $LogFile  (puede contener texto de evidencias)"
 Write-Host ""
 
 $startedAt = Get-Date
-$process = Start-Process -FilePath $LlamaServer -ArgumentList $arguments `
+# Start-Process une ArgumentList con espacios; cada argumento necesita comillas.
+$quotedArguments = foreach ($argument in $arguments) {
+    $value = [string] $argument
+    if ($value.Contains('"')) { throw 'Un argumento contiene comillas no admitidas.' }
+    '"' + $value + '"'
+}
+$process = Start-Process -FilePath $LlamaServer -ArgumentList $quotedArguments `
     -RedirectStandardOutput $LogFile -RedirectStandardError "$LogFile.err" `
-    -WindowStyle Minimized -PassThru
+    -WindowStyle Hidden -PassThru
 
 [ordered]@{
     ProcessId   = $process.Id
     StartTime   = $process.StartTime.ToString('o')
+    ExecutablePath = (Resolve-Path -LiteralPath $LlamaServer).Path
     BaseUrl     = "http://${BindAddress}:$Port"
     ModelPath   = $ModelPath
     ContextSize = $ContextSize
@@ -257,7 +266,14 @@ while ((Get-Date) -lt $deadline) {
     }
     try {
         $response = Invoke-WebRequest -Uri $healthUrl -UseBasicParsing -TimeoutSec 5
-        if ($response.StatusCode -eq 200) { $ready = $true; break }
+        if ($response.StatusCode -eq 200 -and -not $process.HasExited) {
+            $props = Invoke-RestMethod -Uri "http://${BindAddress}:$Port/props" -TimeoutSec 5
+            if ($props.default_generation_settings.n_ctx -ne $ContextSize -or $props.total_slots -ne $Parallel) {
+                throw 'El runtime no coincide con el contexto/concurrencia configurados.'
+            }
+            $ready = $true
+            break
+        }
     } catch {
         # Todavía no escucha, o sigue cargando. Reintentar.
     }

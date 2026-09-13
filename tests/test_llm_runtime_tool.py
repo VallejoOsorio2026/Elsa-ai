@@ -210,7 +210,8 @@ async def test_demo_reports_a_stopped_runtime_as_error_not_as_missing_evidence(
     settings = make_test_settings(
         llm_backend=LLMBackend.LLAMA_CPP,
         llm_base_url=closed_port_url(),
-        llm_timeout_seconds=2.0,
+        # Windows puede tardar más de 2 s en rechazar un puerto cerrado.
+        llm_timeout_seconds=10.0,
     )
     args = parse("demo", "¿cada cuánto se lubrica?")
 

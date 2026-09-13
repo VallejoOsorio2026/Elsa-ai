@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Detiene el llama-server que arrancó ELSA. Solo ese.
 
@@ -83,6 +83,14 @@ no al llama-server que arrancó ELSA. No se detiene nada.
 "@
     Remove-Item -LiteralPath $PidFile -Force
     exit 0
+}
+
+if ($process.ProcessName -ne 'llama-server') {
+    throw 'El proceso registrado no es llama-server. No se detiene nada.'
+}
+if (($record.PSObject.Properties.Name -contains 'ExecutablePath') -and
+    $process.Path -ne $record.ExecutablePath) {
+    throw 'El ejecutable no coincide con el registrado por ELSA. No se detiene nada.'
 }
 
 Write-Host "Deteniendo llama-server de ELSA (PID $($process.Id), $($process.ProcessName))..."

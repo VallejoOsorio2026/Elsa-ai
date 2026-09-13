@@ -35,6 +35,7 @@ transporte a las excepciones del puerto.
 
 import asyncio
 import logging
+import math
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -101,6 +102,8 @@ class GenerationMetrics:
     queued_seconds: float
     """Cuánto se esperó por el semáforo de concurrencia antes de pedir nada."""
 
+    tokens_per_second_source: str = "server"
+
 
 class LlamaCppAdapter:
     """Habla con un ``llama-server`` ya arrancado. No carga ningún modelo."""
@@ -122,26 +125,34 @@ class LlamaCppAdapter:
         if not base.startswith(("http://", "https://")):
             raise LLMConfigurationError(f"the llama-server URL needs an http(s) scheme: {base!r}")
         base = base.rstrip("/")
-        if not urlsplit(base).hostname:
+        try:
+            parts = urlsplit(base)
+            _ = parts.port
+        except ValueError:
+            raise LLMConfigurationError(
+                "the llama-server URL has an invalid host or port"
+            ) from None
+        if parts.username or parts.password or parts.query or parts.fragment or parts.path:
+            raise LLMConfigurationError(
+                "the llama-server URL must be an origin without credentials"
+            )
+        if not parts.hostname:
             raise LLMConfigurationError(f"the llama-server URL has no host: {base!r}")
-        if not allow_remote and not is_loopback(base):
-            # El servidor no tiene autenticación porque no la necesita
-            # mientras solo escuche en loopback. Apuntarlo a otra máquina
-            # cambia esa premisa entera, así que no puede ser un descuido de
-            # configuración: hay que declararlo.
+        if allow_remote or not is_loopback(base):
+            # Este bloque no admite generación remota, tampoco en DEV.
             raise LLMConfigurationError(
                 f"the llama-server URL must be loopback ({base!r} is not); "
-                "it has no authentication, so exposing it is an explicit decision"
+                "remote generation is not supported in block 4.5"
             )
         if not model.strip():
             raise LLMConfigurationError("the logical model identifier cannot be empty")
-        if timeout_seconds <= 0:
+        if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise LLMConfigurationError("the llama-server timeout must be greater than zero")
-        if health_timeout_seconds <= 0:
+        if not math.isfinite(health_timeout_seconds) or health_timeout_seconds <= 0:
             raise LLMConfigurationError("the health probe timeout must be greater than zero")
         if max_output_tokens <= 0:
             raise LLMConfigurationError("the maximum output tokens must be greater than zero")
-        if temperature < 0:
+        if not math.isfinite(temperature) or temperature < 0:
             raise LLMConfigurationError("the temperature cannot be negative")
         if concurrency < 1:
             raise LLMConfigurationError("the concurrency must be at least one")
@@ -161,7 +172,8 @@ class LlamaCppAdapter:
         # compiten. Se limita aquí para que el límite sea el mismo número
         # que se le pasó al servidor y esté declarado en un sitio.
         self._gate = asyncio.Semaphore(concurrency)
-        self._http = http_client or httpx.AsyncClient()
+        # Un proxy del entorno nunca debe recibir el contexto autorizado.
+        self._http = http_client or httpx.AsyncClient(trust_env=False, follow_redirects=False)
         self._owns_http = http_client is None
 
     # -----------------------------------------------------------------
@@ -216,6 +228,17 @@ class LlamaCppAdapter:
         try:
             response = await self._http.get(
                 f"{self._base_url}{HEALTH_PATH}", timeout=self._health_timeout_seconds
+            )
+        except httpx.ConnectTimeout as error:
+            # Vencer **estableciendo la conexión** es no encontrar a nadie, no
+            # encontrar a alguien lento: con el runtime apagado, Windows deja
+            # el SYN sin contestar en vez de rechazarlo, así que el mismo
+            # servidor caído que en Linux da `ConnectError` aquí da
+            # `ConnectTimeout`. Como `ConnectTimeout` hereda de
+            # `TimeoutException`, va antes: si no, el sistema operativo
+            # decidiría el diagnóstico.
+            raise LLMUnavailableError(f"llama-server is not reachable at {self._base_url}") from (
+                error
             )
         except httpx.TimeoutException as error:
             raise LLMTimeoutError(f"llama-server did not answer {HEALTH_PATH} in time") from error
@@ -284,6 +307,7 @@ class LlamaCppAdapter:
             completion_tokens=completion_tokens,
             tokens_per_second=_tokens_per_second(data, completion_tokens, duration),
             queued_seconds=queued,
+            tokens_per_second_source=("server" if _server_rate(data) is not None else "wall_clock"),
         )
         _logger.info(
             "llama-server generation finished",
@@ -354,6 +378,14 @@ class LlamaCppAdapter:
         url = f"{self._base_url}{CHAT_COMPLETIONS_PATH}"
         try:
             response = await self._http.post(url, json=payload, timeout=self._timeout_seconds)
+        except httpx.ConnectTimeout as error:
+            # Igual que en el sondeo de salud: un plazo vencido antes de que
+            # haya conexión es el runtime apagado, y se diagnostica arrancando
+            # el servidor, no ampliando el plazo. Va antes de
+            # `TimeoutException`, de la que hereda.
+            raise LLMUnavailableError(f"llama-server is not reachable at {self._base_url}") from (
+                error
+            )
         except httpx.TimeoutException as error:
             raise LLMTimeoutError(
                 f"llama-server did not answer within {self._timeout_seconds}s"
@@ -458,13 +490,24 @@ def _tokens_per_second(
     prompt y la red, así que da un número menor; se usa como respaldo cuando
     el servidor no informa, y no se mezclan.
     """
-    timings = data.get("timings")
-    if isinstance(timings, dict):
-        measured = timings.get("predicted_per_second")
-        if isinstance(measured, int | float) and measured > 0:
-            return float(measured)
+    measured = _server_rate(data)
+    if measured is not None:
+        return measured
     if completion_tokens and duration > 0:
         return completion_tokens / duration
+    return None
+
+
+def _server_rate(data: dict[str, Any]) -> float | None:
+    timings = data.get("timings")
+    measured = timings.get("predicted_per_second") if isinstance(timings, dict) else None
+    if (
+        isinstance(measured, int | float)
+        and not isinstance(measured, bool)
+        and math.isfinite(measured)
+        and measured > 0
+    ):
+        return float(measured)
     return None
 
 

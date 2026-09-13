@@ -11,6 +11,7 @@ base de ELSA, token de bootstrap) se declaran como ``SecretStr``: no se
 imprimen al representar la configuración ni aparecen en los logs.
 """
 
+import math
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
@@ -283,19 +284,7 @@ class Settings(BaseSettings):
     """Generaciones simultáneas permitidas. Debe coincidir con ``--parallel``."""
 
     llm_allow_remote: bool = False
-    """Permite apuntar a un ``llama-server`` que no sea loopback. **Solo en DEV.**
-
-    ``llama-server`` no lleva autenticación y este bloque no se la añade,
-    porque mientras solo escuche en 127.0.0.1 no la necesita. Sacarlo de ahí
-    cambia esa premisa entera: el prompt —que es evidencia técnica autorizada
-    de una persona concreta— pasaría a viajar por la red hacia un servidor
-    que no pregunta quién llama.
-
-    Por eso queda restringido a DEV, igual que ``debug``: en DEV sirve para
-    probar contra otra máquina de laboratorio, y fuera de DEV habilitarlo es
-    una decisión de arquitectura que necesita su propio ADR, no una variable
-    de entorno.
-    """
+    """Compatibilidad con configuración previa: true falla; 4.5 es solo local."""
 
     # ---------------------------------------------------------------
     # Almacenamiento privado de artefactos e ingesta
@@ -618,17 +607,16 @@ class Settings(BaseSettings):
             raise ValueError(
                 "ELSA_ARTIFACT_STORAGE_ROOT is required when the artifact storage is local"
             )
-        if self.llm_timeout_seconds <= 0:
+        if not math.isfinite(self.llm_timeout_seconds) or self.llm_timeout_seconds <= 0:
             raise ValueError("ELSA_LLM_TIMEOUT_SECONDS must be greater than zero")
-        if self.llm_health_timeout_seconds <= 0:
+        if (
+            not math.isfinite(self.llm_health_timeout_seconds)
+            or self.llm_health_timeout_seconds <= 0
+        ):
             raise ValueError("ELSA_LLM_HEALTH_TIMEOUT_SECONDS must be greater than zero")
-        if self.llm_allow_remote and not is_dev:
-            raise ValueError(
-                "a non-loopback llama-server is only allowed in the DEV environment; "
-                "llama-server has no authentication, so the prompt —authorised plant "
-                "evidence— would travel to a server that does not ask who is calling"
-            )
-        if self.llm_temperature < 0:
+        if self.llm_allow_remote:
+            raise ValueError("ELSA_LLM_ALLOW_REMOTE is forbidden: block 4.5 is local only")
+        if not math.isfinite(self.llm_temperature) or self.llm_temperature < 0:
             raise ValueError("ELSA_LLM_TEMPERATURE cannot be negative")
         if self.llm_max_output_tokens >= self.llm_context_tokens:
             # La ventana la comparten el prompt y la respuesta. Pedir una

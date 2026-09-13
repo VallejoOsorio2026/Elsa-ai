@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Comprueba que el runtime responde y mide una generación mínima.
 

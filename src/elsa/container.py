@@ -337,10 +337,6 @@ class Container:
         # toma también la auditoría de cada respuesta. Preguntárselo al
         # adaptador exigiría que el puerto lo declarase, y no es asunto suyo.
         detail = f"{self.settings.llm_backend.value} runtime, model {self.settings.llm_model}"
-        if self.settings.llm_allow_remote:
-            # Que el runtime esté fuera de loopback tiene que dejar huella en
-            # algún sitio que alguien mire. `/health/ready` es ese sitio.
-            detail += " (NOT loopback: ELSA_LLM_ALLOW_REMOTE is on)"
         return DependencyReport(
             name="llm", status=DependencyStatus.OK, critical=False, detail=detail
         )

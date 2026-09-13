@@ -311,13 +311,10 @@ caído, `/health/ready` reporta el sistema como `degraded`, no como `down`.
 | Superficie pública de ELSA | FastAPI, como siempre |
 | `0.0.0.0` | **no** cuenta como loopback: es «todas las interfaces» |
 
-Apuntar ELSA a un `llama-server` que no sea loopback detiene el arranque con
-un error explícito. `ELSA_LLM_ALLOW_REMOTE=true` lo permite **solo en DEV**,
-igual que `ELSA_DEBUG`, y cuando está activo `/health/ready` lo declara en el
-detalle de la dependencia `llm`, para que la decisión no sea invisible. Fuera
-de DEV el prompt es evidencia técnica autorizada de una persona concreta
-viajando hacia un servidor que no pregunta quién llama: eso necesita su propio
-ADR, no una variable de entorno.
+Apuntar ELSA a un runtime remoto detiene el arranque. No existe excepción
+para DEV: `ELSA_LLM_ALLOW_REMOTE=true` se rechaza. El cliente ignora proxies
+del entorno y no sigue redirecciones. El script solo acepta `127.0.0.1` y
+restringe CORS al origen del propio runtime; el navegador no consume el LLM.
 
 Dos cosas más que el arranque cierra por defecto:
 

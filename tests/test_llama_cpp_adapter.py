@@ -226,6 +226,88 @@ async def test_a_stopped_server_is_reported_as_unavailable() -> None:
     assert not isinstance(error.value, LLMTimeoutError)
 
 
+# ---------------------------------------------------------------------
+# Qué plazo vencido es cuál
+# ---------------------------------------------------------------------
+#
+# `httpx.ConnectTimeout` hereda de `httpx.TimeoutException`, así que un
+# `except TimeoutException` puesto antes se los traga a los dos. La diferencia
+# importa: vencer **estableciendo la conexión** es el runtime apagado —en
+# Windows un puerto cerrado deja el SYN sin contestar en vez de rechazarlo, y
+# es lo que `closed_port_url()` produce allí de forma consistente— mientras que
+# vencer **esperando la respuesta** es el runtime lento. El primero se arregla
+# arrancando `llama-server`; el segundo, revisando el plazo o el tamaño de la
+# generación.
+#
+# Aquí se inyecta el cliente HTTP porque la excepción concreta la elige el
+# sistema operativo: en Linux el mismo puerto cerrado da `ConnectError`, y una
+# prueba que dependiera de eso comprobaría el kernel de la máquina, no la
+# traducción del adaptador. Lo que se fija es el contrato: dada esta excepción
+# de httpx, esta excepción del puerto.
+
+
+def adapter_raising(error: Exception) -> tuple[LlamaCppAdapter, httpx.AsyncClient]:
+    """Un adaptador cuyo transporte falla siempre con `error`.
+
+    Devuelve también el cliente porque lo cierra quien lo crea: el adaptador
+    solo cierra el suyo propio.
+    """
+
+    def _fail(request: httpx.Request) -> httpx.Response:
+        raise error
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(_fail))
+    instance = LlamaCppAdapter(
+        base_url="http://127.0.0.1:8080",
+        model="phi-4-mini-instruct",
+        http_client=client,
+    )
+    return instance, client
+
+
+async def test_a_connect_timeout_is_unavailable_and_not_a_timeout() -> None:
+    """El runtime apagado es indisponibilidad aunque el socket venza el plazo."""
+    instance, client = adapter_raising(httpx.ConnectTimeout("timed out"))
+    try:
+        with pytest.raises(LLMUnavailableError) as error:
+            await instance.complete(CONVERSATION)
+    finally:
+        await client.aclose()
+
+    assert not isinstance(error.value, LLMTimeoutError)
+
+
+async def test_a_read_timeout_is_reported_as_a_timeout() -> None:
+    """Conectó y se quedó esperando: eso sí es un plazo vencido."""
+    instance, client = adapter_raising(httpx.ReadTimeout("timed out"))
+    try:
+        with pytest.raises(LLMTimeoutError):
+            await instance.complete(CONVERSATION)
+    finally:
+        await client.aclose()
+
+
+async def test_health_treats_a_connect_timeout_as_unavailable() -> None:
+    """El sondeo hace la misma distinción que la generación."""
+    instance, client = adapter_raising(httpx.ConnectTimeout("timed out"))
+    try:
+        with pytest.raises(LLMUnavailableError) as error:
+            await instance.check_health()
+    finally:
+        await client.aclose()
+
+    assert not isinstance(error.value, LLMTimeoutError)
+
+
+async def test_health_treats_a_read_timeout_as_a_timeout() -> None:
+    instance, client = adapter_raising(httpx.ReadTimeout("timed out"))
+    try:
+        with pytest.raises(LLMTimeoutError):
+            await instance.check_health()
+    finally:
+        await client.aclose()
+
+
 async def test_an_http_error_is_reported_as_unavailable() -> None:
     """Caso 8: un 500 del runtime es un fallo técnico, no una respuesta."""
     with FakeLlamaServer(status_code=500, raw_body='{"error":"context overflow"}') as server:
@@ -550,11 +632,9 @@ def test_listening_on_every_interface_is_not_loopback() -> None:
         LlamaCppAdapter(base_url="http://0.0.0.0:8080", model="phi-4-mini-instruct")
 
 
-def test_a_non_loopback_url_is_allowed_only_when_declared() -> None:
-    instance = LlamaCppAdapter(
-        base_url="http://10.0.0.5:8080", model="phi-4-mini-instruct", allow_remote=True
-    )
-    assert instance.base_url == "http://10.0.0.5:8080"
+def test_remote_opt_in_is_rejected_even_in_the_adapter() -> None:
+    with pytest.raises(LLMConfigurationError, match="loopback"):
+        LlamaCppAdapter(model="phi", base_url="http://192.168.1.40:8080", allow_remote=True)
 
 
 def test_loopback_names_are_recognised() -> None:
@@ -590,3 +670,39 @@ def test_invalid_runtime_options_fail_loudly(overrides: dict[str, object], expec
         LlamaCppAdapter(**options)  # type: ignore[arg-type]
 
     assert expected in str(error.value)
+
+
+async def test_environment_proxy_never_receives_evidence(monkeypatch: pytest.MonkeyPatch) -> None:
+    with FakeLlamaServer(responses=[completion_body("local")]) as server:
+        with FakeLlamaServer(responses=[completion_body("proxy")]) as proxy:
+            monkeypatch.setenv("HTTP_PROXY", proxy.base_url)
+            monkeypatch.setenv("ALL_PROXY", proxy.base_url)
+            monkeypatch.setenv("NO_PROXY", "")
+            llm = adapter(server)
+            try:
+                result = await llm.complete(CONVERSATION)
+            finally:
+                await llm.aclose()
+            assert result.content == "local"
+            assert not proxy.requests
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:bad",
+        "http://127.0.0.1:65536",
+        "http://user:secret@127.0.0.1",
+        "http://127.0.0.1?host=remote",
+    ],
+)
+def test_invalid_origin_fails_before_http(url: str) -> None:
+    with pytest.raises(LLMConfigurationError):
+        LlamaCppAdapter(model="phi", base_url=url)
+
+
+@pytest.mark.parametrize("field", ["timeout_seconds", "health_timeout_seconds", "temperature"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
+def test_nonfinite_runtime_parameters_are_rejected(field: str, value: float) -> None:
+    with pytest.raises(LLMConfigurationError):
+        LlamaCppAdapter(model="phi", **{field: value})  # type: ignore[arg-type]
