@@ -39,7 +39,7 @@ from elsa.bench.adapters.sentence_transformers import (
 from elsa.bench.corpus import build_corpus
 from elsa.bench.goldenset import GoldenSetError, load_golden_set
 from elsa.bench.ports import ModelUnavailableError
-from elsa.bench.report import render_json, render_markdown
+from elsa.bench.report import render_json, render_markdown, render_query_diagnostics
 from elsa.bench.retrievers import LexicalRetriever, TrigramRetriever
 from elsa.bench.runner import BenchmarkRun, run_dense, run_fusion, run_retriever
 
@@ -166,10 +166,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "informe.json").write_text(
-        render_json(runs, unmeasured=unmeasured), encoding="utf-8"
+        render_json(runs, golden=golden, unmeasured=unmeasured), encoding="utf-8"
     )
     (args.out / "informe.md").write_text(
         render_markdown(runs, unmeasured=unmeasured), encoding="utf-8"
+    )
+    # Comparación consulta por consulta: un promedio no dice *cuál* se degradó.
+    (args.out / "diagnostico.md").write_text(
+        render_query_diagnostics(runs, golden), encoding="utf-8"
     )
 
     print(

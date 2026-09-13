@@ -134,6 +134,50 @@ produjo y les aplica el mismo RRF con la misma constante, así que medir el
 híbrido no cuesta una segunda pasada de inferencia ni puede dar un resultado
 distinto al del canal que fusiona.
 
+### Qué guarda el informe, y por qué
+
+`informe.json` conserva los **rankings por consulta** de cada corrida, no solo
+los promedios. Un promedio dice que algo empeoró; no dice **cuál** consulta ni
+por qué, y sin eso auditar una fusión obliga a volver a ejecutar el modelo.
+
+El conjunto dorado —texto, eje, `must_retrieve` y `must_not_retrieve`— se
+escribe **una sola vez** bajo `golden`, y los rankings solo cruzan por
+`query_id`: repetirlo por corrida multiplicaría el archivo por el número de
+recuperadores sin añadir un dato.
+
+```json
+{
+  "golden": {"fingerprint": "...", "queries": [{"id": "...", "text": "...",
+             "axis": "synonyms", "must_retrieve": {"chunk": 2}, "must_not_retrieve": []}]},
+  "runs": [{"metadata": {...}, "scoreboard": {...},
+            "rankings": [{"query_id": "...",
+                          "ranked": [{"rank": 1, "chunk_id": "...", "score": 2.85}]}]}]
+}
+```
+
+Junto a él se escribe `diagnostico.md`, que muestra para cada consulta qué puso
+primero cada corrida y en qué posición quedó lo esperado. **Presenta los datos;
+no saca conclusiones.**
+
+### Abstención de una fusión: `N/A`, no un número
+
+El banco mide abstención con un umbral fijo sobre la puntuación del primer
+resultado. Ese umbral **no significa nada sobre una suma de recíprocos**: el
+valor máximo posible de RRF con dos canales y `k=60` es `2/61 ≈ 0,033`, así que
+toda consulta sin respuesta quedaría por debajo de cualquier umbral pensado
+para coseno y el resultado sería `1,000` — un artefacto, no una medición.
+
+Una corrida de fusión reporta `abstention_rate = null` y `N/A — no calibrada`.
+No se inventa un umbral: RRF no puntúa similitud. Para los recuperadores donde
+el umbral sí tiene el significado que tenía, nada cambia.
+
+### Identidad auditable
+
+Cada fusión se nombra con lo que fusiona y con la constante —
+`fusion-rrf(lexical-bm25+BAAI/bge-m3,k=60)` — en el JSON, en el Markdown, en
+las tablas por eje y en las de coste. Antes las dos fusiones aparecían ambas
+como `fusion-rrf(k=60)` y distinguirlas exigía conocer el orden de ejecución.
+
 Lo que sí se comprobó aquí, con el control determinista en lugar del modelo
 denso, es que **la fusión es reproducible** y que RRF **diluye cuando un canal
 es débil**: fusionar BM25 con el control baja `recall@1` de 0,661 a 0,559. Es

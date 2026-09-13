@@ -37,7 +37,39 @@ class BenchmarkRun:
             "metadata": dataclasses.asdict(self.metadata),
             "identity": dict(self.metadata.identity()),
             "scoreboard": self.scoreboard.as_dict(),
+            "rankings": self.rankings(),
         }
+
+    def rankings(self) -> list[dict[str, object]]:
+        """Lo que el recuperador devolvió, consulta por consulta.
+
+        Sin esto el informe solo permite comparar promedios, y un promedio no
+        dice **qué** consulta se degradó ni por qué. Persistirlo es lo que
+        permite auditar una fusión —o reconstruirla— sin volver a ejecutar
+        inferencia, que con un modelo real cuesta minutos de CPU.
+
+        El texto de la consulta, su eje y lo que se esperaba de ella **no** se
+        repiten aquí: viven una sola vez en el bloque `golden` del informe, y
+        se cruzan por `query_id`.
+        """
+        return [
+            {
+                "query_id": query_id,
+                "ranked": [
+                    {
+                        "rank": position,
+                        "chunk_id": chunk_id,
+                        "score": (
+                            round(result.scores[position - 1], 6)
+                            if position <= len(result.scores)
+                            else None
+                        ),
+                    }
+                    for position, chunk_id in enumerate(result.ranked, start=1)
+                ],
+            }
+            for query_id, result in sorted(self.results.items())
+        ]
 
 
 def hardware_description() -> dict[str, object]:
@@ -267,12 +299,16 @@ def run_fusion(
     """
     if len(runs) < 2:
         raise ValueError("fusion needs at least two runs")
-    names = "+".join(run.metadata.retriever for run in runs)
+    # El nombre lleva qué se fusionó y con qué constante, para que cada fila
+    # del informe se lea sola: sin esto, dos fusiones distintas aparecían
+    # ambas como `fusion-rrf(k=60)` y había que conocer el orden de ejecución.
+    names = "+".join(run.metadata.model_name for run in runs)
+    label = f"fusion-rrf({names},k={k})"
     results = fuse_rankings([run.results for run in runs], golden, k=k)
     hardware = hardware_description()
     metadata = RunMetadata(
-        retriever=f"fusion-rrf({names})",
-        model_name=f"fusion-rrf(k={k})",
+        retriever=label,
+        model_name=label,
         revision="-",
         dimension=0,
         normalized=False,
@@ -292,4 +328,8 @@ def run_fusion(
             "No vuelve a ejecutar ningun modelo.",
         ),
     )
-    return BenchmarkRun(metadata=metadata, scoreboard=score_run(golden, results), results=results)
+    return BenchmarkRun(
+        metadata=metadata,
+        scoreboard=score_run(golden, results, abstention_threshold=None),
+        results=results,
+    )

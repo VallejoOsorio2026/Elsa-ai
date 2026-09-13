@@ -10,9 +10,16 @@ import hashlib
 import json
 from collections.abc import Sequence
 
+from elsa.bench.model import GoldenQuery, GoldenSet
 from elsa.bench.runner import BenchmarkRun
 
-__all__ = ["comparison_fingerprint", "render_json", "render_markdown"]
+__all__ = [
+    "comparison_fingerprint",
+    "golden_block",
+    "render_json",
+    "render_markdown",
+    "render_query_diagnostics",
+]
 
 
 def comparison_fingerprint(runs: Sequence[BenchmarkRun]) -> str:
@@ -28,20 +35,72 @@ def comparison_fingerprint(runs: Sequence[BenchmarkRun]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def render_json(runs: Sequence[BenchmarkRun], *, unmeasured: Sequence[dict[str, str]] = ()) -> str:
+def golden_block(golden: GoldenSet) -> dict[str, object]:
+    """El conjunto dorado, **una sola vez** en el informe.
+
+    Los rankings de cada corrida solo guardan `query_id`; el texto, el eje y
+    lo que se esperaba viven aquí y se cruzan por ese identificador. Repetirlo
+    por corrida multiplicaría el archivo por el número de recuperadores sin
+    añadir un solo dato.
+    """
+    return {
+        "fingerprint": golden.fingerprint,
+        "queries": [
+            {
+                "id": query.id,
+                "text": query.text,
+                "axis": query.axis.value,
+                "match_kind": query.match_kind.value,
+                "difficulty": query.difficulty.value,
+                "is_diagnostic": query.is_diagnostic,
+                "is_confusability": query.is_confusability,
+                # `relevant` es la relevancia graduada: 2 responde, 1 parcial.
+                "must_retrieve": dict(query.relevant),
+                "must_not_retrieve": list(query.must_not_retrieve),
+            }
+            for query in golden.queries
+        ],
+    }
+
+
+def render_json(
+    runs: Sequence[BenchmarkRun],
+    *,
+    golden: GoldenSet | None = None,
+    unmeasured: Sequence[dict[str, str]] = (),
+) -> str:
+    payload: dict[str, object] = {
+        "tool": "embedding-benchmark",
+        "comparison_fingerprint": comparison_fingerprint(runs),
+    }
+    if golden is not None:
+        payload["golden"] = golden_block(golden)
+    payload["runs"] = [run.as_dict() for run in runs]
+    payload["unmeasured_candidates"] = list(unmeasured)
     return (
         json.dumps(
-            {
-                "tool": "embedding-benchmark",
-                "comparison_fingerprint": comparison_fingerprint(runs),
-                "runs": [run.as_dict() for run in runs],
-                "unmeasured_candidates": list(unmeasured),
-            },
+            payload,
             indent=2,
             ensure_ascii=False,
         )
         + "\n"
     )
+
+
+def _abstention_cell(run: BenchmarkRun) -> str:
+    """`N/A` cuando el umbral no significa nada sobre esta puntuación.
+
+    Distinguirlo de un guion importa: un guion se lee como «no había consultas
+    que medir», y aquí lo que ocurre es que la métrica **no aplica**. Una
+    fusión RRF suma recíprocos, no similitudes, así que cualquier umbral
+    pensado para coseno la marcaría siempre como abstenida.
+    """
+    rate = run.scoreboard.abstention_rate
+    if rate is not None:
+        return f"{rate:.3f}"
+    if any("NOT calibrated" in note for note in run.scoreboard.notes):
+        return "N/A — no calibrada"
+    return "—"
 
 
 def _row(label: str, run: BenchmarkRun) -> str:
@@ -117,10 +176,7 @@ def render_markdown(
             s.confusion_at_5 for s in run.scoreboard.per_axis if s.confusion_at_5 is not None
         ]
         average = f"{sum(confusions) / len(confusions):.3f}" if confusions else "—"
-        rate = run.scoreboard.abstention_rate
-        lines.append(
-            f"| {run.metadata.model_name} | {average} | {'—' if rate is None else f'{rate:.3f}'} |"
-        )
+        lines.append(f"| {run.metadata.model_name} | {average} | {_abstention_cell(run)} |")
 
     lines += [
         "",
@@ -164,4 +220,51 @@ def render_markdown(
         lines += ["## Notas de la medición", ""]
         lines += [f"- {note}" for note in notes]
         lines.append("")
+    return "\n".join(lines)
+
+
+def _rank_of_expected(query: GoldenQuery, ranked: Sequence[str]) -> int | None:
+    """Posición del primer chunk esperado, o `None` si no salió."""
+    for position, chunk_id in enumerate(ranked, start=1):
+        if chunk_id in query.relevant:
+            return position
+    return None
+
+
+def render_query_diagnostics(runs: Sequence[BenchmarkRun], golden: GoldenSet) -> str:
+    """Comparación consulta por consulta entre corridas.
+
+    Existe porque un promedio no dice **qué** consulta se degradó. Aquí se ve,
+    para cada una, qué puso primero cada corrida y en qué posición quedó lo que
+    se esperaba — que es lo que permite clasificar después dónde una fusión
+    ayuda y dónde estorba.
+
+    **No saca conclusiones ni recomienda nada**: presenta los datos.
+    """
+    lines = [
+        "# Diagnóstico por consulta",
+        "",
+        "Qué puso primero cada corrida, y en qué posición quedó lo esperado.",
+        "`—` significa que lo esperado **no** apareció en la lista devuelta.",
+        "",
+        "| Consulta | Eje | " + " | ".join(f"1.º {r.metadata.model_name}" for r in runs) + " |",
+        "|---" * (len(runs) + 2) + "|",
+    ]
+    for query in golden.queries:
+        if not query.expects_an_answer:
+            continue
+        cells = []
+        for run in runs:
+            result = run.results.get(query.id)
+            ranked = list(result.ranked) if result else []
+            position = _rank_of_expected(query, ranked)
+            top = ranked[0][:8] if ranked else "—"
+            cells.append(f"`{top}` (esperado en {position or '—'})")
+        lines.append(f"| {query.text[:52]} | {query.axis.value} | " + " | ".join(cells) + " |")
+    lines += [
+        "",
+        "Los identificadores van truncados a 8 caracteres para que la tabla se lea;",
+        "los completos están en `informe.json`, bajo `rankings` de cada corrida.",
+        "",
+    ]
     return "\n".join(lines)
