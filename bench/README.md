@@ -17,7 +17,7 @@ Nada de aquí procede de PAPELSA.
 uv run python -m elsa.tools.embedding_benchmark --out bench/resultados
 ```
 
-Cómo se mide, qué se midió y qué quedó sin medir:
+Cómo se mide, qué se midió y qué se decidió con ello:
 [`docs/embedding-benchmark.md`](../docs/embedding-benchmark.md).
 
 El informe por defecto se escribe en `resultados/`, que **sí** se versiona:
