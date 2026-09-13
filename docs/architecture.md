@@ -23,7 +23,7 @@ FastAPI (este repositorio)
         │
         ├──► Supabase Materiales: JWKS + perfil propio  [adaptador real]
         ├──► Supabase ELSA (permisos y auditoría)       [adaptador real]
-        ├──► LLM local / autohospedado (puerto llm)     [no configurado aún]
+        ├──► llama-server local, Phi-4-mini (puerto llm) [adaptador real]
         ├──► Embeddings / OCR / Reranker (puertos)      [no configurados aún]
         └──► Motor de Materiales (puerto materials)     [no configurado aún]
 ```
@@ -64,7 +64,7 @@ Reglas de dependencia entre capas:
 | `artifact_storage` | `ArtifactStoragePort` |
 | `permissions` | `PermissionsRepositoryPort` | Modelo de autorización de ELSA (Supabase ELSA) |
 | `abuse` | `AbuseGuardPort.acquire` / `release` | Control de abuso por usuario |
-| `llm` | `LLMPort.complete` | Modelo de lenguaje local / autohospedado |
+| `llm` | `LLMPort.complete` | Generación local: `llama-server` en loopback con Phi-4-mini (ADR 0018) |
 | `embeddings` | `EmbeddingsPort.embed` + `dimension` | Modelo de embeddings |
 | `ocr` | `OCRPort.extract_text` | Extracción de texto de imágenes (OCR) |
 | `document_extraction` | `DocumentExtractionPort.extract` | Estructura de un documento: títulos, párrafos, listas, pasos, advertencias, tablas |
@@ -408,19 +408,30 @@ tiene que saber si el texto se reconoció o lo escribió una persona.
 
 ## Qué no existe todavía (a propósito)
 
-**LLM real**, OCR, reranking, agentes, transcripción real, integración con el
-motor de búsqueda de Materiales, IH06/IW13, Centro de Control y despliegue.
-Los bloques anteriores dejan las fronteras preparadas (puertos, health por
+OCR, reranking, agentes, transcripción real, integración con el motor de
+búsqueda de Materiales, IH06/IW13, Centro de Control y despliegue. Los
+bloques anteriores dejan las fronteras preparadas (puertos, health por
 dependencia, migraciones versionadas, cadena de confianza y modelo de
 permisos) para que esos componentes lleguen sin romper la arquitectura.
 
-La **capa de RAG sí existe** desde el Bloque 4.4
-([`rag-generacion.md`](rag-generacion.md), [ADR 0017](adr/0017-generacion-fundamentada-y-citas-verificables.md)):
-recuperación autorizada, contexto controlado, verificación de citas y contrato
-de respuesta. Lo que falta es el **proveedor**: no hay decisión registrada de
-modelo ni de dónde se ejecuta, así que el camino completo se prueba contra el
-puerto con un adaptador determinista y **no hay comando que responda preguntas
-de verdad**. Añadir uno contra el fake daría una demostración falsa.
+La **capa de RAG existe** desde el Bloque 4.4
+([`rag-generacion.md`](rag-generacion.md), [ADR 0017](adr/0017-generacion-fundamentada-y-citas-verificables.md))
+y **ya tiene proveedor** desde el 4.5
+([`llm-runtime.md`](llm-runtime.md), [ADR 0018](adr/0018-runtime-llm-local-phi-4-mini-y-llama-cpp.md)):
+Phi-4-mini-instruct en GGUF Q4_K_M, servido por un `llama-server` persistente
+que escucha solo en loopback. Ninguna API comercial participa.
+
+Dos matices que conviene no perder de vista:
+
+- **El modelo no vive en el proceso de FastAPI.** El backend arranca con el
+  runtime apagado y lo declara en `/health/ready` como `degraded`: la
+  generación no es una dependencia crítica. Por defecto
+  `ELSA_LLM_BACKEND=disabled`, de modo que un clon limpio levanta el servidor
+  y pasa la suite sin descargar ningún peso.
+- **Todavía no hay endpoint HTTP que responda preguntas con el modelo.** El
+  camino completo se ejerce desde la herramienta de operación
+  (`python -m elsa.tools.llm_runtime ask`), sin interfaz. Exponerlo es de un
+  bloque posterior.
 
 Los aportes del Bloque 3 se guardan **solo en memoria**: no hay adaptador de
 PostgreSQL ni migración, y por tanto no sobreviven a un reinicio. Es lo

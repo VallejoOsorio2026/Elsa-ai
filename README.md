@@ -6,12 +6,21 @@ Barbosa de PAPELSA. Este repositorio contiene el backend (Python + FastAPI).
 El contrato del proyecto —reglas arquitectónicas, stack y decisiones cerradas—
 vive en [`CLAUDE.md`](CLAUDE.md). La documentación técnica está en [`docs/`](docs/).
 
-> Estado actual: piloto de interfaz (Bloque 3). Sobre la fundación de los
-> bloques anteriores —verificación real del JWT de Materiales, autorización
-> propia de ELSA con migraciones versionadas, conocimiento técnico versionado y
-> revisado— hay ya una interfaz web utilizable: consulta, aportes de
-> conocimiento por voz y Centro de Revisión. Todavía **no** hay RAG, LLM,
-> transcripción real, documentos ni Centro de Control.
+> Estado actual: el cerebro completo funciona sin interfaz (Bloque 4.5). Sobre
+> la fundación de los bloques anteriores —verificación real del JWT de
+> Materiales, autorización propia de ELSA con migraciones versionadas,
+> conocimiento documental versionado y revisado, recuperación híbrida y
+> generación fundamentada con citas verificables— hay ya un modelo local
+> conectado: **Phi-4-mini-instruct servido por `llama-server` en loopback**, sin
+> ninguna API comercial ([`docs/llm-runtime.md`](docs/llm-runtime.md)).
+>
+> Dos cosas que conviene saber antes de clonar: el backend **arranca sin
+> modelo** —`ELSA_LLM_BACKEND=disabled` por defecto, así que un clon limpio
+> levanta el servidor y pasa la suite sin descargar ningún peso— y **todavía no
+> hay endpoint HTTP que responda con el modelo**: el camino completo se ejerce
+> desde `python -m elsa.tools.llm_runtime`. La interfaz web del piloto
+> (consulta literal, aportes por voz y Centro de Revisión) sigue siendo la del
+> Bloque 3. Todavía **no** hay transcripción real ni Centro de Control.
 
 **Materiales = identidad. ELSA = autorización.** El Asistente de Materiales
 sigue siendo la única fuente de identidad (los usuarios inician sesión una sola
@@ -160,6 +169,8 @@ uv run pre-commit install
 | [`docs/embedding-benchmark.md`](docs/embedding-benchmark.md) | Infraestructura y banco de evaluación de embeddings: qué se midió y qué falta para elegir |
 | [`docs/embeddings-operations.md`](docs/embeddings-operations.md) | Registrar, generar y activar el modelo de embeddings desde una máquina con acceso a los pesos |
 | [`docs/hybrid-retrieval.md`](docs/hybrid-retrieval.md) | Recuperación híbrida: canales exacto, léxico y semántico, y cómo se fusionan |
+| [`docs/rag-generacion.md`](docs/rag-generacion.md) | Generación fundamentada: contexto, política, verificación de citas y estados |
+| [`docs/llm-runtime.md`](docs/llm-runtime.md) | Runtime de generación local: instalar, arrancar, detener y probar `llama-server` con Phi-4-mini |
 | [`docs/bloque-4-2-plan.md`](docs/bloque-4-2-plan.md) | Planificación del Bloque 4.2: alcance, decisiones abiertas y aceptación |
 | [`docs/embeddings-model-evaluation.md`](docs/embeddings-model-evaluation.md) | Candidatos de embeddings, criterio de elección y banco de pruebas |
 | [`docs/private-storage.md`](docs/private-storage.md) | Almacenamiento privado de archivos originales y planos |
@@ -185,13 +196,15 @@ src/elsa/
   ingestion/       # parsers de XLSX y HTM, independientes de FastAPI
   documents/       # conocimiento documental: seccionado, chunking y validación
   services/        # orquestación de casos de uso (ingesta, reconciliación)
-  tools/           # utilidades de línea de comandos (pruebas de aceptación)
+  tools/           # utilidades de línea de comandos (aceptación, embeddings,
+                   #   operación del runtime de generación local)
   container.py     # composición: qué adaptador implementa cada puerto
   demo/            # siembra de datos sintéticos para la demostración
   web.py           # publica la interfaz estática y los assets de marca
   ports/           # interfaces (Protocol) de dependencias externas
   adapters/        # implementaciones reales y fakes deterministas
 supabase/migrations/  # migraciones SQL (autoridad única del esquema)
+scripts/              # arranque, parada y prueba del runtime local (PowerShell)
 web/                  # interfaz del piloto: HTML, CSS y JS sin compilar
 render.yaml           # blueprint de despliegue de la demostración (sin secretos)
 tests/                # pytest
