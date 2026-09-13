@@ -20,7 +20,7 @@ except ImportError:  # pragma: no cover - depende del sistema operativo
 from elsa.bench.metrics import QueryResult, Scoreboard, score_run
 from elsa.bench.model import BenchCorpus, GoldenSet, RunMetadata
 from elsa.bench.ports import BenchmarkEmbedder
-from elsa.bench.retrievers import DenseRetriever, Retriever
+from elsa.bench.retrievers import DenseRetriever, Retriever, fuse_rankings
 from elsa.documents.composition import COMPOSITION_TEMPLATE
 
 __all__ = ["BenchmarkRun", "hardware_description", "run_dense", "run_retriever"]
@@ -37,7 +37,39 @@ class BenchmarkRun:
             "metadata": dataclasses.asdict(self.metadata),
             "identity": dict(self.metadata.identity()),
             "scoreboard": self.scoreboard.as_dict(),
+            "rankings": self.rankings(),
         }
+
+    def rankings(self) -> list[dict[str, object]]:
+        """Lo que el recuperador devolvió, consulta por consulta.
+
+        Sin esto el informe solo permite comparar promedios, y un promedio no
+        dice **qué** consulta se degradó ni por qué. Persistirlo es lo que
+        permite auditar una fusión —o reconstruirla— sin volver a ejecutar
+        inferencia, que con un modelo real cuesta minutos de CPU.
+
+        El texto de la consulta, su eje y lo que se esperaba de ella **no** se
+        repiten aquí: viven una sola vez en el bloque `golden` del informe, y
+        se cruzan por `query_id`.
+        """
+        return [
+            {
+                "query_id": query_id,
+                "ranked": [
+                    {
+                        "rank": position,
+                        "chunk_id": chunk_id,
+                        "score": (
+                            round(result.scores[position - 1], 6)
+                            if position <= len(result.scores)
+                            else None
+                        ),
+                    }
+                    for position, chunk_id in enumerate(result.ranked, start=1)
+                ],
+            }
+            for query_id, result in sorted(self.results.items())
+        ]
 
 
 def hardware_description() -> dict[str, object]:
@@ -245,3 +277,59 @@ def run_dense(
         notes=tuple(notes),
     )
     return BenchmarkRun(metadata=metadata, scoreboard=score_run(golden, results), results=results)
+
+
+def run_fusion(
+    runs: Sequence[BenchmarkRun],
+    golden: GoldenSet,
+    corpus: BenchCorpus,
+    *,
+    k: int = 60,
+) -> BenchmarkRun:
+    """Fusiona corridas **ya hechas**, sin volver a ejecutar ningún modelo.
+
+    Toma las posiciones que cada corrida produjo y les aplica el mismo RRF que
+    usa producción, con la misma constante. Reejecutar los recuperadores para
+    fusionarlos costaría otra pasada de inferencia y no añadiría nada: las
+    posiciones ya están.
+
+    Los tiempos de la corrida fusionada no se inventan: la fusión no carga
+    modelos ni embebe nada, así que los campos de coste quedan vacíos y los de
+    coste real siguen estando en la corrida de cada canal.
+    """
+    if len(runs) < 2:
+        raise ValueError("fusion needs at least two runs")
+    # El nombre lleva qué se fusionó y con qué constante, para que cada fila
+    # del informe se lea sola: sin esto, dos fusiones distintas aparecían
+    # ambas como `fusion-rrf(k=60)` y había que conocer el orden de ejecución.
+    names = "+".join(run.metadata.model_name for run in runs)
+    label = f"fusion-rrf({names},k={k})"
+    results = fuse_rankings([run.results for run in runs], golden, k=k)
+    hardware = hardware_description()
+    metadata = RunMetadata(
+        retriever=label,
+        model_name=label,
+        revision="-",
+        dimension=0,
+        normalized=False,
+        document_prefix="",
+        query_prefix="",
+        runtime="fusion",
+        device="cpu",
+        corpus_fingerprint=corpus.fingerprint,
+        golden_fingerprint=golden.fingerprint,
+        composition_template=COMPOSITION_TEMPLATE,
+        started_at=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        cpu=str(hardware["cpu"]),
+        ram_gb=hardware["ram_gb"] if isinstance(hardware["ram_gb"], float) else None,
+        gpu=str(hardware["gpu"]),
+        notes=(
+            f"Reciprocal Rank Fusion sobre las posiciones de: {names}. "
+            "No vuelve a ejecutar ningun modelo.",
+        ),
+    )
+    return BenchmarkRun(
+        metadata=metadata,
+        scoreboard=score_run(golden, results, abstention_threshold=None),
+        results=results,
+    )

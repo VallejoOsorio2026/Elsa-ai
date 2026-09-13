@@ -39,9 +39,9 @@ from elsa.bench.adapters.sentence_transformers import (
 from elsa.bench.corpus import build_corpus
 from elsa.bench.goldenset import GoldenSetError, load_golden_set
 from elsa.bench.ports import ModelUnavailableError
-from elsa.bench.report import render_json, render_markdown
+from elsa.bench.report import render_json, render_markdown, render_query_diagnostics
 from elsa.bench.retrievers import LexicalRetriever, TrigramRetriever
-from elsa.bench.runner import BenchmarkRun, run_dense, run_retriever
+from elsa.bench.runner import BenchmarkRun, run_dense, run_fusion, run_retriever
 
 _DEFAULT_OUT = Path("bench/resultados")
 
@@ -67,6 +67,14 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="No correr las lineas base lexicas (no recomendado: son la referencia)",
     )
+    parser.add_argument(
+        "--fusion",
+        action="store_true",
+        help=(
+            "Anadir una corrida RRF(k=60) que fusiona BM25 con cada candidato denso "
+            "medido. Reutiliza las posiciones ya calculadas: no reejecuta ningun modelo"
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -83,18 +91,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     runs: list[BenchmarkRun] = []
     unmeasured: list[dict[str, str]] = []
 
+    lexical_run: BenchmarkRun | None = None
+    # Todo lo denso es fusionable, el control incluido: fusionarlo con BM25 es
+    # lo que muestra que RRF diluye cuando un canal es debil, y hace la
+    # bandera ejecutable sin red.
+    fusable_runs: list[BenchmarkRun] = []
+
     if not args.skip_baselines:
-        runs.append(run_retriever(LexicalRetriever(), corpus, golden))
+        lexical_run = run_retriever(LexicalRetriever(), corpus, golden)
+        runs.append(lexical_run)
         runs.append(run_retriever(TrigramRetriever(), corpus, golden))
 
-    runs.append(
-        run_dense(
-            HashingEmbedder(),
-            corpus,
-            golden,
-            notes=("control determinista: no es un modelo y no compite con ninguno",),
-        )
+    control_run = run_dense(
+        HashingEmbedder(),
+        corpus,
+        golden,
+        notes=("control determinista: no es un modelo y no compite con ninguno",),
     )
+    runs.append(control_run)
+    fusable_runs.append(control_run)
 
     requested = [key.strip() for key in args.candidates.split(",") if key.strip()]
     known = {spec.key: spec for spec in CANDIDATES}
@@ -119,15 +134,29 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "measured but NOT eligible for production until its licence is formally "
                 "validated for corporate use (decision D1)"
             )
-        runs.append(
-            run_dense(
-                embedder,
-                corpus,
-                golden,
-                load_seconds=load_seconds,
-                notes=tuple(n for n in notes if n),
-            )
+        candidate_run = run_dense(
+            embedder,
+            corpus,
+            golden,
+            load_seconds=load_seconds,
+            notes=tuple(n for n in notes if n),
         )
+        runs.append(candidate_run)
+        fusable_runs.append(candidate_run)
+
+    # La fusion va al final para que el informe muestre primero cada canal por
+    # separado: un numero fusionado sin sus componentes al lado no se puede leer.
+    if args.fusion:
+        if lexical_run is None:
+            print(
+                "--fusion necesita la linea base lexica: no uses --skip-baselines", file=sys.stderr
+            )
+            return 2
+        if not fusable_runs:
+            print("--fusion necesita al menos una corrida densa", file=sys.stderr)
+            return 2
+        for dense_run in fusable_runs:
+            runs.append(run_fusion([lexical_run, dense_run], golden, corpus))
 
     for spec in CANDIDATES:
         if spec.key not in requested and not any(
@@ -137,10 +166,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "informe.json").write_text(
-        render_json(runs, unmeasured=unmeasured), encoding="utf-8"
+        render_json(runs, golden=golden, unmeasured=unmeasured), encoding="utf-8"
     )
     (args.out / "informe.md").write_text(
         render_markdown(runs, unmeasured=unmeasured), encoding="utf-8"
+    )
+    # Comparación consulta por consulta: un promedio no dice *cuál* se degradó.
+    (args.out / "diagnostico.md").write_text(
+        render_query_diagnostics(runs, golden), encoding="utf-8"
     )
 
     print(

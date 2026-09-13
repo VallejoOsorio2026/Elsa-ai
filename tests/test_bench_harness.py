@@ -27,8 +27,13 @@ from elsa.bench.goldenset import load_golden_set
 from elsa.bench.model import BenchCorpus, GoldenSet
 from elsa.bench.ports import BenchmarkEmbedder, ModelUnavailableError
 from elsa.bench.report import comparison_fingerprint, render_json, render_markdown
-from elsa.bench.retrievers import DenseRetriever, LexicalRetriever, TrigramRetriever
-from elsa.bench.runner import run_dense, run_retriever
+from elsa.bench.retrievers import (
+    DenseRetriever,
+    LexicalRetriever,
+    TrigramRetriever,
+    fuse_rankings,
+)
+from elsa.bench.runner import run_dense, run_fusion, run_retriever
 from elsa.tools.embedding_benchmark import main
 
 
@@ -430,3 +435,240 @@ def test_the_benchmark_imports_where_resource_does_not_exist() -> None:
 
         assert module.main is not None
         assert importlib.import_module("elsa.bench.runner").resource is None
+
+
+# ---------------------------------------------------------------------------
+# Fusión RRF en el banco: el mismo método y la misma constante que producción,
+# sobre rankings ya calculados.
+# ---------------------------------------------------------------------------
+
+
+def test_fusion_reuses_rankings_instead_of_running_the_retrievers_again(
+    corpus: BenchCorpus, golden: GoldenSet
+) -> None:
+    """Fusionar no puede costar otra pasada de inferencia.
+
+    `fuse_rankings` recibe posiciones ya calculadas. Si fusionar reejecutara
+    los canales, medir el híbrido con un modelo real costaría el doble y
+    podría dar otro resultado.
+    """
+    lexical = run_retriever(LexicalRetriever(), corpus, golden)
+    dense = run_dense(HashingEmbedder(), corpus, golden)
+
+    fused = fuse_rankings([lexical.results, dense.results], golden, k=60)
+
+    assert set(fused) == set(lexical.results)
+    # Cada canal aporta 1/(k+posición); un chunk que ambos ponen primero suma
+    # 2/61. Se comprueba la fórmula, no un número copiado.
+    common = next(
+        (
+            q
+            for q in golden.queries
+            if lexical.results[q.id].ranked[:1] == dense.results[q.id].ranked[:1]
+            and lexical.results[q.id].ranked
+        ),
+        None,
+    )
+    if common is not None:
+        assert fused[common.id].scores[0] == pytest.approx(2 / 61, abs=1e-9)
+
+
+def test_a_fused_run_keeps_the_corpus_golden_and_template_fingerprints(
+    corpus: BenchCorpus, golden: GoldenSet
+) -> None:
+    """Una corrida fusionada tiene que ser comparable con sus canales."""
+    lexical = run_retriever(LexicalRetriever(), corpus, golden)
+    dense = run_dense(HashingEmbedder(), corpus, golden)
+
+    fused = run_fusion([lexical, dense], golden, corpus)
+
+    assert fused.metadata.corpus_fingerprint == corpus.fingerprint
+    assert fused.metadata.golden_fingerprint == golden.fingerprint
+    assert fused.metadata.composition_template == lexical.metadata.composition_template
+    assert "fusion-rrf(" in fused.metadata.retriever
+    # El nombre compone desde `model_name`, que es lo que el informe muestra.
+    assert lexical.metadata.model_name in fused.metadata.retriever
+    assert dense.metadata.model_name in fused.metadata.retriever
+    assert "k=60" in fused.metadata.retriever
+    assert fused.scoreboard.primary.queries == lexical.scoreboard.primary.queries
+    # La fusión no carga ni embebe nada: no inventa tiempos de coste.
+    assert fused.metadata.load_seconds is None
+    assert fused.metadata.corpus_embed_seconds is None
+
+
+def test_fusion_needs_at_least_two_runs(corpus: BenchCorpus, golden: GoldenSet) -> None:
+    lexical = run_retriever(LexicalRetriever(), corpus, golden)
+
+    with pytest.raises(ValueError, match="at least two"):
+        run_fusion([lexical], golden, corpus)
+
+
+def test_the_cli_reports_each_channel_separately_and_then_the_fusion(
+    tmp_path: Path,
+) -> None:
+    """`--fusion` añade la corrida fusionada **sin** ocultar sus componentes.
+
+    Un número fusionado sin sus canales al lado no se puede leer: no se sabría
+    si la fusión ayudó o estorbó.
+    """
+    assert main(["--fusion", "--out", str(tmp_path)]) == 0
+
+    report = json.loads((tmp_path / "informe.json").read_text(encoding="utf-8"))
+    names = [run["metadata"]["retriever"] for run in report["runs"]]
+
+    assert "lexical-bm25" in names
+    assert any(n.startswith("dense:") for n in names)
+    fused = [n for n in names if n.startswith("fusion-rrf(")]
+    assert len(fused) == 1
+    # El nombre dice qué se fusionó, para que el informe se lea solo.
+    assert "lexical-bm25" in fused[0]
+    # Y va después de sus componentes.
+    assert names.index(fused[0]) > names.index("lexical-bm25")
+
+    identities = {
+        (
+            run["metadata"]["corpus_fingerprint"],
+            run["metadata"]["golden_fingerprint"],
+            run["metadata"]["composition_template"],
+        )
+        for run in report["runs"]
+    }
+    assert len(identities) == 1
+    assert {run["scoreboard"]["primary"]["queries"] for run in report["runs"]} == {59}
+
+
+def test_the_cli_refuses_to_fuse_without_the_lexical_baseline(tmp_path: Path) -> None:
+    """RRF(BM25 + denso) sin BM25 no es lo que el informe diría que es."""
+    assert main(["--fusion", "--skip-baselines", "--out", str(tmp_path)]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Observabilidad del informe: sin rankings persistidos, un promedio no dice
+# qué consulta se degradó, y una fusión no se puede auditar sin reejecutar.
+# ---------------------------------------------------------------------------
+
+
+def test_rankings_survive_serialisation_keeping_order_and_scores(
+    corpus: BenchCorpus, golden: GoldenSet
+) -> None:
+    run = run_retriever(LexicalRetriever(), corpus, golden)
+    restored = json.loads(json.dumps(run.as_dict()))
+
+    by_query = {entry["query_id"]: entry for entry in restored["rankings"]}
+    assert set(by_query) == set(run.results)
+    for query_id, result in run.results.items():
+        ranked = by_query[query_id]["ranked"]
+        # El orden es el del recuperador, no el de un diccionario.
+        assert [row["chunk_id"] for row in ranked] == list(result.ranked)
+        assert [row["rank"] for row in ranked] == list(range(1, len(result.ranked) + 1))
+        for position, row in enumerate(ranked):
+            if position < len(result.scores):
+                assert row["score"] == pytest.approx(result.scores[position], abs=1e-6)
+
+
+def test_the_golden_set_is_written_once_and_carries_what_each_query_expects(
+    corpus: BenchCorpus, golden: GoldenSet
+) -> None:
+    """El texto y lo esperado viven una vez; los rankings solo cruzan por id."""
+    run = run_retriever(LexicalRetriever(), corpus, golden)
+    report = json.loads(render_json([run], golden=golden))
+
+    assert len(report["golden"]["queries"]) == len(golden.queries)
+    entry = report["golden"]["queries"][0]
+    assert {"id", "text", "axis", "must_retrieve", "must_not_retrieve"} <= set(entry)
+    assert report["golden"]["fingerprint"] == golden.fingerprint
+    # No se repite por corrida: el ranking solo lleva identificadores.
+    assert set(report["runs"][0]["rankings"][0]) == {"query_id", "ranked"}
+
+
+def test_two_fusions_have_different_auditable_identities(
+    corpus: BenchCorpus, golden: GoldenSet
+) -> None:
+    """Sin esto, ambas aparecían como `fusion-rrf(k=60)` y no se distinguían."""
+    lexical = run_retriever(LexicalRetriever(), corpus, golden)
+    trigram = run_retriever(TrigramRetriever(), corpus, golden)
+    dense = run_dense(HashingEmbedder(), corpus, golden)
+
+    first = run_fusion([lexical, dense], golden, corpus)
+    second = run_fusion([trigram, dense], golden, corpus)
+
+    assert first.metadata.model_name != second.metadata.model_name
+    assert first.metadata.model_name == (
+        f"fusion-rrf({lexical.metadata.model_name}+{dense.metadata.model_name},k=60)"
+    )
+    # El nombre auditable es el que sale en el Markdown, no solo en el JSON.
+    markdown = render_markdown([first, second])
+    assert first.metadata.model_name in markdown
+    assert second.metadata.model_name in markdown
+
+
+def test_a_fusion_reports_abstention_as_not_calibrated_never_as_a_number(
+    corpus: BenchCorpus, golden: GoldenSet
+) -> None:
+    """El umbral 0,35 no significa nada sobre una suma de recíprocos."""
+    lexical = run_retriever(LexicalRetriever(), corpus, golden)
+    dense = run_dense(HashingEmbedder(), corpus, golden)
+    fused = run_fusion([lexical, dense], golden, corpus)
+
+    assert fused.scoreboard.abstention_rate is None
+    assert any("NOT calibrated" in note for note in fused.scoreboard.notes)
+    assert json.loads(json.dumps(fused.as_dict()))["scoreboard"]["abstention"]["rate"] is None
+    assert "N/A — no calibrada" in render_markdown([fused])
+    # Y el comportamiento de siempre se conserva donde el umbral sí aplica.
+    assert dense.scoreboard.abstention_rate is not None
+
+
+def test_aggregate_metrics_and_fingerprints_are_unchanged_by_the_new_fields(
+    corpus: BenchCorpus, golden: GoldenSet
+) -> None:
+    """Añadir observabilidad no puede mover una sola métrica."""
+    run = run_retriever(LexicalRetriever(), corpus, golden)
+    versioned = json.loads(Path("bench/resultados/informe.json").read_text(encoding="utf-8"))
+    stored = next(
+        r for r in versioned["runs"] if r["metadata"]["retriever"] == run.metadata.retriever
+    )
+
+    assert run.scoreboard.as_dict() == stored["scoreboard"]
+    assert run.metadata.corpus_fingerprint == stored["metadata"]["corpus_fingerprint"]
+    assert run.metadata.golden_fingerprint == stored["metadata"]["golden_fingerprint"]
+    assert run.metadata.composition_template == stored["metadata"]["composition_template"]
+
+
+def test_a_saved_report_is_enough_to_compare_channels_query_by_query(
+    tmp_path: Path,
+) -> None:
+    """La prueba de fuego: reconstruir la comparación leyendo solo el archivo.
+
+    Si esto pasa, auditar una fusión ya no exige volver a ejecutar el modelo.
+    """
+    assert main(["--fusion", "--out", str(tmp_path)]) == 0
+    report = json.loads((tmp_path / "informe.json").read_text(encoding="utf-8"))
+
+    expected = {q["id"]: set(q["must_retrieve"]) for q in report["golden"]["queries"]}
+    rankings = {
+        run["metadata"]["model_name"]: {
+            entry["query_id"]: [row["chunk_id"] for row in entry["ranked"]]
+            for entry in run["rankings"]
+        }
+        for run in report["runs"]
+    }
+    lexical = rankings["lexical-bm25"]
+    fusion = next(name for name in rankings if name.startswith("fusion-rrf("))
+
+    # Se reconstruye, solo con el archivo, dónde quedó lo esperado en cada canal.
+    compared = 0
+    for query_id, wanted in expected.items():
+        if not wanted:
+            continue
+        for name in (("lexical-bm25"), fusion):
+            ranked = rankings[name][query_id]
+            position = next((i for i, c in enumerate(ranked, 1) if c in wanted), None)
+            assert position is None or position >= 1
+        compared += 1
+    assert compared > 0
+    assert set(lexical) == set(rankings[fusion])
+    assert (
+        (tmp_path / "diagnostico.md")
+        .read_text(encoding="utf-8")
+        .startswith("# Diagnóstico por consulta")
+    )

@@ -21,7 +21,14 @@ from elsa.bench.metrics import QueryResult
 from elsa.bench.model import BenchCorpus, GoldenSet
 from elsa.bench.ports import BenchmarkEmbedder
 
-__all__ = ["DenseRetriever", "LexicalRetriever", "TrigramRetriever", "Retriever"]
+__all__ = [
+    "DenseRetriever",
+    "FusionRetriever",
+    "fuse_rankings",
+    "LexicalRetriever",
+    "Retriever",
+    "TrigramRetriever",
+]
 
 _WORD = re.compile(r"[0-9a-záéíóúüñ]+", re.IGNORECASE)
 _DEPTH = 10
@@ -185,3 +192,55 @@ def _rank(query_id: str, scored: list[tuple[float, str]]) -> QueryResult:
         ranked=tuple(chunk_id for _, chunk_id in top),
         scores=tuple(score for score, _ in top),
     )
+
+
+class FusionRetriever(Retriever):
+    """Fusiona varios recuperadores con Reciprocal Rank Fusion.
+
+    Reproduce en el banco lo que hace `HybridRetrievalService` en producción,
+    con el mismo método y la misma constante, para que lo que se mide aquí sea
+    lo que allí se ejecuta. Lo que **no** reproduce es el filtrado por alcance:
+    el banco no aplica permisos a propósito (ADR 0014), y en producción cada
+    canal los aplica en su propia consulta.
+
+    Usa solo la **posición** de cada canal. `ts_rank_cd` y la distancia coseno
+    no comparten escala ni significado; sumarlos exigiría inventar pesos.
+    """
+
+    name = "fusion-rrf"
+
+    def __init__(self, retrievers: Sequence[Retriever], *, k: int = 60) -> None:
+        if not retrievers:
+            raise ValueError("fusion needs at least one retriever")
+        self._retrievers = tuple(retrievers)
+        self._k = k
+        self.name = "fusion-rrf(" + "+".join(r.name for r in retrievers) + ")"
+
+    def run(self, corpus: BenchCorpus, golden: GoldenSet) -> dict[str, QueryResult]:
+        return fuse_rankings([r.run(corpus, golden) for r in self._retrievers], golden, k=self._k)
+
+
+def fuse_rankings(
+    channels: Sequence[dict[str, QueryResult]], golden: GoldenSet, *, k: int = 60
+) -> dict[str, QueryResult]:
+    """Reciprocal Rank Fusion sobre rankings **ya calculados**.
+
+    Existe separada de `FusionRetriever.run` para que el banco pueda fusionar
+    sin volver a ejecutar nada: una corrida densa ya produjo sus posiciones, y
+    repetir la inferencia para fusionarla costaría minutos de CPU y podría dar
+    un resultado distinto si algo en el modelo no fuera determinista.
+
+    Solo usa la **posición** en cada canal. Las puntuaciones de BM25 y de la
+    distancia coseno no comparten escala ni significado.
+    """
+    fused: dict[str, QueryResult] = {}
+    for query in golden.queries:
+        points: dict[str, float] = {}
+        for results in channels:
+            result = results.get(query.id)
+            if result is None:
+                continue
+            for position, chunk_id in enumerate(result.ranked, start=1):
+                points[chunk_id] = points.get(chunk_id, 0.0) + 1.0 / (k + position)
+        fused[query.id] = _rank(query.id, [(score, cid) for cid, score in points.items()])
+    return fused

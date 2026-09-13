@@ -178,7 +178,7 @@ def score_run(
     golden: GoldenSet,
     results: Mapping[str, QueryResult],
     *,
-    abstention_threshold: float = 0.35,
+    abstention_threshold: float | None = 0.35,
 ) -> Scoreboard:
     """Calcula el marcador completo a partir de los rankings devueltos.
 
@@ -213,7 +213,18 @@ def score_run(
 
     unanswered = tuple(q for q in golden.queries if not q.expects_an_answer)
     abstention = None
-    if unanswered:
+    if unanswered and abstention_threshold is None:
+        # La puntuación de esta corrida no representa similitud, así que el
+        # umbral no significa nada sobre ella. Una suma de recíprocos de RRF
+        # vale como mucho `canales/(k+1)` —del orden de 0,03— y por tanto
+        # quedaría siempre por debajo de cualquier umbral pensado para coseno:
+        # el 1,000 resultante sería un artefacto, no una medición.
+        notes.append(
+            f"abstention NOT calibrated for this run: its score is not a similarity, "
+            f"so the fixed threshold has no meaning over it "
+            f"({len(unanswered)} unanswerable queries were not scored)"
+        )
+    elif unanswered and abstention_threshold is not None:
         abstained = 0
         for query in unanswered:
             result = results[query.id]
