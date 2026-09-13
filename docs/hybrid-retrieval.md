@@ -117,12 +117,28 @@ solo métricas agregadas, no los **rankings por consulta**, y RRF necesita las
 listas ordenadas de cada canal. Fusionar fuera de línea es por tanto imposible
 sin volver a ejecutar BGE-M3.
 
-`FusionRetriever` deja la comparación a un comando en una máquina con el modelo
-en caché. Lo que sí se comprobó aquí, con el control determinista en lugar del
-modelo denso, es que **la fusión es reproducible** y que RRF **diluye cuando un
-canal es débil**: fusionar BM25 con el control baja `recall@1` de 0,661 a
-0,559. Es un aviso concreto y no una medición del híbrido real: dice que el
-canal semántico tiene que aportar de verdad para que la fusión gane, no que
+La comparación queda a **un comando** en una máquina con el modelo en caché:
+
+```bash
+uv run python -m elsa.tools.embedding_benchmark --candidates bge-m3 --fusion \
+    --out bench/resultados/hibrido
+```
+
+El informe muestra las tres filas por separado —`lexical-bm25`, `dense:BAAI/bge-m3`
+y `fusion-rrf(lexical-bm25+dense:BAAI/bge-m3)`— sobre las mismas 67 consultas,
+la misma huella de corpus y de conjunto dorado, la misma plantilla y los mismos
+ejes y diagnósticos.
+
+**La fusión no reejecuta nada.** Toma las posiciones que cada corrida ya
+produjo y les aplica el mismo RRF con la misma constante, así que medir el
+híbrido no cuesta una segunda pasada de inferencia ni puede dar un resultado
+distinto al del canal que fusiona.
+
+Lo que sí se comprobó aquí, con el control determinista en lugar del modelo
+denso, es que **la fusión es reproducible** y que RRF **diluye cuando un canal
+es débil**: fusionar BM25 con el control baja `recall@1` de 0,661 a 0,559. Es
+un aviso concreto y no una medición del híbrido real: dice que el canal
+semántico tiene que aportar de verdad para que la fusión gane, no que
 BM25+BGE-M3 vaya a comportarse así.
 
 ## Ver también

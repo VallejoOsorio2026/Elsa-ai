@@ -27,8 +27,13 @@ from elsa.bench.goldenset import load_golden_set
 from elsa.bench.model import BenchCorpus, GoldenSet
 from elsa.bench.ports import BenchmarkEmbedder, ModelUnavailableError
 from elsa.bench.report import comparison_fingerprint, render_json, render_markdown
-from elsa.bench.retrievers import DenseRetriever, LexicalRetriever, TrigramRetriever
-from elsa.bench.runner import run_dense, run_retriever
+from elsa.bench.retrievers import (
+    DenseRetriever,
+    LexicalRetriever,
+    TrigramRetriever,
+    fuse_rankings,
+)
+from elsa.bench.runner import run_dense, run_fusion, run_retriever
 from elsa.tools.embedding_benchmark import main
 
 
@@ -430,3 +435,106 @@ def test_the_benchmark_imports_where_resource_does_not_exist() -> None:
 
         assert module.main is not None
         assert importlib.import_module("elsa.bench.runner").resource is None
+
+
+# ---------------------------------------------------------------------------
+# Fusión RRF en el banco: el mismo método y la misma constante que producción,
+# sobre rankings ya calculados.
+# ---------------------------------------------------------------------------
+
+
+def test_fusion_reuses_rankings_instead_of_running_the_retrievers_again(
+    corpus: BenchCorpus, golden: GoldenSet
+) -> None:
+    """Fusionar no puede costar otra pasada de inferencia.
+
+    `fuse_rankings` recibe posiciones ya calculadas. Si fusionar reejecutara
+    los canales, medir el híbrido con un modelo real costaría el doble y
+    podría dar otro resultado.
+    """
+    lexical = run_retriever(LexicalRetriever(), corpus, golden)
+    dense = run_dense(HashingEmbedder(), corpus, golden)
+
+    fused = fuse_rankings([lexical.results, dense.results], golden, k=60)
+
+    assert set(fused) == set(lexical.results)
+    # Cada canal aporta 1/(k+posición); un chunk que ambos ponen primero suma
+    # 2/61. Se comprueba la fórmula, no un número copiado.
+    common = next(
+        (
+            q
+            for q in golden.queries
+            if lexical.results[q.id].ranked[:1] == dense.results[q.id].ranked[:1]
+            and lexical.results[q.id].ranked
+        ),
+        None,
+    )
+    if common is not None:
+        assert fused[common.id].scores[0] == pytest.approx(2 / 61, abs=1e-9)
+
+
+def test_a_fused_run_keeps_the_corpus_golden_and_template_fingerprints(
+    corpus: BenchCorpus, golden: GoldenSet
+) -> None:
+    """Una corrida fusionada tiene que ser comparable con sus canales."""
+    lexical = run_retriever(LexicalRetriever(), corpus, golden)
+    dense = run_dense(HashingEmbedder(), corpus, golden)
+
+    fused = run_fusion([lexical, dense], golden, corpus)
+
+    assert fused.metadata.corpus_fingerprint == corpus.fingerprint
+    assert fused.metadata.golden_fingerprint == golden.fingerprint
+    assert fused.metadata.composition_template == lexical.metadata.composition_template
+    assert "fusion-rrf(" in fused.metadata.retriever
+    assert lexical.metadata.retriever in fused.metadata.retriever
+    assert dense.metadata.retriever in fused.metadata.retriever
+    assert fused.scoreboard.primary.queries == lexical.scoreboard.primary.queries
+    # La fusión no carga ni embebe nada: no inventa tiempos de coste.
+    assert fused.metadata.load_seconds is None
+    assert fused.metadata.corpus_embed_seconds is None
+
+
+def test_fusion_needs_at_least_two_runs(corpus: BenchCorpus, golden: GoldenSet) -> None:
+    lexical = run_retriever(LexicalRetriever(), corpus, golden)
+
+    with pytest.raises(ValueError, match="at least two"):
+        run_fusion([lexical], golden, corpus)
+
+
+def test_the_cli_reports_each_channel_separately_and_then_the_fusion(
+    tmp_path: Path,
+) -> None:
+    """`--fusion` añade la corrida fusionada **sin** ocultar sus componentes.
+
+    Un número fusionado sin sus canales al lado no se puede leer: no se sabría
+    si la fusión ayudó o estorbó.
+    """
+    assert main(["--fusion", "--out", str(tmp_path)]) == 0
+
+    report = json.loads((tmp_path / "informe.json").read_text(encoding="utf-8"))
+    names = [run["metadata"]["retriever"] for run in report["runs"]]
+
+    assert "lexical-bm25" in names
+    assert any(n.startswith("dense:") for n in names)
+    fused = [n for n in names if n.startswith("fusion-rrf(")]
+    assert len(fused) == 1
+    # El nombre dice qué se fusionó, para que el informe se lea solo.
+    assert "lexical-bm25" in fused[0]
+    # Y va después de sus componentes.
+    assert names.index(fused[0]) > names.index("lexical-bm25")
+
+    identities = {
+        (
+            run["metadata"]["corpus_fingerprint"],
+            run["metadata"]["golden_fingerprint"],
+            run["metadata"]["composition_template"],
+        )
+        for run in report["runs"]
+    }
+    assert len(identities) == 1
+    assert {run["scoreboard"]["primary"]["queries"] for run in report["runs"]} == {59}
+
+
+def test_the_cli_refuses_to_fuse_without_the_lexical_baseline(tmp_path: Path) -> None:
+    """RRF(BM25 + denso) sin BM25 no es lo que el informe diría que es."""
+    assert main(["--fusion", "--skip-baselines", "--out", str(tmp_path)]) == 2

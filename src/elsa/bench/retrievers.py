@@ -24,6 +24,7 @@ from elsa.bench.ports import BenchmarkEmbedder
 __all__ = [
     "DenseRetriever",
     "FusionRetriever",
+    "fuse_rankings",
     "LexicalRetriever",
     "Retriever",
     "TrigramRetriever",
@@ -216,15 +217,30 @@ class FusionRetriever(Retriever):
         self.name = "fusion-rrf(" + "+".join(r.name for r in retrievers) + ")"
 
     def run(self, corpus: BenchCorpus, golden: GoldenSet) -> dict[str, QueryResult]:
-        per_channel = [r.run(corpus, golden) for r in self._retrievers]
-        fused: dict[str, QueryResult] = {}
-        for query in golden.queries:
-            points: dict[str, float] = {}
-            for results in per_channel:
-                result = results.get(query.id)
-                if result is None:
-                    continue
-                for position, chunk_id in enumerate(result.ranked, start=1):
-                    points[chunk_id] = points.get(chunk_id, 0.0) + 1.0 / (self._k + position)
-            fused[query.id] = _rank(query.id, [(score, cid) for cid, score in points.items()])
-        return fused
+        return fuse_rankings([r.run(corpus, golden) for r in self._retrievers], golden, k=self._k)
+
+
+def fuse_rankings(
+    channels: Sequence[dict[str, QueryResult]], golden: GoldenSet, *, k: int = 60
+) -> dict[str, QueryResult]:
+    """Reciprocal Rank Fusion sobre rankings **ya calculados**.
+
+    Existe separada de `FusionRetriever.run` para que el banco pueda fusionar
+    sin volver a ejecutar nada: una corrida densa ya produjo sus posiciones, y
+    repetir la inferencia para fusionarla costaría minutos de CPU y podría dar
+    un resultado distinto si algo en el modelo no fuera determinista.
+
+    Solo usa la **posición** en cada canal. Las puntuaciones de BM25 y de la
+    distancia coseno no comparten escala ni significado.
+    """
+    fused: dict[str, QueryResult] = {}
+    for query in golden.queries:
+        points: dict[str, float] = {}
+        for results in channels:
+            result = results.get(query.id)
+            if result is None:
+                continue
+            for position, chunk_id in enumerate(result.ranked, start=1):
+                points[chunk_id] = points.get(chunk_id, 0.0) + 1.0 / (k + position)
+        fused[query.id] = _rank(query.id, [(score, cid) for cid, score in points.items()])
+    return fused
