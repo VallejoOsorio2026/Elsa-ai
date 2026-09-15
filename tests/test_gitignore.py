@@ -32,6 +32,17 @@ FORBIDDEN_PATHS = [
     "ggml-vulkan.dll",
     "model.safetensors",
     "model.onnx",
+    # Bloque 4.6: un `.onnx` de más de 2 GB guarda sus pesos en un archivo
+    # hermano. `*.onnx` no lo cubre, y es el grande de los dos.
+    "onnx/model.onnx_data",
+    "model.onnx_data",
+    "model.onnx.data",
+    "tokenizer.json",
+    "sentencepiece.bpe.model",
+    # Capturas de vectores del banco experimental: volcados numéricos.
+    "bench/experimental/captura-onnx.json",
+    "bench/experimental/comparacion.json",
+    "vectores.npy",
     "data/dataset.csv",
     "dataset.parquet",
     "backup.dump",

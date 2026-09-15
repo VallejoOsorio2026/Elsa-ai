@@ -68,6 +68,25 @@ reports/
 *.pth
 *.onnx
 *.ckpt
+# Un `.onnx` de más de 2 GB —BGE-M3 lo es— guarda sus pesos fuera del grafo,
+# en un archivo hermano (`model.onnx_data`). `*.onnx` NO lo cubre: es el
+# archivo grande de los dos, y sin esta línea sería lo único del modelo que
+# sí podría versionarse por descuido.
+*.onnx_data
+*.onnx.data
+# Tokenizadores y vocabularios de los pesos descargados. No son secretos,
+# pero son artefactos de terceros de decenas de megas y el repositorio no es
+# su sitio.
+tokenizer.json
+sentencepiece.bpe.model
+
+# --- Banco experimental de ONNX (Bloque 4.6) ---
+# Capturas de vectores y comparaciones: son volcados numéricos de decenas de
+# megas. El artefacto vive fuera del repositorio; estas entradas cubren el
+# caso de que alguien apunte la salida dentro.
+bench/experimental/
+*.npy
+*.npz
 
 # --- Runtime de generación local (Bloque 4.5) ---
 # Ni los binarios de llama.cpp ni el modelo ni los logs del servidor entran

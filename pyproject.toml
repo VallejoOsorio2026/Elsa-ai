@@ -40,6 +40,22 @@ bench = [
     "elsa[embeddings]",
 ]
 
+# Banco **experimental** de ONNX (Bloque 4.6, fase 1). No es un runtime
+# productivo de ELSA y no debe entrar en `dependencies`: el servicio web no
+# ejecuta modelos.
+#
+# Son las dos únicas piezas que hacen falta para inferir sin PyTorch —ese es
+# justamente el objetivo del experimento—, y ninguna de las dos lo arrastra:
+# `onnxruntime` depende de flatbuffers, numpy, packaging y protobuf, y
+# `tokenizers` solo de huggingface-hub. Exportar el .onnx sí necesita torch,
+# pero eso se hace una vez y en un entorno aparte que se desecha.
+#
+#   uv sync --extra bench-onnx
+bench-onnx = [
+    "onnxruntime>=1.18,<2",
+    "tokenizers>=0.19,<1",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",
@@ -109,6 +125,14 @@ warn_unused_configs = true
 # ELSA no la necesita para funcionar. El adaptador la importa dentro de una
 # funcion y traduce su ausencia a `ModelUnavailableError`.
 module = ["sentence_transformers.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# `onnxruntime`, `tokenizers` y `numpy` son el extra **experimental**
+# `bench-onnx` (Bloque 4.6). Solo los importa `elsa.bench.adapters.onnx`, y lo
+# hace dentro de funciones para que su ausencia se traduzca a
+# `ModelUnavailableError` en vez de romper la importación del banco.
+module = ["onnxruntime.*", "tokenizers.*", "numpy.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
