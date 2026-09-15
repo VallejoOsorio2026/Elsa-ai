@@ -959,4 +959,4 @@ cumplir, y es la razón de que se decida ahora y no después.
 - [ADR 0014](0014-confusabilidad-no-es-autorizacion.md) — esto es calidad, no seguridad
 - [ADR 0011](0011-chunking-estructural-deterministico.md) — cambiar de productor no obliga a re-trocear
 - [ADR 0003](0003-puertos-y-adaptadores-para-modelos-reemplazables.md) — por qué el runtime era reemplazable desde el principio
-- [`bench-onnx-experimental.md`](../bench-onnx-experimental.md) — el experimento que producirá la evidencia de la primera atestación
+- `bench-onnx-experimental.md` — experimento pendiente que producirá evidencia para la primera atestación de equivalencia.
