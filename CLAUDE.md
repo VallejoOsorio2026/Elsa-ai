@@ -85,6 +85,9 @@ Visión completa y estado actual: `docs/architecture.md`.
     README, levanta el servidor y pasa los tests en una máquina sin contexto.
 25. Toda decisión arquitectónica relevante se registra como ADR en
     `docs/adr/`. Las decisiones cerradas no se reabren sin un ADR nuevo.
+26. Ningún bloque o subbloque se considera cerrado sin su documento Markdown de
+    cierre, redactado según `docs/project/BLOCK_CLOSURE_STANDARD.md`. Ese
+    documento es obligatorio y su contenido lo fija el estándar.
 
 ## 3. Idioma
 
