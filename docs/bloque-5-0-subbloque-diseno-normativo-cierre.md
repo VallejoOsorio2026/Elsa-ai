@@ -355,6 +355,11 @@ ejecutó ninguna capacidad**, porque ninguna existe todavía.
 - Ejecución de las verificaciones de §6.
 - Commit, apertura del pull request #19 y merge.
 
+**Identificador de sesión.** **No se dispone de un identificador de sesión
+verificable** para este trabajo: no hay forma de comprobarlo desde el
+repositorio, y el estándar prohíbe inventarlo. Todo lo anterior queda
+respaldado por los commits, la rama, los comandos de §7 y las salidas de §8.
+
 **Revisión.** Cada borrador se entregó en conversación **antes** de escribir un
 archivo, y el responsable del proyecto lo revisó y corrigió en tres rondas. Las
 correcciones que cambiaron el resultado fueron: intención frente a pertenencia
@@ -407,6 +412,14 @@ menores, por transparencia:
    REPOSITORIO.** Se comprobaron las cuatro rutas habituales y
    `.github/PULL_REQUEST_TEMPLATE/`. La descripción del PR se redactó
    libremente.
+3. **Dos ambigüedades del propio estándar, halladas al estrenarlo.** **HECHO
+   DEL REPOSITORIO.** Su sección «Cuándo se aplica» decía «cualquier bloque o
+   subbloque», pero «Dónde vive» decía «un archivo por bloque», sin contemplar
+   el caso de este mismo cierre; y los apartados de aportes pedían «en qué
+   sesiones» sin decir qué hacer cuando no hay un identificador verificable.
+   **Resuelto** por la corrección mínima al estándar que acompaña a este
+   documento en la misma rama. La convención de nombres aplicada aquí no
+   cambió: ya era la que el estándar corregido recoge como ejemplo válido.
 
 ---
 

@@ -25,8 +25,25 @@ está cerrado, aunque su código esté en `main` y su CI esté en verde.
 
 ## Dónde vive
 
-Un archivo Markdown por bloque, en `docs/`, con el número del bloque en el
-nombre. Ejemplo: `docs/bloque-5-0-cierre.md`.
+**Un documento de cierre por cada bloque o subbloque cerrado**, en `docs/`.
+Cerrar un subbloque no cierra su bloque padre, y cada uno tiene el suyo.
+
+El nombre debe identificar **inequívocamente** qué se cierra: lleva el número
+del bloque y, si lo que se cierra es un subbloque, además lo que lo distingue
+dentro de él. **Un cierre de subbloque nunca debe poder leerse como el cierre
+de su bloque padre**, ni por el nombre del archivo ni por su título: alguien
+que revise la lista de documentos meses después no tiene por qué recordar qué
+quedaba pendiente.
+
+Ejemplos válidos:
+
+- `docs/bloque-5-0-cierre.md` — cierre del bloque completo.
+- `docs/bloque-5-0-subbloque-diseno-normativo-cierre.md` — cierre de un
+  subbloque, sin ambigüedad sobre lo que queda abierto.
+
+El patrón exacto no es obligatorio. Si el repositorio ya tiene una convención
+de nombres compatible con lo anterior, se sigue esa en vez de inventar una
+segunda.
 
 ## Qué debe contener
 
@@ -46,7 +63,8 @@ olvidó».
    trabajo.
 8. **Resultados** — la salida real. Pegada, no parafraseada.
 9. **Métricas** — cifras medidas, con el método por el que se obtuvieron.
-10. **Aportes de Claude Code** — qué produjo, en qué sesiones, y qué se revisó.
+10. **Aportes de Claude Code** — qué produjo, en qué sesiones y qué se revisó.
+    Ver «Identificadores de sesión» más abajo.
 11. **Aportes de Codex** — lo mismo.
 12. **Operaciones manuales y de PowerShell** — lo que se ejecutó fuera del
     repositorio: scripts, comandos, comprobaciones en un panel, arranque de
@@ -80,6 +98,25 @@ esta distinción un lector no puede saber si algo se comprobó o se supuso.
 Nunca se marca como **HECHO MEDIDO** algo que no se ejecutó (regla 21). Si una
 comprobación la hizo el responsable del proyecto fuera de la sesión, se registra
 como medida **por él**, nombrando la procedencia del dato.
+
+## Identificadores de sesión
+
+Aplica a los apartados de aportes de Claude Code y de Codex, y a cualquier otra
+herramienta futura cuyo trabajo ocurra en sesiones identificables.
+
+- **Cuando exista un identificador de sesión y sea verificable, se registra.**
+  Es lo que permite volver al origen de un cambio.
+- **Cuando no esté disponible, se dice explícitamente** que no se dispone de un
+  identificador verificable. Esa frase es información, no un hueco.
+- **Nunca se inventa un identificador**, ni se reconstruye de memoria, ni se
+  aproxima. Un identificador falso es peor que ninguno: parece verificable y
+  manda a quien investigue a un sitio que no existe.
+
+**La ausencia de identificador de sesión no invalida la evidencia.** Un aporte
+respaldado por commits, ramas, comandos ejecutados, salidas reales, archivos
+versionados o mediciones sigue siendo evidencia completa, y el apartado se
+redacta igual de exigente. Lo que falta es el puntero a la conversación, no el
+respaldo del hecho.
 
 ## De dónde puede venir la evidencia
 
