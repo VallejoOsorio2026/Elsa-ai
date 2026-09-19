@@ -96,6 +96,29 @@ class AnswerWarning(StrEnum):
     ello haría creer al operador que sí.
     """
 
+    CAPABILITY_UNAVAILABLE = "capability_unavailable"
+    """Una capacidad necesaria no respondió. **No es una ausencia de dato.**
+
+    Lo que falló fue el camino hacia la fuente, no la fuente: decir «no hay
+    información» aquí haría concluir que el dato no está, cuando lo cierto
+    es que no se pudo mirar.
+    """
+
+    INVENTORY_UNAVAILABLE = "inventory_unavailable"
+    """No había versión de inventario activa sobre la que consultar.
+
+    Distinto de :attr:`CAPABILITY_UNAVAILABLE`: la fuente respondió, pero no
+    tenía nada vigente con lo que contestar. Tampoco es una ausencia.
+    """
+
+    CODE_NOT_FOUND_IN_SOURCE = "code_not_found_in_source"
+    """La fuente respondió correctamente y no devolvió el código pedido.
+
+    **No significa que el material no exista.** Mientras la fuente no
+    garantice que su ausencia es autoritativa, esto solo dice lo que se
+    observó, no lo que pasa en la realidad.
+    """
+
 
 @dataclass(frozen=True, slots=True)
 class Citation:
