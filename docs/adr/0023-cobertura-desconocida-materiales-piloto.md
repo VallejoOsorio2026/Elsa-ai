@@ -161,6 +161,13 @@ similitud sobre la descripción. Dejan de ser un riesgo teórico.
 > La comprobación M5 (JWKS, algoritmo de firma, login y llamadas autenticadas)
 > se ejecutó en el mismo bloque y **no es objeto de este ADR**. No se declara
 > aquí ningún avance de M5.
+>
+> **Estado, 2026-09-19.** Esa comprobación, y la medición M3 completa de la que
+> la tabla de arriba es solo el cruce final, están registradas en
+> [la evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md). **Este ADR no
+> cambia**: sigue sin declarar ningún avance de M5, y lo que decide —que M8
+> deja de ser puerta previa a liberar— **no depende de M3 ni de M5**, como su
+> §14 argumenta.
 
 ### 6. Hechos que este ADR no altera
 
