@@ -209,12 +209,16 @@ una cobertura que nadie demostró**.
 
 ### 8. Conclusión: M8-A
 
-> **M8 deja de ser puerta previa a liberar el Piloto 0.1.**
+> **M8 deja de ser puerta previa a liberar el Piloto 0.1**, y **B9a, B9b y B9c
+> (§14) ocupan su lugar como puertas.**
 >
 > La cobertura `UNKNOWN` se acepta para V1 bajo controles compensatorios,
 > siempre que **ninguna capacidad trate una ausencia o un no-match como prueba
 > de inexistencia**, y que **toda consulta que exigiría cobertura completa se
 > resuelva de forma determinista sin producir una respuesta factual completa**.
+>
+> **Esto no libera nada por sí solo.** B9a, B9b y B9c deben estar
+> **implementadas y probadas** antes de liberar las capacidades afectadas.
 
 **Qué NO significa esta decisión.** Se enumera porque cada línea es una
 confusión posible:
@@ -388,7 +392,14 @@ tres condiciones en su lugar.
 |---|---|---|
 | **B9a** | `requires_complete_inventory_coverage` **implementada** como propiedad determinista de la plantilla ([ADR 0021](0021-contrato-de-inventario-con-materiales.md) §12), derivada de los campos que la composición va a afirmar y **no decidida por un LLM** | Código |
 | **B9b** | Los avisos `coverage_unknown` y `coverage_incomplete` **disponibles** en `AnswerWarning` y emitidos según [ADR 0021](0021-contrato-de-inventario-con-materiales.md) §13, **sin confundirse entre sí** | Código |
-| **B9c** | Pruebas automáticas **A20** y **A21** (§14.1), activas en integración continua | Código |
+| **B9c** | Pruebas automáticas **A20**, **A20b** y **A21** (§14.1), activas en integración continua | Código |
+
+**Las tres son puertas operativas, no mejoras deseables.** Ninguna capacidad
+que pueda emitir una afirmación dependiente de cobertura (§9) se libera a un
+tester antes de que **las tres estén implementadas y probadas en integración
+continua**. Retirar B9 sin ellas dejaría el riesgo R4 del
+[contrato funcional](../piloto-0-1/contrato-funcional.md) sin ningún control
+ejecutable, que es exactamente lo que esta decisión evita.
 
 **Por qué esto no es M8 con otro nombre**, que es la objeción obvia:
 
@@ -415,7 +426,8 @@ Se añaden a la tabla del [contrato funcional](../piloto-0-1/contrato-funcional.
 comprobada en las dos direcciones, para que no pueda volverse vacua en silencio.
 
 **Este ADR no las implementa.** Fijarlas es su objeto; construirlas es trabajo
-posterior y autorizado aparte.
+posterior a este ADR, autorizado aparte y **previo a liberar** las capacidades
+afectadas (§14).
 
 ### 15. El LLM no puede levantar ninguna de estas restricciones
 
@@ -491,12 +503,11 @@ las causas posibles. Cambiarlo sería empeorarlo.
 | # | Pendiente | Estado |
 |---|---|---|
 | 1 | **M8** | **ABIERTO.** Criterio de cierre: [ADR 0021](0021-contrato-de-inventario-con-materiales.md) §8.3, **no cumplido**. Deja de ser bloqueante, **no se cierra** |
-| 2 | **B9a, B9b, B9c** | **Bloqueantes nuevos**, propios de ELSA (§14) |
-| 3 | **M1, M3, M4, M5, M6, M7** | **Abiertos y bloqueantes, sin cambio.** Este ADR no toca ninguno |
-| 4 | **M2** | Abierto y **no** bloqueante, sin cambio |
-| 5 | **D20** — retención del Incident Snapshot | **ABIERTA y puerta previa a liberar**, sin cambio |
-| 6 | Fachada contractual, `MaterialsPort` real, adaptador, endpoints, plan de capacidades | **No existen.** Fuera del alcance de este ADR |
-| 7 | Documento de cierre del subbloque | **Obligatorio** (regla 26) cuando el subbloque se declare cerrado. Este ADR **no lo es** |
+| 2 | **B9a, B9b, B9c** | **Bloqueantes nuevos**, propios de ELSA (§14). **Puertas previas a liberar** las capacidades afectadas: implementadas y probadas antes del primer tester |
+| 3 | **Estado de los demás puntos del contrato con Materiales (M1–M7)** | **Fuera del alcance de este ADR.** No se declaran aquí: los gobiernan sus propios subbloques |
+| 4 | **D20** — retención del Incident Snapshot | **ABIERTA y puerta previa a liberar**, sin cambio |
+| 5 | Fachada contractual, `MaterialsPort` real, adaptador, endpoints, plan de capacidades | **No existen.** Fuera del alcance de este ADR |
+| 6 | Documento de cierre del subbloque | **Obligatorio** (regla 26) cuando el subbloque se declare cerrado. Este ADR **no lo es** |
 
 **La cobertura seguirá siendo `UNKNOWN` después de aprobar este ADR.** Esa es
 precisamente la situación que se acepta, no una que se resuelva.
