@@ -302,7 +302,7 @@ Formato «acción → resultado observable». **Sin métricas numéricas de éxi
 |---|---|
 | **Retención del Incident Snapshot** | **Abierta. Puerta previa a liberar**: ningún tester entra antes de que exista una política escrita. No se fija aquí un número de días |
 | **M8** — semántica de ausencia y cobertura | **Abierta y NO bloqueante** desde [ADR 0023](../adr/0023-cobertura-desconocida-materiales-piloto.md). Mientras siga abierta, ELSA **no puede afirmar la inexistencia de un material** y la cobertura se declara `UNKNOWN`. **M8 no está cerrado**: su criterio de cierre sigue siendo [ADR 0021](../adr/0021-contrato-de-inventario-con-materiales.md) §8.3, sin cumplir |
-| M1, M3, M4, M5, M6, M7 | Abiertas y bloqueantes. Requieren al responsable de Materiales y datos reales |
+| **M1–M7** | Sus estados se mantienen en sus artefactos y decisiones correspondientes. **Este apartado no los redefine** |
 | M2 — consulta por lote | Abierta y **no** bloqueante |
 | Muestra concreta de la medición M3 | Pendiente: qué hojas y quién la ejecuta, dentro del protocolo del §11 |
 | Mecanismo por el que la interfaz presenta el manual | Pendiente de inspeccionar el frontend (ver el manual, §«Sobre este documento») |
