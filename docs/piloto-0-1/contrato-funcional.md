@@ -193,7 +193,10 @@ fuera de los permisos del usuario, ni volcados indiscriminados de documentos.
 | B6 | **M5** — JWT del usuario confirmado en la llamada real | Contrato |
 | B7 | **M6** — semántica **y temporalidad** de los campos devueltos | Contrato |
 | B8 | **M7** — responsable y versionado del contrato | Contrato |
-| B9 | **M8** — semántica de ausencia y cobertura | Contrato |
+| ~~B9~~ | ~~**M8** — semántica de ausencia y cobertura~~ — **retirado** por [ADR 0023](../adr/0023-cobertura-desconocida-materiales-piloto.md). M8 sigue **abierto**, pero **deja de ser bloqueante**. Lo sustituyen B9a–B9c | — |
+| B9a | `requires_complete_inventory_coverage` implementada como propiedad determinista de la plantilla, **no decidida por un LLM** | Código |
+| B9b | Avisos `coverage_unknown` y `coverage_incomplete` disponibles y emitidos según [ADR 0021](../adr/0021-contrato-de-inventario-con-materiales.md) §13, sin confundirse entre sí | Código |
+| B9c | Pruebas **A20**, **A20b** y **A21** activas en integración continua | Código |
 | B10 | Las cuatro capacidades, cinco plantillas, selector y ejecutor | Código |
 | B11 | Autorización por capacidad, minimización y no divulgación en planes | Código |
 | B12 | Composición con procedencia por hecho | Código |
@@ -274,15 +277,18 @@ Formato «acción → resultado observable». **Sin métricas numéricas de éxi
 | A16 | Manual del observador | Alcanzable desde cualquier pantalla, sin salir de ELSA, y contiene la advertencia sobre ausencia |
 | A17 | Medición real con el BOM de Tampella | Número de llamadas y latencias registradas, como evidencia para decidir M2 |
 | A18 | Revisión de todo texto que la plantilla pueda generar | Ninguna cadena afirma la inexistencia de un material a partir de una ausencia en Materiales |
+| A20 | Afirmación **acotable** con `requires_complete_inventory_coverage = true` y cobertura `UNKNOWN` | `PARTIAL` + `coverage_unknown`. **Nunca** `coverage_incomplete`, **nunca** `ANSWERED` |
+| A20b | Lo mismo con `requires_complete_inventory_coverage = false` y solo campos estables afirmados | **No** se degrada por cobertura |
+| A21 | Revisión de todo texto que la plantilla pueda generar | **Ninguna cadena alcanzable** afirma algo que solo sería cierto con cobertura completa: «no hay en ningún almacén», «estos son todos los materiales que tenemos» o equivalentes. Estado y texto se verifican **por separado** |
 
 ## 13. Riesgos
 
 | Id | Riesgo | Mitigación concreta |
 |---|---|---|
 | R1 | **Formato del código SAP.** Si el BOM y Materiales difieren en su representación, el caso central falla en silencio y cae a búsqueda por parecido | Medición M3 previa (§11), sin asumir categorías. Bloquea normalización, unión y adaptador; **no** bloquea tipos, contratos, documentación ni observabilidad independiente del formato |
-| R2 | **Ausencia interpretada como inexistencia** | M8 bloqueante; restricción de redacción de ADR 0020 §12; pruebas A6, A6b y A18; advertencia en el manual |
+| R2 | **Ausencia interpretada como inexistencia** | Restricción de redacción de ADR 0020 §12; pruebas A6, A6b, A18 y A19, **activas en CI**; ausencia autoritativa rechazada en código; advertencia en el manual §5. M8 **ya no** figura entre las mitigaciones: [ADR 0023](../adr/0023-cobertura-desconocida-materiales-piloto.md) lo retiró como puerta al existir las otras |
 | R3 | **Contrato de Materiales no versionado del lado de Materiales** | M1 y M7 por escrito; prueba de contrato propia que falle si la forma cambia |
-| R4 | **Cobertura incompleta del inventario.** La exportación puede no cubrir todas las sedes | No es nuestro fallo, sí nuestro problema: el manual lo advierte y el mensaje de ausencia nunca se lee como «no existe» |
+| R4 | **Cobertura incompleta del inventario.** La exportación puede no cubrir todas las sedes | No es nuestro fallo, sí nuestro problema: el manual lo advierte y el mensaje de ausencia nunca se lee como «no existe». Formalizado en [ADR 0023](../adr/0023-cobertura-desconocida-materiales-piloto.md): la cobertura `UNKNOWN` se acepta, y **ninguna respuesta puede depender de una cobertura que nadie demostró** (A20, A21) |
 | R5 | **Muchas llamadas en consultas compuestas** | Aceptado: la primera versión hace consultas individuales. Se mide (B13) y se decide con evidencia. Sin concurrencia inventada |
 | R6 | **Léxico de intención que no cubre cómo habla la planta** | La salida segura es `clarify`, no adivinar. Los reportes de los testers son el instrumento para ampliarlo |
 | R7 | **Divulgación de activos por aclaración o por mensaje** | Resolución restringida al universo autorizado por construcción; pruebas A9, A9b y A9c, extendiendo la prueba de no divulgación existente |
@@ -295,8 +301,8 @@ Formato «acción → resultado observable». **Sin métricas numéricas de éxi
 | Qué | Estado |
 |---|---|
 | **Retención del Incident Snapshot** | **Abierta. Puerta previa a liberar**: ningún tester entra antes de que exista una política escrita. No se fija aquí un número de días |
-| **M8** — semántica de ausencia | **Abierta y bloqueante.** Mientras siga así, ELSA no puede afirmar la inexistencia de un material |
-| M1, M3, M4, M5, M6, M7 | Abiertas y bloqueantes. Requieren al responsable de Materiales y datos reales |
+| **M8** — semántica de ausencia y cobertura | **Abierta y NO bloqueante** desde [ADR 0023](../adr/0023-cobertura-desconocida-materiales-piloto.md). Mientras siga abierta, ELSA **no puede afirmar la inexistencia de un material** y la cobertura se declara `UNKNOWN`. **M8 no está cerrado**: su criterio de cierre sigue siendo [ADR 0021](../adr/0021-contrato-de-inventario-con-materiales.md) §8.3, sin cumplir |
+| **M1–M7** | Sus estados se mantienen en sus artefactos y decisiones correspondientes. **Este apartado no los redefine** |
 | M2 — consulta por lote | Abierta y **no** bloqueante |
 | Muestra concreta de la medición M3 | Pendiente: qué hojas y quién la ejecuta, dentro del protocolo del §11 |
 | Mecanismo por el que la interfaz presenta el manual | Pendiente de inspeccionar el frontend (ver el manual, §«Sobre este documento») |

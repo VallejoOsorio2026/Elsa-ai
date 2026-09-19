@@ -1,6 +1,8 @@
 # ADR 0022 — Feedback, observabilidad e Incident Snapshot del Piloto 0.1
 
 - Estado: **propuesto**
+- La condición que el §21 exigía para cambiar el carácter bloqueante de M8
+  se cumple en [ADR 0023](0023-cobertura-desconocida-materiales-piloto.md)
 - Bloque: 5.0, subbloque **5.0.c**
 - Conserva sin cambios los estados de respuesta de
   [ADR 0017](0017-generacion-fundamentada-y-citas-verificables.md)
@@ -522,6 +524,14 @@ propusiera que M8 deje de bloquear el piloto.
 
 **Cualquier cambio futuro del carácter bloqueante de M8 requiere otro ADR**
 (regla 25).
+
+> **Ese ADR posterior existe: es
+> [ADR 0023](0023-cobertura-desconocida-materiales-piloto.md).** Las cuatro
+> pruebas que este apartado exigía como precondición —A6, A6b, A18 y A19— se
+> implementaron en el subbloque 5.0.c.1 y están activas en integración continua.
+> Sobre esa base, ADR 0023 retira a M8 de las puertas previas a liberar **sin
+> cerrarlo**. Este apartado queda como el registro de la condición que se exigió;
+> **no se reescribe**.
 
 ---
 
