@@ -1,6 +1,9 @@
 # ADR 0021 — Contrato de inventario con Materiales (V1)
 
 - Estado: **propuesto**
+- El carácter bloqueante de **M8** (§25) se redefine en
+  [ADR 0023](0023-cobertura-desconocida-materiales-piloto.md). El **criterio
+  de cierre de M8 del §8.3 no se toca**, y este ADR no se reescribe
 - Bloque: 5.0, subbloque **5.0.b**
 - Deriva de [ADR 0020](0020-capacidades-componibles-y-planes-de-ejecucion.md)
   §5, §10, §11, §12 y §13, y **no lo reabre**
@@ -963,6 +966,12 @@ Materiales real.**
 | **M6** | **Parcial** | **Sí** |
 | **M7** | **Rol y gobernanza definidos · ocupante inicial pendiente** | **Sí** |
 | **M8** | **Abierto** | **Sí** |
+
+> **Actualizado por [ADR 0023](0023-cobertura-desconocida-materiales-piloto.md).**
+> La fila de **M8** se lee hoy **«Abierto · no bloqueante»**: la cobertura
+> `UNKNOWN` se acepta para V1 bajo controles compensatorios verificables.
+> **M8 no se cierra**, y el criterio de cierre del §8.3 de este ADR queda
+> **intacto y sin cumplir**. El resto de la tabla **no cambia**.
 
 ### 26. Trazabilidad de los requisitos de este ADR
 
