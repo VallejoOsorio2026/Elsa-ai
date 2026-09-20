@@ -1,6 +1,6 @@
 # ADR 0020 — Capacidades componibles y planes de ejecución controlados
 
-- Estado: **propuesto**
+- Estado: **aceptado**
 - El carácter bloqueante de **M8** (§17) se redefine en
   [ADR 0023](0023-cobertura-desconocida-materiales-piloto.md). El resto de
   este ADR, incluida la restricción del §12, **no se reabre**
