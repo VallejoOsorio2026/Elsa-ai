@@ -4,6 +4,12 @@
 - El carácter bloqueante de **M8** (§25) se redefine en
   [ADR 0023](0023-cobertura-desconocida-materiales-piloto.md). El **criterio
   de cierre de M8 del §8.3 no se toca**, y este ADR no se reescribe
+- **M3 y M5 fueron medidos el 2026-09-19** y quedan **resueltos para V1** por
+  [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md),
+  sobre [la evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md). Ese ADR
+  **cierra los puntos 1, 2 y 3 de las decisiones diferidas del §22**. Este ADR
+  **no se reescribe**; las notas fechadas de §3.2, §20, §21.1, §21.2, §22 y §25
+  registran el estado posterior. **El §8.3 sigue intacto**
 - Bloque: 5.0, subbloque **5.0.b**
 - Deriva de [ADR 0020](0020-capacidades-componibles-y-planes-de-ejecucion.md)
   §5, §10, §11, §12 y §13, y **no lo reabre**
@@ -206,6 +212,15 @@ Se conservan cuatro representaciones distintas, que no deben confundirse:
 | Forma de almacenamiento en ELSA | Cómo se guarda | Definido |
 | Forma canónica de comparación | **Solo** para comparar dos códigos **dentro de** ELSA | **Provisional hasta M3** |
 | **Representación de frontera (`material_code`)** | Lo único que cruza hacia Materiales | **Indecidible hasta M3** |
+
+> **Estado, 2026-09-19.** M3 se midió y las dos últimas filas **dejaron de ser
+> indecidibles para V1**: la representación de frontera es la regla **M3-A**
+> —cadena decimal exacta, sin agregar ni quitar ceros, sin padding— decidida en
+> [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md)
+> §8, sobre [la evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md) §3. **El texto de
+> arriba se conserva** porque describe correctamente el estado en el momento de
+> esta decisión. **Las cuatro representaciones siguen sin confundirse**, que es
+> lo que este apartado decide.
 
 Concuerda con ADR 0020 §5 —*«la representación que exija Materiales se aplica
 dentro de su adaptador, nunca en el núcleo»*— sin reabrirlo.
@@ -862,6 +877,16 @@ ocupante real y materializar la gobernanza correspondiente.
 | Materiales ya fue modificado | **No se ha tocado.** La auditoría fue de solo lectura |
 | La representación de frontera está decidida | **Indecidible hasta M3** |
 
+> **Estado, 2026-09-19.** Tres filas de esta tabla cambiaron, y **solo tres**:
+> **M3** y **M5** dejaron de estar «bloqueados por prueba real» —ambas pruebas
+> se ejecutaron y quedan **resueltos para V1**—, y con M3 la **representación
+> de frontera quedó decidida** como **M3-A**. Lo decide
+> [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md),
+> sobre [la evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md).
+> **El resto de la tabla no cambia**: la fachada sigue sin existir, M1 y M7
+> siguen sin cerrarse operacionalmente, M8 sigue **abierto** con su §8.3
+> intacto, y Materiales sigue sin tocarse.
+
 ### 21. Condiciones previas, en orden
 
 #### 21.1 M3 es condición previa al adaptador
@@ -873,6 +898,28 @@ ADR 0020 §5 ya lo establece; aquí se confirma sin ampliarlo.
 La forma canónica de comparación permanece **provisional hasta M3**, sigue
 siendo normalización **interna** de ELSA, y **no se asume que sea la
 representación que deba enviarse a Materiales**.
+
+> **Estado, 2026-09-19. La condición previa está cumplida.** M3 se midió sobre
+> el BOM real de Tampella según el protocolo D23 y quedó **resuelto para V1**
+> como **M3-A**, decidido en
+> [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md)
+> §8 sobre [la evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md) §2 y §3.
+> **El adaptador de inventario deja de estar bloqueado por M3** (ADR 0024 §9),
+> lo que levanta la condición previa **sin autorizar** su construcción.
+>
+> Dos advertencias que este levantamiento **no** retira:
+>
+> - la forma canónica de comparación **sigue siendo normalización interna de
+>   ELSA**, y sigue sin ser, por sí misma, lo que se envía a Materiales: lo que
+>   cruza la frontera es **M3-A**;
+> - **M3-A vale para el dominio observado del Piloto Tampella V1.** El XLSX
+>   almacena los códigos numéricamente, de modo que la medición **no demuestra**
+>   que nunca haya existido un cero inicial aguas arriba, y **no autoriza**
+>   ninguna regla global sobre ceros iniciales en SAP.
+>
+> **Resuelto:** M3-A ya está registrado como decisión arquitectónica en
+> [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md)
+> §8, conforme a la regla 25.
 
 #### 21.2 M5 es condición previa a la autenticación real
 
@@ -887,6 +934,24 @@ clave publicable, sin credencial de servicio. Queda por verificar el
   **revisión arquitectónica explícita** antes de proceder, porque convertiría a
   ELSA en depositaria de un secreto de Materiales, que es una postura distinta
   de la actual.
+
+> **Estado, 2026-09-19. La bifurcación se resolvió por la primera rama.** La
+> comprobación pública demostró **firma asimétrica**: el JWKS real de
+> Materiales publica una clave `ES256` / `EC` con `use=sig` y `kid` presente, y
+> 30 de 30 llamadas autenticadas al RPC real respondieron sin error con el JWT
+> de un usuario real ([evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md)
+> §4). **La validación de ELSA queda confirmada y M5 queda resuelto para V1**
+> por
+> [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md)
+> §11.
+>
+> Por tanto **el segundo escenario no se activa**: no hay secreto simétrico que
+> compartir, y la revisión arquitectónica que ese caso habría exigido **no hace
+> falta**. La postura de ELSA frente a Materiales **no cambia**.
+>
+> **Resuelto:** este cierre ya está registrado en
+> [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md)
+> §11, conforme a la regla 25.
 
 #### 21.3 M8 permanece abierto
 
@@ -921,6 +986,18 @@ este ADR resuelve.
 | 10 | Exposición de los componentes crudos de existencias | Mejora futura de auditabilidad; no bloquea el piloto |
 | 11 | Ocupante inicial del rol de Contract Owner | Antes del primer tester, en el repositorio de Materiales |
 | 12 | Entrega de `search_materials_by_text` | Fuera del Piloto 0.1 inicial |
+
+> **Estado, 2026-09-19. Las filas 1, 2 y 3 quedan CERRADAS** por
+> [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md)
+> §14, sobre [la evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md):
+>
+> | # | Resultado |
+> |---|---|
+> | **1** | Representación de frontera: **M3-A** (ADR 0024 §8), **para V1** |
+> | **2** | Forma canónica de comparación: **confirmada** como normalización **interna**, distinta de la de frontera (ADR 0024 §8.1) |
+> | **3** | Algoritmo de firma: **`ES256` asimétrico aceptado**, sin revisión arquitectónica porque el escenario simétrico no se dio (ADR 0024 §11.1) |
+>
+> **Las filas 4 a 12 no cambian.**
 
 ### 23. Riesgos que este ADR mitiga, y el que no
 
@@ -972,6 +1049,30 @@ Materiales real.**
 > `UNKNOWN` se acepta para V1 bajo controles compensatorios verificables.
 > **M8 no se cierra**, y el criterio de cierre del §8.3 de este ADR queda
 > **intacto y sin cumplir**. El resto de la tabla **no cambia**.
+
+> **Actualizado el 2026-09-19 por
+> [la evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md).** Dos filas más
+> cambian de lectura, y **solo dos**:
+>
+> | ID | Estado el 2026-09-19 | Bloqueante |
+> |---|---|---|
+> | **M3** | **Resuelto para V1** como **M3-A**, medido sobre datos reales y decidido en [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md) §8 | **No** |
+> | **M5** | **Resuelto para V1** por [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md) §11: JWKS asimétrico `ES256`/`EC`, JWT de usuario real verificado contra el RPC real | **No** |
+>
+> **M1, M2, M4, M6, M7 y M8 conservan exactamente el estado de la tabla de
+> arriba.** Ninguno se cierra por asociación. En particular **M8 sigue
+> abierto** bajo [ADR 0023](0023-cobertura-desconocida-materiales-piloto.md), y
+> el §8.3 de este ADR sigue **intacto y sin cumplir**.
+>
+> La frase que encabeza este apartado —«ninguno se declara cerrado
+> operacionalmente mientras siga dependiendo de Materiales real»— **se respeta**:
+> M3 y M5 se resuelven **precisamente porque se midieron contra Materiales
+> real**, no por decisión de escritorio.
+>
+> Ambos cierres están registrados en
+> [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md),
+> conforme a la regla 25. **M3-A vale para el dominio observado del Piloto
+> Tampella V1**, no universalmente (ADR 0024 §10).
 
 ### 26. Trazabilidad de los requisitos de este ADR
 
