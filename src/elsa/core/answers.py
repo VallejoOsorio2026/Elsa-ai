@@ -119,6 +119,22 @@ class AnswerWarning(StrEnum):
     observó, no lo que pasa en la realidad.
     """
 
+    COVERAGE_UNKNOWN = "coverage_unknown"
+    """La cobertura del inventario **no se puede determinar**.
+
+    Nadie ha declarado qué ámbito cubre el snapshot consultado, así que la
+    respuesta se atribuye a lo que esa fuente devolvió y nunca al mundo
+    (ADR 0021 §7.5, ADR 0023 §10.2.2).
+    """
+
+    COVERAGE_INCOMPLETE = "coverage_incomplete"
+    """Se **demuestra** que falta un ámbito esperado, y es relevante.
+
+    Distinto de :attr:`COVERAGE_UNKNOWN` y **no intercambiable con él**:
+    afirmar incompletitud sin evidencia sería el mismo error en espejo.
+    `UNKNOWN` no se presenta como `INCOMPLETE` (ADR 0021 §13.2).
+    """
+
 
 @dataclass(frozen=True, slots=True)
 class Citation:

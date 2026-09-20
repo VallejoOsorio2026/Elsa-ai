@@ -41,11 +41,13 @@ __all__ = [
     "CAPABILITY_UNAVAILABLE_MESSAGE",
     "INVENTORY_UNAVAILABLE_MESSAGE",
     "SOURCE_DID_NOT_RETURN_MESSAGE",
+    "UNBOUNDED_CLAIM_REFUSAL_MESSAGE",
     "CapabilityCallStatus",
     "CapabilityOutcome",
     "InterpretedOutcome",
     "InventoryLookupResult",
     "UncomposableOutcomeError",
+    "asserts_complete_coverage",
     "asserts_nonexistence",
     "interpret_inventory_lookup",
 ]
@@ -134,6 +136,12 @@ INVENTORY_UNAVAILABLE_MESSAGE = (
 
 _ANSWERED_MESSAGE = "La fuente consultada devolvió el material solicitado."
 
+UNBOUNDED_CLAIM_REFUSAL_MESSAGE = (
+    "Consulté el inventario cargado en Materiales y puedo hablar únicamente de lo "
+    "que esa fuente devolvió en esta consulta. No puedo concluir nada sobre el "
+    "resto de la empresa: el alcance que ese inventario cubre no está declarado."
+)
+
 # Afirmaciones de inexistencia como hecho. La guarda busca **estas**, no las
 # palabras sueltas que las componen: prohibir «existe» dejaría sin forma de
 # explicar honestamente una ausencia no autoritativa.
@@ -176,6 +184,68 @@ def asserts_nonexistence(text: str) -> bool:
         if any(hedge.search(sentence) for hedge in _HEDGES):
             continue
         if any(denial.search(sentence) for denial in _DENIALS):
+            return True
+    return False
+
+
+# Afirmaciones que cuantifican sobre un universo cuyo alcance nadie declaró
+# (Clase 2 de ADR 0023 §9). Se buscan **frases**, no palabras: prohibir
+# «todos» o «ningún» dejaría sin forma de acotar una respuesta a su fuente.
+_COVERAGE_CLAIM_PATTERNS = (
+    # «no hay / no tenemos / no queda … en ningún almacén»
+    r"\bno\s+(?:hay|haya|tenemos|queda|quedan|existen?)\b[^.;]*?\ben\s+ning[uú]n(?:a)?\s+"
+    r"(?:almac[eé]n|almacenes|bodega|dep[oó]sito|sede|centro|planta|parte|lado|sitio)\b",
+    # «el material no está en ninguna bodega»
+    r"\bno\s+est[aá]\s+(?:en\s+)?ning[uú]n(?:a)?\s+"
+    r"(?:almac[eé]n|bodega|dep[oó]sito|sede|centro|planta)\b",
+    # «estos son todos los materiales que tenemos»
+    r"\btodos\s+los\s+(?:materiales|c[oó]digos|repuestos|art[ií]culos|[ií]tems)\b"
+    r"[^.;]*?\b(?:que\s+(?:tenemos|hay|existen|manejamos)|"
+    r"de\s+la\s+(?:empresa|compa[ñn][ií]a|planta)|del\s+inventario)\b",
+    # «en todos los almacenes», «en toda la empresa»
+    r"\ben\s+tod(?:os|as)\s+(?:los|las)\s+"
+    r"(?:almacenes|bodegas|dep[oó]sitos|sedes|centros|plantas)\b",
+    r"\ben\s+tod[ao]\s+la\s+(?:empresa|compa[ñn][ií]a|planta|organizaci[oó]n)\b",
+    # «el inventario completo», «la cobertura es total»
+    r"\binventario\s+(?:completo|total|[ií]ntegro)\b",
+    r"\bcobertura\s+(?:es\s+)?(?:completa|total)\b",
+    # «no existe en el inventario de la empresa»
+    r"\bno\s+existe\s+en\s+el\s+inventario\b",
+)
+
+# Marcas de que la frase habla del **desconocimiento** del alcance, que es
+# justo lo que ELSA debe poder decir en voz alta.
+_COVERAGE_HEDGE_PATTERNS = (
+    r"\bno\s+puedo\s+(?:afirmar|concluir|saber|decir|hablar)\b",
+    r"\bno\s+s[eé]\s+(?:qu[eé]|si|cu[aá]l)\b",
+    r"\bse\s+desconoce\b",
+    r"\bno\s+est[aá]\s+declarad[oa]\b",
+    r"\bnadie\s+(?:ha\s+)?demostr",
+)
+
+_COVERAGE_CLAIMS = tuple(re.compile(pattern) for pattern in _COVERAGE_CLAIM_PATTERNS)
+_COVERAGE_HEDGES = _HEDGES + tuple(re.compile(pattern) for pattern in _COVERAGE_HEDGE_PATTERNS)
+
+
+def asserts_complete_coverage(text: str) -> bool:
+    """Si el texto afirma algo que solo sería cierto con cobertura completa.
+
+    Es a la cobertura lo que :func:`asserts_nonexistence` es a la
+    inexistencia, y se construye igual: frase a frase, con salvedades, y
+    **sin prohibir vocabulario**. «Estos son todos los elementos del BOM
+    publicado» es una afirmación acotada a una fuente propia de ELSA y debe
+    seguir siendo decible; «estos son todos los materiales que tenemos»
+    cuantifica sobre un universo que nadie ha delimitado y no.
+
+    Una atribución **no** es una salvedad: «según el inventario cargado, no
+    hay en ningún almacén» sigue siendo una afirmación de Clase 2, porque
+    ninguna acotación vuelve verdadera una afirmación universal sobre un
+    universo desconocido (ADR 0023 §9).
+    """
+    for sentence in _SENTENCE_SPLIT.split(text.lower()):
+        if any(hedge.search(sentence) for hedge in _COVERAGE_HEDGES):
+            continue
+        if any(claim.search(sentence) for claim in _COVERAGE_CLAIMS):
             return True
     return False
 
