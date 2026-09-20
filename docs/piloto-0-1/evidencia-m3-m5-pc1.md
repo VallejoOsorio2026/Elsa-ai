@@ -132,7 +132,10 @@ cambios.
 ## 3. M3-A — la regla de frontera decidida
 
 **DECISIÓN TOMADA.** Sobre la evidencia del §2, **M3 queda resuelto para V1
-como `M3-A`**.
+como `M3-A`**. La decisión se formaliza en
+[ADR 0024](../adr/0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md)
+§8, que es su autoridad; lo que sigue es la misma regla, registrada aquí junto
+a la evidencia que la sostiene.
 
 La regla, completa:
 
@@ -221,7 +224,9 @@ consultar_materiales(p_consulta, p_desde, p_limite)
 
 ### 4.4 La decisión
 
-**DECISIÓN TOMADA.** **M5 queda resuelto para V1.**
+**DECISIÓN TOMADA.** **M5 queda resuelto para V1**, formalizado en
+[ADR 0024](../adr/0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md)
+§11.
 
 Queda demostrado, en el entorno real observado, que:
 
@@ -248,7 +253,7 @@ que el escenario simétrico habría exigido.
 | 1 | **M8** — semántica de ausencia y cobertura | **ABIERTO**, y **no bloqueante** desde [ADR 0023](../adr/0023-cobertura-desconocida-materiales-piloto.md). Su criterio de cierre sigue siendo [ADR 0021](../adr/0021-contrato-de-inventario-con-materiales.md) §8.3, **sin cumplir**. **Este documento no lo toca** | Responsable del proyecto |
 | 2 | **M1, M4, M6, M7** | **Conservan su estado real.** Ninguno se cierra por asociación con M3 o M5 | Sus propios subbloques |
 | 3 | **M2** — consulta por lote | **Abierto y no bloqueante**, sin cambio | Responsable del proyecto |
-| 4 | **ADR que registre `M3-A` y el cierre de M5 para V1** | **PENDIENTE.** La regla de frontera del §3 y la aceptación del §4.4 deciden los puntos 1, 2 y 3 de las decisiones diferidas de [ADR 0021](../adr/0021-contrato-de-inventario-con-materiales.md) §22, y la regla 25 de [`CLAUDE.md`](../../CLAUDE.md) exige un ADR para ello. **No se redacta en esta actualización** porque no fue autorizada | Responsable del proyecto |
+| 4 | ~~ADR que registre `M3-A` y el cierre de M5 para V1~~ | **RESUELTO.** Es [ADR 0024](../adr/0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md), que decide M3-A (§8) y el cierre de M5 (§11) y **cierra los puntos 1, 2 y 3** de las decisiones diferidas de [ADR 0021](../adr/0021-contrato-de-inventario-con-materiales.md) §22, conforme a la regla 25 | — |
 | 5 | **B9a, B9b, B9c** | **Bloqueantes nuevos** de [ADR 0023](../adr/0023-cobertura-desconocida-materiales-piloto.md) §14. **No implementados** | Responsable del proyecto |
 | 6 | **Cierre del subbloque 5.0.b** | **PENDIENTE.** Obligatorio (regla 26). Este documento **no lo es** | Responsable del proyecto |
 
@@ -263,6 +268,7 @@ posterior fechada.
 
 | Documento | Qué se añadió |
 |---|---|
+| [ADR 0024](../adr/0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md) | **Creado.** Formaliza M3-A (§8) y el cierre de M5 (§11) como decisión arquitectónica, y cierra los puntos 1, 2 y 3 de las diferidas de [ADR 0021](../adr/0021-contrato-de-inventario-con-materiales.md) §22 |
 | [Contrato funcional](contrato-funcional.md) §10, §11, §13, §14 | B3 y B6 marcados como resueltos para V1; resultado de la medición en el §11; R1 actualizado; §14 retira «Muestra concreta de la medición M3» de las decisiones abiertas |
 | [ADR 0021](../adr/0021-contrato-de-inventario-con-materiales.md) §3.2, §20, §21.1, §21.2, §22, §25 | Notas de estado posterior. **Los cuerpos normativos y el §8.3 no se tocan** |
 | [ADR 0020](../adr/0020-capacidades-componibles-y-planes-de-ejecucion.md) §5, §17 | Notas de estado posterior sobre M3 y M5 |

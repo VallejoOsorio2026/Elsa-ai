@@ -164,10 +164,12 @@ similitud sobre la descripción. Dejan de ser un riesgo teórico.
 >
 > **Estado, 2026-09-19.** Esa comprobación, y la medición M3 completa de la que
 > la tabla de arriba es solo el cruce final, están registradas en
-> [la evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md). **Este ADR no
-> cambia**: sigue sin declarar ningún avance de M5, y lo que decide —que M8
-> deja de ser puerta previa a liberar— **no depende de M3 ni de M5**, como su
-> §14 argumenta.
+> [la evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md), y ambas quedan
+> decididas para V1 en
+> [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md).
+> **Este ADR no cambia, y ADR 0024 no lo reabre**: sigue sin declarar ningún
+> avance de M5, y lo que decide —que M8 deja de ser puerta previa a liberar—
+> **no depende de M3 ni de M5**, como su §14 argumenta.
 
 ### 6. Hechos que este ADR no altera
 

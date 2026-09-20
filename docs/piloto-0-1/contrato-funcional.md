@@ -187,10 +187,10 @@ fuera de los permisos del usuario, ni volcados indiscriminados de documentos.
 |---|---|---|
 | B1 | Datos reales de Tampella validados | Dato |
 | B2 | BOM real publicado | Dato |
-| ~~B3~~ | ~~**M3** — formato real del código SAP, medido según el protocolo del §11~~ — **resuelto para V1** el 2026-09-19. La medición se ejecutó según el protocolo del §11; su resultado y la regla de frontera **M3-A** están en [la evidencia M3/M5](evidencia-m3-m5-pc1.md) §2 y §3 | — |
+| ~~B3~~ | ~~**M3** — formato real del código SAP, medido según el protocolo del §11~~ — **resuelto para V1** el 2026-09-19 por [ADR 0024](../adr/0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md) §8. La medición se ejecutó según el protocolo del §11; su detalle está en [la evidencia M3/M5](evidencia-m3-m5-pc1.md) §2 y §3 | — |
 | B4 | **M1** — contrato estable de consulta de Materiales | Contrato |
 | B5 | **M4** — versión y fecha del inventario activo | Contrato |
-| ~~B6~~ | ~~**M5** — JWT del usuario confirmado en la llamada real~~ — **resuelto para V1** el 2026-09-19. JWKS asimétrico `ES256`/`EC` y 30 de 30 llamadas autenticadas reales: [la evidencia M3/M5](evidencia-m3-m5-pc1.md) §4 | — |
+| ~~B6~~ | ~~**M5** — JWT del usuario confirmado en la llamada real~~ — **resuelto para V1** el 2026-09-19 por [ADR 0024](../adr/0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md) §11. JWKS asimétrico `ES256`/`EC` y 30 de 30 llamadas autenticadas reales: [la evidencia M3/M5](evidencia-m3-m5-pc1.md) §4 | — |
 | B7 | **M6** — semántica **y temporalidad** de los campos devueltos | Contrato |
 | B8 | **M7** — responsable y versionado del contrato | Contrato |
 | ~~B9~~ | ~~**M8** — semántica de ausencia y cobertura~~ — **retirado** por [ADR 0023](../adr/0023-cobertura-desconocida-materiales-piloto.md). M8 sigue **abierto**, pero **deja de ser bloqueante**. Lo sustituyen B9a–B9c | — |
@@ -215,8 +215,10 @@ redacción de secretos y métricas numéricas de éxito.
 
 > **Estado, 2026-09-19: la medición ya se ejecutó.** El protocolo que sigue es
 > el que se aplicó, y se conserva porque describe **cómo** se midió. Los
-> resultados reales, los artefactos sellados y la regla de frontera **M3-A**
-> que salió de ellos viven en [la evidencia M3/M5](evidencia-m3-m5-pc1.md).
+> resultados reales y los artefactos sellados viven en
+> [la evidencia M3/M5](evidencia-m3-m5-pc1.md), y la regla de frontera **M3-A**
+> que salió de ellos se decide en
+> [ADR 0024](../adr/0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md).
 > Este apartado **no se reescribe con los resultados**: enuncia el método.
 
 La medición se hace **sobre el BOM real de Tampella**, antes de implementar la
@@ -254,8 +256,8 @@ Materiales.
 > mínimo que el protocolo exige, y la primera comparación se hizo **sin
 > normalización nueva**, como el apartado ordena. La decisión que habilitó
 > —la representación de frontera **M3-A**— está en
-> [la evidencia M3/M5](evidencia-m3-m5-pc1.md) §3, junto con la limitación que
-> **no** supera: el XLSX almacena los códigos numéricamente, de modo que la
+> [ADR 0024](../adr/0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md)
+> §8, junto con la limitación que **no** supera: el XLSX almacena los códigos numéricamente, de modo que la
 > medición **no demuestra** que nunca haya existido un cero inicial aguas
 > arriba.
 
@@ -300,7 +302,7 @@ Formato «acción → resultado observable». **Sin métricas numéricas de éxi
 
 | Id | Riesgo | Mitigación concreta |
 |---|---|---|
-| R1 | **Formato del código SAP.** Si el BOM y Materiales difieren en su representación, el caso central falla en silencio y cae a búsqueda por parecido | Medición M3 previa (§11), sin asumir categorías. **Ejecutada el 2026-09-19**: la regla de frontera **M3-A** ya está decidida y deja de bloquear normalización, unión y adaptador ([evidencia M3/M5](evidencia-m3-m5-pc1.md) §3). **El riesgo no desaparece**: la medición confirmó 3 casos reales en que la consulta devolvió resultados sin el código exacto, que es precisamente la caída a parecido que este riesgo describe. La mitigación viva es que ese fallo sea **ruidoso**: `fuzzy` no es equivalencia de código, y el invariante de lookup de [ADR 0021](../adr/0021-contrato-de-inventario-con-materiales.md) §6 lo hace verificable |
+| R1 | **Formato del código SAP.** Si el BOM y Materiales difieren en su representación, el caso central falla en silencio y cae a búsqueda por parecido | Medición M3 previa (§11), sin asumir categorías. **Ejecutada el 2026-09-19**: la regla de frontera **M3-A** ya está decidida en [ADR 0024](../adr/0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md) §8 y deja de bloquear normalización, unión y adaptador. **El riesgo no desaparece**: la medición confirmó 3 casos reales en que la consulta devolvió resultados sin el código exacto, que es precisamente la caída a parecido que este riesgo describe. La mitigación viva es que ese fallo sea **ruidoso**: `fuzzy` no es equivalencia de código, y el invariante de lookup de [ADR 0021](../adr/0021-contrato-de-inventario-con-materiales.md) §6 lo hace verificable |
 | R2 | **Ausencia interpretada como inexistencia** | Restricción de redacción de ADR 0020 §12; pruebas A6, A6b, A18 y A19, **activas en CI**; ausencia autoritativa rechazada en código; advertencia en el manual §5. M8 **ya no** figura entre las mitigaciones: [ADR 0023](../adr/0023-cobertura-desconocida-materiales-piloto.md) lo retiró como puerta al existir las otras |
 | R3 | **Contrato de Materiales no versionado del lado de Materiales** | M1 y M7 por escrito; prueba de contrato propia que falle si la forma cambia |
 | R4 | **Cobertura incompleta del inventario.** La exportación puede no cubrir todas las sedes | No es nuestro fallo, sí nuestro problema: el manual lo advierte y el mensaje de ausencia nunca se lee como «no existe». Formalizado en [ADR 0023](../adr/0023-cobertura-desconocida-materiales-piloto.md): la cobertura `UNKNOWN` se acepta, y **ninguna respuesta puede depender de una cobertura que nadie demostró** (A20, A21) |
@@ -317,8 +319,8 @@ Formato «acción → resultado observable». **Sin métricas numéricas de éxi
 |---|---|
 | **Retención del Incident Snapshot** | **Abierta. Puerta previa a liberar**: ningún tester entra antes de que exista una política escrita. No se fija aquí un número de días |
 | **M8** — semántica de ausencia y cobertura | **Abierta y NO bloqueante** desde [ADR 0023](../adr/0023-cobertura-desconocida-materiales-piloto.md). Mientras siga abierta, ELSA **no puede afirmar la inexistencia de un material** y la cobertura se declara `UNKNOWN`. **M8 no está cerrado**: su criterio de cierre sigue siendo [ADR 0021](../adr/0021-contrato-de-inventario-con-materiales.md) §8.3, sin cumplir |
-| **M3** — formato real del código SAP | **Resuelto para V1** el 2026-09-19 como **M3-A** ([evidencia M3/M5](evidencia-m3-m5-pc1.md) §3). La regla aplica **al dominio observado del Piloto Tampella V1** y no autoriza una regla global sobre ceros iniciales. **Pendiente**: el ADR que la registre (regla 25) |
-| **M5** — JWT del usuario en la llamada real | **Resuelto para V1** el 2026-09-19 ([evidencia M3/M5](evidencia-m3-m5-pc1.md) §4). JWKS asimétrico `ES256`/`EC` con `kid`, y 30 de 30 llamadas autenticadas reales sin error. **No se comparte ningún secreto simétrico HS256**. **Pendiente**: el ADR que lo registre (regla 25) |
+| ~~**M3** — formato real del código SAP~~ | **Cerrado para V1** como **M3-A** por [ADR 0024](../adr/0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md) §8. La regla aplica **al dominio observado del Piloto Tampella V1** y **no autoriza** una regla global sobre ceros iniciales (ADR 0024 §10). Deja de ser una decisión abierta |
+| ~~**M5** — JWT del usuario en la llamada real~~ | **Cerrado para V1** por [ADR 0024](../adr/0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md) §11. JWKS asimétrico `ES256`/`EC` con `kid`, y 30 de 30 llamadas autenticadas reales sin error. **No se comparte ningún secreto simétrico HS256**. Deja de ser una decisión abierta |
 | **M1, M4, M6, M7** | Sus estados se mantienen en sus artefactos y decisiones correspondientes, **sin cambio**. Ninguno se cierra por asociación con M3 o M5. **Este apartado no los redefine** |
 | M2 — consulta por lote | Abierta y **no** bloqueante |
 | ~~Muestra concreta de la medición M3~~ | **Resuelta el 2026-09-19.** La ejecutó el responsable del proyecto en PC1 sobre las secciones BOM y AMEF del XLSX y sobre el snapshot HTM, con una muestra de 30 códigos distintos. Conteos y artefactos sellados en [la evidencia M3/M5](evidencia-m3-m5-pc1.md) §2 |

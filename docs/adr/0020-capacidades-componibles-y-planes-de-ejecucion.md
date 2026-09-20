@@ -156,8 +156,9 @@ sola consulta de disponibilidad**, y la respuesta lo dice así.
 > frontera.
 
 > **Estado, 2026-09-19. La medición existe.** M3 se midió sobre datos reales y
-> la representación de frontera quedó fijada para V1 como **M3-A**
-> ([evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md) §3). **La regla de
+> la representación de frontera quedó fijada para V1 como **M3-A** en
+> [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md)
+> §8, sobre [la evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md) §3. **La regla de
 > este apartado no cambia**: la normalización sigue ocurriendo una sola vez, en
 > la frontera, y la representación que exige Materiales se sigue aplicando
 > **dentro de su adaptador**, nunca en el núcleo. Lo único que cambia es que ya
@@ -492,9 +493,10 @@ está cerrado**:
 | M8 | Semántica de ausencia y cobertura | Sí |
 
 > **Actualizado el 2026-09-19 por
-> [la evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md).** **M3** y **M5**
-> se midieron contra Materiales real y quedan **resueltos para V1**; dejan de
-> ser bloqueantes. **M1, M2, M4, M6, M7 y M8 conservan su estado**, y M8 sigue
+> [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md),
+> sobre [la evidencia M3/M5](../piloto-0-1/evidencia-m3-m5-pc1.md).** **M3** y
+> **M5** se midieron contra Materiales real y quedan **resueltos para V1**;
+> dejan de ser bloqueantes. **M1, M2, M4, M6, M7 y M8 conservan su estado**, y M8 sigue
 > además gobernado por la nota de ADR 0023 de más arriba. La medición de M3
 > **no** demuestra cobertura, freshness de SAP ni un `extracted_at` conocido, y
 > **M3-A vale para el dominio observado del Piloto Tampella V1**.
