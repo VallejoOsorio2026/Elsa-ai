@@ -320,19 +320,18 @@ sesión sobre el árbol con los cambios aplicados. Las salidas reales están en
 | `ruff format --check` | Sí | `305 files already formatted`. **Ruff 0.16 también formatea Markdown**, de modo que esta verificación **sí cubre los documentos de este cambio** |
 | `mypy` | Sí | `Success: no issues found in 215 source files` |
 | `pytest -q` | Sí | `1396 passed, 230 skipped` |
-| **`gitleaks`** | **No** | **PENDIENTE de CI** — ver más abajo |
-| Pruebas que exigen PostgreSQL | **No** | **Omitidas localmente**, se ejecutan en CI |
+| **`gitleaks`** | **No, localmente** | ✅ **Verde en CI** (§17.1) |
+| Pruebas que exigen PostgreSQL | **No, localmente** | ✅ **Verdes en CI** (§17.1) |
 
 ### Qué NO se ejecutó, y por qué
 
 - **Las 230 pruebas omitidas** son las que exigen PostgreSQL y no tienen
   `ELSA_TEST_DATABASE_URL` en este contenedor. **En CI sí se ejecutan**, contra
-  el servicio `pgvector/pgvector:pg16` del flujo de trabajo. **No se declaran
-  verdes aquí.**
+  el servicio `pgvector/pgvector:pg16` del flujo de trabajo, **y pasaron**
+  (§17.1).
 - **`gitleaks` no se ejecutó localmente**: no está instalado en el contenedor y
-  el encargo prohíbe instalar herramientas nuevas. **Lo ejecuta CI** sobre la
-  historia completa (trabajo `secret-scan`). **PENDIENTE** hasta comprobar el
-  CI del pull request (§17).
+  el encargo prohíbe instalar herramientas nuevas. **Lo ejecutó CI** sobre la
+  historia completa (trabajo `secret-scan`), **y pasó** (§17.1).
 - **Ninguna migración** se escribió, se aplicó ni se revirtió.
 - **No se ejecutó nada contra Materiales**, ni real ni de prueba.
 
@@ -533,7 +532,7 @@ ni `web/`.
 | **Pull request** | [#36](https://github.com/VallejoOsorio2026/Elsa-ai/pull/36) |
 | **Título** | `docs(adr): decide M4 null and inventory metadata semantics` |
 | **Base** | `main` |
-| **CI** | Ver §17.1 |
+| **CI** | ✅ **verde** — ver §17.1 |
 | **Merge** | **PENDIENTE** |
 | **Main final** | **PENDIENTE**, hasta el merge |
 
@@ -541,22 +540,26 @@ ni `web/`.
 
 ### 17.1 CI
 
-**HECHO MEDIDO** sobre el commit `9dd78ee`, consultado el 2026-09-21:
+**HECHO MEDIDO** sobre el head `c34f76a`, consultado el 2026-09-21. El flujo de
+trabajo se dispara en `push` y en `pull_request`, de modo que cada trabajo
+aparece dos veces:
 
 | Trabajo | Estado |
 |---|---|
-| **Secret scan (gitleaks)** | ✅ **success** |
-| **Lint, types and tests** | **EN EJECUCIÓN** al cerrar esta redacción |
+| **Lint, types and tests** | ✅ **success** (ambas corridas) |
+| **Secret scan (gitleaks)** | ✅ **success** (ambas corridas) |
 
-> **PENDIENTE.** El trabajo `Lint, types and tests` —que ejecuta `ruff`,
-> `ruff format --check`, `mypy` y `pytest` **con el servicio PostgreSQL**, y por
-> tanto las 230 pruebas omitidas localmente— **todavía no había terminado**
-> cuando se escribió esta línea. **No se declara verde lo que no se ha
-> observado verde** (regla 21). Quien retome este subbloque debe comprobarlo en
-> el pull request y completar esta tabla antes del merge.
+**CI REQUERIDO EN VERDE.** También lo estuvo sobre el commit anterior
+`9dd78ee`, que es el que contiene el ADR y el grueso de este documento.
 
-**El `gitleaks` que no pudo ejecutarse localmente (§6) sí se ejecutó aquí, y
-pasó.**
+Dos cosas que localmente **no** pudieron verificarse (§6) quedan verificadas
+aquí:
+
+- **`gitleaks`**, que no está instalado en el contenedor de la sesión, se
+  ejecutó sobre la **historia completa** y pasó.
+- **Las 230 pruebas que exigen PostgreSQL**, omitidas localmente por falta de
+  `ELSA_TEST_DATABASE_URL`, se ejecutaron contra el servicio
+  `pgvector/pgvector:pg16` del flujo de trabajo y pasaron.
 
 ---
 
@@ -657,8 +660,8 @@ implementación futura fuera incorrecta sin que nadie lo notara.
 | 11 | Existe **`.md` específico de cierre** | ✅ este documento |
 | 12 | **`git diff --check`** pasa | ✅ §8.2 |
 | 13 | **Historia normativa conservada** en ADR 0021 y ADR 0025 | ✅ §5.6 |
-| 14 | **CI requerido en verde** | **PENDIENTE** — §17 |
-| 15 | **PR creado** | **PENDIENTE** — §17 |
+| 14 | **CI requerido en verde** | ✅ §17.1 |
+| 15 | **PR creado** | ✅ [#36](https://github.com/VallejoOsorio2026/Elsa-ai/pull/36) |
 | 16 | **PR NO mergeado** | ✅ por diseño |
 
 **Estado resultante:**
@@ -680,7 +683,7 @@ implementación futura fuera incorrecta sin que nadie lo notara.
 | **N4** | Pruebas contractuales del proveedor sobre nulos, centinelas y claves omitidas | Materiales |
 | **N5** | ADR adicional si `material_antiguo` necesitara distinguir sus dos causas | Trabajo normativo futuro |
 | **N6** | **M6 operacional, M8 y D20** siguen abiertos, sin cambio | Sus propios subbloques |
-| **N7** | **Verificar el CI del pull request**, incluido `gitleaks`, y completar §17 | Esta sesión o la siguiente |
+| **N7** | ~~Verificar el CI del pull request~~ **CERRADO**: CI verde, §17.1 completado | — |
 
 ### 20.2 Riesgos y limitaciones
 
@@ -691,8 +694,8 @@ implementación futura fuera incorrecta sin que nadie lo notara.
 | **3** | **El tercer sentido de `null` sigue vivo en el código** | Registrado como N2. Quien implemente M1 debe corregirlo |
 | **4** | **`material_antiguo` conserva una ambigüedad irreductible** | ADR 0025 la declaró por diseño; ADR 0027 la nombra como `DATO_DESCONOCIDO` y prohíbe a ELSA resolverla |
 | **5** | **La Alternativa C podría hacer falta antes de lo previsto** | ADR 0027 §12 deja la ruta declarada como cambio **compatible**, de modo que adoptarla no sería una ruptura |
-| **6** | **`gitleaks` no se verificó localmente** | Lo ejecuta CI. PENDIENTE en §6 y §19.4 |
-| **7** | **Las pruebas que exigen PostgreSQL se omitieron localmente** | Se ejecutan en CI. **No se declaran verdes en este documento** |
+| **6** | **`gitleaks` no se verificó localmente** | **Resuelto:** verde en CI (§17.1) |
+| **7** | **Las pruebas que exigen PostgreSQL se omitieron localmente** | **Resuelto:** verdes en CI (§17.1) |
 
 ---
 
