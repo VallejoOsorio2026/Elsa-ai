@@ -501,7 +501,7 @@ que resolver antes de empezar.
 | # | Pendiente |
 |---|---|
 | T1 | **M1 abierto:** definición canónica versionada del contrato, `contract_version` y descriptor |
-| T2 | **M4 abierto:** metadata de versión y fecha del inventario activo |
+| T2 | **M4 operativo abierto:** transporte y consumo de la metadata de versión y fecha del inventario activo. **M4-NORMATIVO está cerrado** por [ADR 0027](../adr/0027-semantica-de-null-y-disponibilidad-de-metadata-del-inventario.md) y su [documento de cierre](../bloque-5-0-m4-normativo-cierre.md); la semántica de `null` ya no es una decisión pendiente |
 | T3 | **M6:** implementación y verificación de la semántica decidida en ADR 0025 |
 | T4 | **M8 abierto, no bloqueante:** el criterio de cierre de ADR 0021 §8.3 sigue intacto y sin cumplir |
 | T5 | La **fachada Materiales–ELSA no existe** y no está solicitada |
