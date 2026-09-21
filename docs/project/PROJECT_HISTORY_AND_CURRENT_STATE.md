@@ -136,7 +136,7 @@ primero hay que medirlo y versionar la medida.
 | 2026-09-20 | **Subbloque 5.0.b** — cierre | `#32` | Cierre normativo y documental de 5.0.b |
 | 2026-09-21 | **M7** — cierre | `#33` | [ADR 0026](../adr/0026-gobernanza-y-cierre-de-m7.md). **M7 cerrado** |
 | 2026-09-21 | **M4-NORMATIVO** — cierre | `#36`, `#37` | [ADR 0027](../adr/0027-semantica-de-null-y-disponibilidad-de-metadata-del-inventario.md). **M4 operativo sigue abierto** |
-| 2026-09-21 | **M1-A** — contrato consumidor ejecutable | pendiente | [ADR 0028](../adr/0028-forma-del-resultado-contractual-del-puerto-de-materiales.md), [cierre M1-A](../bloque-5-0-m1-a-contrato-consumidor-cierre.md). **M1 sigue abierto** |
+| 2026-09-21 | **M1-A** — contrato consumidor ejecutable | `#38` | [ADR 0028](../adr/0028-forma-del-resultado-contractual-del-puerto-de-materiales.md), [cierre M1-A](../bloque-5-0-m1-a-contrato-consumidor-cierre.md). **M1-A cerrado**; **M1 sigue abierto** |
 
 ### 3.3 Ramas no fusionadas
 

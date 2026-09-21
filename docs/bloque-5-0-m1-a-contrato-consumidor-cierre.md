@@ -1,5 +1,7 @@
 # Cierre de M1-A — Contrato esperado ejecutable en ELSA
 
+> **M1-A = CERRADO Y DOCUMENTADO.**
+>
 > **Esto cierra M1-A, no M1.** M1 sigue **ABIERTO** y bloqueante: la fachada
 > contractual no existe, no está solicitada, y el adaptador real tampoco
 > existe. Este subbloque convierte la norma ya aprobada en una
@@ -356,22 +358,72 @@ H4.**
 | Archivos modificados | `src/elsa/ports/materials.py`, `src/elsa/ports/__init__.py`, `src/elsa/adapters/fake_materials.py`, `tests/test_contract_materials.py`, `docs/architecture.md` |
 | Archivos creados | `docs/adr/0028-forma-del-resultado-contractual-del-puerto-de-materiales.md`, `docs/bloque-5-0-m1-a-contrato-consumidor-cierre.md` |
 | Archivos **no** tocados | `config.py`, `container.py`, `core/health.py`, `scripts/`, `web/`, `supabase/`, y **todo** el repositorio de Materiales |
-| Sin squash ni rebase | Correcto |
+| Commit del trabajo | `36b692fbdf37f8861fd014f9840f7d32f8bb3022` |
+| Merge de PR #38 | `d6b3270aa9ad37f6833ff77f4e5278f2c5efb171`, **merge commit real de dos padres** |
+| Padres del merge | `dd0634b2…` (main previo) · `36b692fb…` (la rama) |
+| `main` tras el merge | `d6b3270aa9ad37f6833ff77f4e5278f2c5efb171` |
+| Sin squash ni rebase | Correcto. Merge commit real, verificado con `git rev-list --parents -n1` |
+| Rama remota | **Conservada**, no borrada al mergear |
 
 ## 15. Ramas
 
 | Rama | Papel |
 |---|---|
 | `claude/upbeat-turing-4bppro` | **La usada.** La sesión impone esta rama de desarrollo, de modo que **no se creó** `feat/m1-a-materials-contract-consumer`, que era el nombre sugerido. Se registra aquí porque el estándar lo exige y porque la desviación es del entorno, no de una preferencia |
-| `main` | Destino del pull request. **No se mergeó** |
+| `docs/m1-a-cierre-final` | **Cierre documental.** Creada desde `main` = `d6b3270a…`, ya con el trabajo dentro, para registrar en este documento los SHA reales que no existían antes del merge. Solo toca `docs/` |
+| `main` | Destino de ambos pull requests. **PR #38 mergeado** con merge commit real |
+| Ninguna abandonada | Nada que registrar |
 
 ## 16. Commits
 
-Registrados en §19.3 con su hash real.
+**HECHO DEL REPOSITORIO.**
+
+| Hash | Asunto | Papel |
+|---|---|---|
+| `36b692fbdf37f8861fd014f9840f7d32f8bb3022` | `feat(materials): make M1 consumer contract executable` | El trabajo de M1-A. Único commit del PR #38 |
+| `d6b3270aa9ad37f6833ff77f4e5278f2c5efb171` | `Merge pull request #38 from VallejoOsorio2026/claude/upbeat-turing-4bppro` | Merge commit real, dos padres: `dd0634b2…` y `36b692fb…` |
+| *(cierre documental)* | `docs(project): close M1-A with real SHAs` | Este documento con los valores reales. Ver §17 |
 
 ## 17. Pull requests
 
-Registrado en §19.3 con su número, estado y resultado de CI.
+**HECHO MEDIDO.**
+
+### 17.1 PR #38 — el trabajo
+
+| | |
+|---|---|
+| Número | [#38](https://github.com/VallejoOsorio2026/Elsa-ai/pull/38) |
+| Rama | `claude/upbeat-turing-4bppro` → `main` |
+| Estado | **MERGED** |
+| Head | `36b692fbdf37f8861fd014f9840f7d32f8bb3022` |
+| Merge commit | `d6b3270aa9ad37f6833ff77f4e5278f2c5efb171` |
+| Método | **Merge commit**, sin squash ni rebase |
+| Fecha efectiva del merge | **2026-09-21 16:34:42 -05:00** (21:34:42 UTC) |
+| Commits | 1 |
+| Archivos | 9 |
+| `mergeable_state` antes del merge | `clean` |
+| Hilos de revisión pendientes | 0 |
+| CI del PR | **4/4 success** |
+
+### 17.2 CI post-merge de `main`
+
+| | |
+|---|---|
+| Run ID | **35657978542** ([enlace](https://github.com/VallejoOsorio2026/Elsa-ai/actions/runs/35657978542)) |
+| Número de run | 207 |
+| Commit probado | `d6b3270aa9ad37f6833ff77f4e5278f2c5efb171` |
+| Evento | `push` sobre `main` |
+| Jobs | `Lint, types and tests` → **success** · `Secret scan (gitleaks)` → **success** |
+| Pasos del job principal | Containers, checkout, uv, dependencias, **Ruff lint**, **Ruff format check**, **mypy**, **Tests** — todos `success` |
+| Duración | 21:34:44 → 21:37:31 UTC |
+
+> En CI la suite corre **con PostgreSQL** (paso «Initialize containers»), de
+> modo que los 230 casos que localmente se omiten sí se ejecutan allí. El
+> paso **Tests** cerró en `success` a las 21:37:28 UTC.
+
+### 17.3 PR del cierre documental
+
+Registrado en §19.4.
 
 ## 18. Migraciones
 
@@ -409,12 +461,28 @@ remoto. La regla 15 no se activó en ningún momento.
 
 | Punto | Estado |
 |---|---|
-| **M1-A** | **LISTO PARA CIERRE TRAS MERGE** |
+| **M1-A** | **CERRADO Y DOCUMENTADO** |
 | **M1** | **ABIERTO** |
 | **M4 OPERATIVO** | **ABIERTO** |
 | **M6 OPERATIVO** | **ABIERTO** |
 | **M8** | **ABIERTO**, con el criterio de [ADR 0021](adr/0021-contrato-de-inventario-con-materiales.md) §8.3 intacto y sin cumplir |
 | **M3, M5, M7, M4-NORMATIVO, M6-NORMATIVO** | Cerrados antes de este subbloque; **no se tocaron** |
+
+### 19.4 Cierre documental
+
+**HECHO MEDIDO.** La regla 26 exige que un bloque no esté cerrado sin su `.md`
+integrado en `main`. Este apartado registra esa integración.
+
+| | |
+|---|---|
+| Rama | `docs/m1-a-cierre-final`, desde `main` = `d6b3270aa9ad37f6833ff77f4e5278f2c5efb171` |
+| Alcance | **Solo `docs/`.** Ningún archivo de `src/`, `tests/`, `scripts/`, configuración, runtime ni Materiales |
+| Qué cambia | Los SHA reales del merge, el CI post-merge, y el estado de M1-A |
+| Qué **no** cambia | **ADR 0028 no se toca.** No se duplica ni se reescribe |
+
+Los datos de PR, merge y CI del cierre documental quedan en el pull request
+correspondiente, enlazado desde el historial del proyecto. Este documento se
+considera definitivo cuando ese PR está mergeado y su CI post-merge en verde.
 
 ## 20. Pendientes
 
@@ -490,3 +558,34 @@ ni decidir D20.
 Su función es que alguien que no participó en la sesión pueda reconstruir
 **qué se decidió, por qué, sobre qué evidencia, y qué sigue abierto**, sin
 acceso a la conversación que lo produjo.
+
+---
+
+## Estado final
+
+**HECHO DEL REPOSITORIO**, con los SHA reales de §14, §16 y §17.
+
+> # M1-A = CERRADO Y DOCUMENTADO
+
+El trabajo está en `main` (`d6b3270aa9ad37f6833ff77f4e5278f2c5efb171`), su CI
+post-merge cerró en verde (run **35657978542**), y este documento lo registra
+conforme a la regla 26 y a
+[`BLOCK_CLOSURE_STANDARD.md`](project/BLOCK_CLOSURE_STANDARD.md).
+
+**Cerrar M1-A no cierra nada más. Lo que sigue abierto, sigue abierto:**
+
+| Punto | Estado |
+|---|---|
+| **M1** | **ABIERTO** |
+| **M4 OPERATIVO** | **ABIERTO** |
+| **M6 OPERATIVO** | **ABIERTO** |
+| **M8** | **ABIERTO**, con el criterio de [ADR 0021](adr/0021-contrato-de-inventario-con-materiales.md) §8.3 intacto y sin cumplir |
+| **H3** — enlace de transporte de la fachada | **PENDIENTE** |
+| **H5** — autorización para modificar el repositorio de Materiales | **PENDIENTE** |
+
+Y dos hechos que este cierre **no** cambia:
+
+- **El repositorio de Materiales no fue modificado.**
+- **No existe adaptador real**, y no puede existir antes de H3.
+
+**Ninguno de estos puntos se cierra por asociación con M1-A.**
