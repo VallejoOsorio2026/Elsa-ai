@@ -1,6 +1,6 @@
 # ADR 0023 — Cobertura desconocida de Materiales, aceptada bajo controles compensatorios
 
-- Estado: **propuesto**
+- Estado: **aceptado**
 - Bloque: 5.0, subbloque **5.0.c.2**
 - **Decide una sola cosa**: que **M8 deja de ser puerta previa a liberar** el
   Piloto 0.1, y qué lo sustituye

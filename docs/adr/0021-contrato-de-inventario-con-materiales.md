@@ -1,6 +1,6 @@
 # ADR 0021 — Contrato de inventario con Materiales (V1)
 
-- Estado: **propuesto**
+- Estado: **aceptado**
 - El carácter bloqueante de **M8** (§25) se redefine en
   [ADR 0023](0023-cobertura-desconocida-materiales-piloto.md). El **criterio
   de cierre de M8 del §8.3 no se toca**, y este ADR no se reescribe

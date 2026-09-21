@@ -1,6 +1,6 @@
 # ADR 0024 — Validación real de la frontera del código SAP y de la autenticación con Materiales (V1)
 
-- Estado: **propuesto**
+- Estado: **aceptado**
 - Bloque: 5.0, subbloque **5.0.b**
 - **Decide dos cosas, y solo dos**: la representación del código SAP en la
   frontera hacia Materiales (**M3-A**, §8) y la aceptación del esquema de
