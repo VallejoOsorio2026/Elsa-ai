@@ -226,6 +226,16 @@ archivo de texto plano con contenido de planta fuera de toda política de
 retención. Para una sesión de medición, `-KeepLog` lo conserva, y entonces
 borrarlo es responsabilidad de quien lo pidió.
 
+**Por qué el cierre es directo.** `llama-server` se arranca oculto, así que en
+Windows el proceso puede no tener `MainWindowHandle`: `CloseMainWindow()`
+devuelve `False` sin llegar a enviar ninguna solicitud de cierre. Esperar el
+timeout en ese caso es tiempo perdido, de modo que el script solo espera
+cuando la solicitud sí se envió, y si no, fuerza el cierre de inmediato.
+Medido en PC1: 20,59 s antes de la corrección, 1,12 s después, sin procesos,
+archivos de PID ni logs residuales. El registro y el log se borran solo
+después de comprobar explícitamente que el proceso desapareció; si sigue
+vivo, el script falla y los conserva.
+
 ## Probar el camino de ELSA
 
 Los scripts prueban el runtime. Para el camino del bloque hay una herramienta

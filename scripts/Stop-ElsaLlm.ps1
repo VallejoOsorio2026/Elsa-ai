@@ -97,11 +97,36 @@ Write-Host "Deteniendo llama-server de ELSA (PID $($process.Id), $($process.Proc
 
 # Cierre ordenado primero: liberar la VRAM de una tarjeta de 4 GB conviene
 # hacerlo bien. Si no atiende, se fuerza.
-$process.CloseMainWindow() | Out-Null
-if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-    Write-Host "No respondió en $TimeoutSeconds s; se fuerza el cierre."
+#
+# Start-ElsaLlm.ps1 arranca llama-server con las salidas redirigidas y sin
+# ventana, así que el proceso no tiene ventana principal: CloseMainWindow()
+# devuelve False sin llegar a enviar ninguna solicitud de cierre. Esperar el
+# timeout completo en ese caso es tiempo perdido, porque no hay nadie a quien
+# esperar. Por eso solo se espera cuando la solicitud sí se envió.
+$closeRequested = $process.CloseMainWindow()
+
+$exited = $false
+if ($closeRequested) {
+    $exited = $process.WaitForExit($TimeoutSeconds * 1000)
+    if (-not $exited) {
+        Write-Host "No respondió en $TimeoutSeconds s; se fuerza el cierre."
+    }
+} else {
+    Write-Host "llama-server no tiene una ventana principal utilizable; se fuerza el cierre."
+}
+
+if (-not $exited) {
     Stop-Process -Id $process.Id -Force
     $process.WaitForExit(5000) | Out-Null
+}
+
+# Comprobación explícita: solo se limpia el registro si el proceso desapareció
+# de verdad. Se consulta el PID y además el handle propio, para no confundir
+# una reutilización del identificador con un cierre fallido.
+$process.Refresh()
+$survivor = Get-Process -Id $record.ProcessId -ErrorAction SilentlyContinue
+if ($survivor -and -not $process.HasExited) {
+    throw "El proceso $($record.ProcessId) sigue vivo tras forzar el cierre. No se borra ni el registro ni el log."
 }
 
 Remove-Item -LiteralPath $PidFile -Force
