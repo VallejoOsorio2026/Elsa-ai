@@ -1,6 +1,12 @@
 # ADR 0025 — Semántica, procedencia y temporalidad de los campos de inventario (V1)
 
 - Estado: **aceptado**
+- **El 2026-09-21**, [ADR 0027](0027-semantica-de-null-y-disponibilidad-de-metadata-del-inventario.md)
+  **cierra la PENDIENTE declarada en el §10**: decide la semántica de `null`
+  del contrato de inventario. **Este ADR no se reescribe**: su §10 conserva su
+  texto íntegro, incluida esa nota, y aquel ADR es la decisión posterior
+  autoritativa. **Ninguna otra decisión de este ADR se toca, y M6 no se
+  reabre**
 - Bloque: 5.0, subbloque **5.0.b**, punto **M6**
 - **Decide la semántica contractual de los campos** que
   [ADR 0021](0021-contrato-de-inventario-con-materiales.md) §22 dejó diferida en

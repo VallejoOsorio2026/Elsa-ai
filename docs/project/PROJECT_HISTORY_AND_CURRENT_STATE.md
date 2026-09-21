@@ -569,14 +569,15 @@ una fuente recurrente de confusión.
 notas de actualización, [ADR 0023](../adr/0023-cobertura-desconocida-materiales-piloto.md),
 [ADR 0024](../adr/0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md),
 [ADR 0025 §15](../adr/0025-semantica-procedencia-y-temporalidad-de-los-campos-de-inventario.md)
-y [ADR 0026](../adr/0026-gobernanza-y-cierre-de-m7.md).
+[ADR 0026](../adr/0026-gobernanza-y-cierre-de-m7.md) y
+[ADR 0027](../adr/0027-semantica-de-null-y-disponibilidad-de-metadata-del-inventario.md).
 
 | ID | Estado al 2026-09-21 | Bloqueante | Fijado por |
 |---|---|---|---|
 | **M1** | **Abierto.** Decisión arquitectónica cerrada · implementación contractual pendiente | **Sí** | ADR 0021 §19.1, §25 |
 | **M2** | **Abierto** | No | ADR 0021 §25 |
 | **M3** | **Resuelto para V1** como **M3-A**, medido sobre datos reales | No | ADR 0024 §8 |
-| **M4** | **Abierto.** Semántica contractual definida · verificación e implementación de metadata pendientes | **Sí** | ADR 0021 §25 |
+| **M4** | **Abierto.** **M4-NORMATIVO cerrado**: la semántica de `null` y la de los cinco campos del bloque `inventory` quedan decididas. **M4 operativo abierto**: verificación e implementación de metadata pendientes | **Sí** | ADR 0021 §25, ADR 0027 §22, [cierre M4-NORMATIVO](../bloque-5-0-m4-normativo-cierre.md) |
 | **M5** | **Resuelto para V1.** JWKS asimétrico `ES256`/`EC`, JWT de usuario real verificado contra el RPC real | No | ADR 0024 §11 |
 | **M6** | **Decisión normativa cerrada · implementación y verificación pendientes** | **Sí** | ADR 0025 §15 |
 | **M7** | **CERRADO.** Rol, ocupante y gobernanza materializados; la asignación vive en Materiales y ELSA la referencia sin copiarla | No | ADR 0026 §4, §9 |
@@ -585,6 +586,11 @@ y [ADR 0026](../adr/0026-gobernanza-y-cierre-de-m7.md).
 ### 13.1 Lecturas que este documento fija
 
 - **M1 sigue abierto y bloqueante.** No se cierra por asociación con M7.
+- **M4-NORMATIVO está cerrado; M4 operativo no.** La semántica de `null` y la
+  de `extracted_at` quedan decididas por
+  [ADR 0027](../adr/0027-semantica-de-null-y-disponibilidad-de-metadata-del-inventario.md),
+  pero **nadie emite ni consume el bloque `inventory`**: depende de la fachada
+  de M1, que no existe. **M4 como punto sigue abierto y bloqueante.**
 - **M6 está decidido normativamente, no cerrado operacionalmente.** Su cierre
   depende de que exista la fachada que emita los campos y de que las pruebas
   contractuales demuestren conformidad.
@@ -611,6 +617,8 @@ contexto, cometería con alta probabilidad.
 | **No dar `~2 GB` ni `~20 tok/s` como mediciones** | Son referencias sin procedencia versionada (§5.1, §6.2) |
 | **No leer «CI en verde» como «el modelo funciona bien»** | CI usa un servidor falso que no carga pesos (§4.4) |
 | **No cerrar M1, M4, M6 u M8 por asociación** | Solo M7 cerró, y solo M3/M5 están resueltos para V1 (§13) |
+| **No leer «M4-NORMATIVO cerrado» como «M4 cerrado»** | M4 operativo sigue abierto y bloqueante: nadie emite ni consume el bloque `inventory` ([ADR 0027](../adr/0027-semantica-de-null-y-disponibilidad-de-metadata-del-inventario.md) §22) |
+| **No inferir nada de un `null` del contrato sin consultar su tabla** | `null` no tiene significado universal; `extracted_at: null` habla del contrato, no de SAP ([ADR 0027](../adr/0027-semantica-de-null-y-disponibilidad-de-metadata-del-inventario.md) §5–§7) |
 
 ---
 

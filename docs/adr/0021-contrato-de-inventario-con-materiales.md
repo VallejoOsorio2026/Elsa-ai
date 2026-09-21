@@ -10,6 +10,13 @@
   **cierra los puntos 1, 2 y 3 de las decisiones diferidas del §22**. Este ADR
   **no se reescribe**; las notas fechadas de §3.2, §20, §21.1, §21.2, §22 y §25
   registran el estado posterior. **El §8.3 sigue intacto**
+- **El 2026-09-21**, [ADR 0027](0027-semantica-de-null-y-disponibilidad-de-metadata-del-inventario.md)
+  **clarifica la semántica de `null`** del §9.3 y la de los cinco campos del
+  §9.1, y cierra la doble semántica que
+  [ADR 0025](0025-semantica-procedencia-y-temporalidad-de-los-campos-de-inventario.md)
+  §10 dejó remitida a **M4**. **Este ADR no se reescribe**: su §9 conserva su
+  texto íntegro y aquel ADR es la decisión posterior autoritativa. **M4 sigue
+  abierto operacionalmente**, y **el §8.3 no se toca**
 - Bloque: 5.0, subbloque **5.0.b**
 - Deriva de [ADR 0020](0020-capacidades-componibles-y-planes-de-ejecucion.md)
   §5, §10, §11, §12 y §13, y **no lo reabre**
