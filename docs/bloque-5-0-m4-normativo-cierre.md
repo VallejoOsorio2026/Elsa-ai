@@ -522,7 +522,7 @@ ni `web/`.
 
 | Commit | Contenido |
 |---|---|
-| `__COMMIT__` | `docs(adr): decide M4 null and inventory metadata semantics` — ADR 0027, documento de cierre, notas fechadas y actualización de los documentos de estado |
+| `9dd78ee17b5ea7908c6d069111554d6e85d96659` | `docs(adr): decide M4 null and inventory metadata semantics` — ADR 0027, documento de cierre, notas fechadas y actualización de los documentos de estado |
 
 ---
 
@@ -530,14 +530,33 @@ ni `web/`.
 
 | Campo | Valor |
 |---|---|
-| **Pull request** | `__PR__` |
+| **Pull request** | [#36](https://github.com/VallejoOsorio2026/Elsa-ai/pull/36) |
 | **Título** | `docs(adr): decide M4 null and inventory metadata semantics` |
 | **Base** | `main` |
-| **CI** | `__CI__` |
+| **CI** | Ver §17.1 |
 | **Merge** | **PENDIENTE** |
 | **Main final** | **PENDIENTE**, hasta el merge |
 
-**El merge no se ejecuta en este subbloque.**
+**El merge no se ejecuta en este subbloque, y la rama se conserva.**
+
+### 17.1 CI
+
+**HECHO MEDIDO** sobre el commit `9dd78ee`, consultado el 2026-09-21:
+
+| Trabajo | Estado |
+|---|---|
+| **Secret scan (gitleaks)** | ✅ **success** |
+| **Lint, types and tests** | **EN EJECUCIÓN** al cerrar esta redacción |
+
+> **PENDIENTE.** El trabajo `Lint, types and tests` —que ejecuta `ruff`,
+> `ruff format --check`, `mypy` y `pytest` **con el servicio PostgreSQL**, y por
+> tanto las 230 pruebas omitidas localmente— **todavía no había terminado**
+> cuando se escribió esta línea. **No se declara verde lo que no se ha
+> observado verde** (regla 21). Quien retome este subbloque debe comprobarlo en
+> el pull request y completar esta tabla antes del merge.
+
+**El `gitleaks` que no pudo ejecutarse localmente (§6) sí se ejecutó aquí, y
+pasó.**
 
 ---
 
