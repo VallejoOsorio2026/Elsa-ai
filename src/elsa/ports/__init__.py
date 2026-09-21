@@ -13,7 +13,21 @@ from elsa.ports.auth import (
 )
 from elsa.ports.embeddings import EmbeddingsPort
 from elsa.ports.llm import ChatMessage, ChatResult, LLMPort, LLMUnavailableError
-from elsa.ports.materials import Material, MaterialsPort, MaterialsUnavailableError
+from elsa.ports.materials import (
+    ContractDescriptor,
+    InventoryCoverage,
+    InventoryStatusResult,
+    InventoryVersion,
+    MatchOrigin,
+    MaterialAbsence,
+    MaterialAttribution,
+    MaterialFacts,
+    MaterialLookupRequest,
+    MaterialsContractViolationError,
+    MaterialsLookupResult,
+    MaterialsPort,
+    StockLocation,
+)
 from elsa.ports.materials_identity import MaterialsIdentityPort, MaterialsProfile
 from elsa.ports.ocr import OCRPage, OCRPort, OCRResult, UnsupportedDocumentError
 from elsa.ports.permissions import (
@@ -40,19 +54,28 @@ __all__ = [
     "BootstrapAlreadyCompletedError",
     "ChatMessage",
     "ChatResult",
+    "ContractDescriptor",
     "ElsaAccount",
     "EmbeddingsPort",
     "IdentityProviderUnavailableError",
     "InvalidTokenError",
+    "InventoryCoverage",
+    "InventoryStatusResult",
+    "InventoryVersion",
     "LLMPort",
     "LLMUnavailableError",
     "LimitKind",
     "LimitVerdict",
-    "Material",
+    "MatchOrigin",
+    "MaterialAbsence",
+    "MaterialAttribution",
+    "MaterialFacts",
+    "MaterialLookupRequest",
+    "MaterialsContractViolationError",
     "MaterialsIdentityPort",
+    "MaterialsLookupResult",
     "MaterialsPort",
     "MaterialsProfile",
-    "MaterialsUnavailableError",
     "OCRPage",
     "OCRPort",
     "OCRResult",
@@ -61,6 +84,7 @@ __all__ = [
     "PermissionsUnavailableError",
     "RankedDocument",
     "RerankerPort",
+    "StockLocation",
     "UnknownDomainError",
     "UnsupportedDocumentError",
 ]

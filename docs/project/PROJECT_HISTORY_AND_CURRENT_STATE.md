@@ -91,7 +91,7 @@ primero hay que medirlo y versionar la medida.
 | Commits alcanzables desde todas las referencias remotas | **169** | `git rev-list --count --remotes` |
 | Commits en `origin/main` | **162** | Los 7 restantes viven solo en ramas no fusionadas |
 | Pull requests fusionados | **33** | `#1`–`#33`, sin huecos |
-| ADR | **26** | `0001`–`0026` |
+| ADR | **28** | `0001`–`0028` |
 | Migraciones | **5** | [`supabase/migrations/`](../../supabase/migrations/) |
 | Ramas remotas | **41** | Excluyendo `origin/HEAD` |
 | Ramas no fusionadas en `main` | **5** | §11 y §3.3 |
@@ -135,6 +135,8 @@ primero hay que medirlo y versionar la medida.
 | 2026-09-20 | **M6** — semántica y temporalidad | `#30`, `#31` | Evidencia M6, [ADR 0025](../adr/0025-semantica-procedencia-y-temporalidad-de-los-campos-de-inventario.md) |
 | 2026-09-20 | **Subbloque 5.0.b** — cierre | `#32` | Cierre normativo y documental de 5.0.b |
 | 2026-09-21 | **M7** — cierre | `#33` | [ADR 0026](../adr/0026-gobernanza-y-cierre-de-m7.md). **M7 cerrado** |
+| 2026-09-21 | **M4-NORMATIVO** — cierre | `#36`, `#37` | [ADR 0027](../adr/0027-semantica-de-null-y-disponibilidad-de-metadata-del-inventario.md). **M4 operativo sigue abierto** |
+| 2026-09-21 | **M1-A** — contrato consumidor ejecutable | pendiente | [ADR 0028](../adr/0028-forma-del-resultado-contractual-del-puerto-de-materiales.md), [cierre M1-A](../bloque-5-0-m1-a-contrato-consumidor-cierre.md). **M1 sigue abierto** |
 
 ### 3.3 Ramas no fusionadas
 
@@ -574,7 +576,7 @@ notas de actualización, [ADR 0023](../adr/0023-cobertura-desconocida-materiales
 
 | ID | Estado al 2026-09-21 | Bloqueante | Fijado por |
 |---|---|---|---|
-| **M1** | **Abierto.** Decisión arquitectónica cerrada · implementación contractual pendiente | **Sí** | ADR 0021 §19.1, §25 |
+| **M1** | **Abierto.** Decisión arquitectónica cerrada. **M1-A cerrado**: el contrato esperado es ejecutable en ELSA y la deuda `Material | None` está eliminada. **Pendiente**: la fachada no existe ni está solicitada, y no hay adaptador real | **Sí** | ADR 0021 §19.1, §25, ADR 0028, [cierre M1-A](../bloque-5-0-m1-a-contrato-consumidor-cierre.md) |
 | **M2** | **Abierto** | No | ADR 0021 §25 |
 | **M3** | **Resuelto para V1** como **M3-A**, medido sobre datos reales | No | ADR 0024 §8 |
 | **M4** | **Abierto.** **M4-NORMATIVO cerrado**: la semántica de `null` y la de los cinco campos del bloque `inventory` quedan decididas. **M4 operativo abierto**: verificación e implementación de metadata pendientes | **Sí** | ADR 0021 §25, ADR 0027 §22, [cierre M4-NORMATIVO](../bloque-5-0-m4-normativo-cierre.md) |

@@ -366,7 +366,7 @@ que está fuera del alcance de este bloque.
 | **R6** | **No hay agregación centralizada de logs.** Los del runtime local viven en `%LOCALAPPDATA%\ELSA\llm` | **BAJO** | Dificulta el diagnóstico posterior, no la operación |
 | **R7** | **Mediciones históricas no recuperadas.** Prompts, corpus comparativo y línea base de nueve métricas se perdieron ([Historia §15](PROJECT_HISTORY_AND_CURRENT_STATE.md#15-evidencia-faltante)) | **MEDIO** | Obliga a volver a medir antes de cualquier comparación futura |
 | **R8** | **La rama ONNX (~3064 líneas) no está integrada y su base tiene 16 PR de antigüedad** | **MEDIO** | Cuanto más se retrase la decisión, más caro será aplicarla o descartarla |
-| **R9** | **M1 sigue abierto y bloqueante.** La definición canónica del contrato vive en Materiales y aún no está versionada allí | **ALTO** | Bloquea la fachada, y con ella el cierre operacional de M4 y M6 |
+| **R9** | **M1 sigue abierto y bloqueante.** La definición canónica del contrato vive en Materiales y aún no está versionada allí. **M1-A no lo cierra**: dejó lista la especificación ejecutable del consumidor, no el proveedor | **ALTO** | Bloquea la fachada, y con ella el cierre operacional de M4 y M6 |
 | **R10** | **El sucesor no está determinado** para ningún sistema (§7) | **ALTO** | Sin sucesor designado, ninguna fase de §11 puede iniciarse |
 
 ---
@@ -500,11 +500,11 @@ que resolver antes de empezar.
 
 | # | Pendiente |
 |---|---|
-| T1 | **M1 abierto:** definición canónica versionada del contrato, `contract_version` y descriptor |
+| T1 | **M1 abierto:** definición canónica versionada del contrato, `contract_version` y descriptor, **en el repositorio de Materiales**. El lado consumidor ya está hecho: **M1-A cerrado** ([ADR 0028](../adr/0028-forma-del-resultado-contractual-del-puerto-de-materiales.md), [cierre M1-A](../bloque-5-0-m1-a-contrato-consumidor-cierre.md)) dejó el contrato esperado ejecutable y probado en ELSA, y eliminó la deuda `Material | None` |
 | T2 | **M4 operativo abierto:** transporte y consumo de la metadata de versión y fecha del inventario activo. **M4-NORMATIVO está cerrado** por [ADR 0027](../adr/0027-semantica-de-null-y-disponibilidad-de-metadata-del-inventario.md) y su [documento de cierre](../bloque-5-0-m4-normativo-cierre.md); la semántica de `null` ya no es una decisión pendiente |
 | T3 | **M6:** implementación y verificación de la semántica decidida en ADR 0025 |
 | T4 | **M8 abierto, no bloqueante:** el criterio de cierre de ADR 0021 §8.3 sigue intacto y sin cumplir |
-| T5 | La **fachada Materiales–ELSA no existe** y no está solicitada |
+| T5 | La **fachada Materiales–ELSA no existe** y no está solicitada. Quedan pendientes las dos decisiones humanas que la gobiernan: **H3** (enlace de transporte) y **H5** (autorización para modificar el repositorio de Materiales) |
 
 ### 13.5 Trabajo técnico futuro
 

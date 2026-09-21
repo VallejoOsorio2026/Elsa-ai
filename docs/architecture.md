@@ -25,7 +25,7 @@ FastAPI (este repositorio)
         ├──► Supabase ELSA (permisos y auditoría)       [adaptador real]
         ├──► llama-server local, Phi-4-mini (puerto llm) [adaptador real]
         ├──► Embeddings / OCR / Reranker (puertos)      [no configurados aún]
-        └──► Motor de Materiales (puerto materials)     [no configurado aún]
+        └──► Fachada de Materiales (puerto materials)  [la fachada no existe: M1]
 ```
 
 **Materiales = identidad. ELSA = autorización.** Materiales dice quién es cada
@@ -70,7 +70,7 @@ Reglas de dependencia entre capas:
 | `document_extraction` | `DocumentExtractionPort.extract` | Estructura de un documento: títulos, párrafos, listas, pasos, advertencias, tablas |
 | `documents` | `DocumentRepositoryPort` | Conocimiento documental de ELSA (documentos, versiones, secciones, chunks) |
 | `reranker` | `RerankerPort.rerank` | Reordenamiento de candidatos por relevancia |
-| `materials` | `MaterialsPort.get_material` / `search_materials` | Motor del Asistente de Materiales (sin duplicar su inventario) |
+| `materials` | `MaterialsPort.lookup_material_by_code` / `get_inventory_status` / `get_contract_descriptor` | Fachada contractual del Asistente de Materiales, con la forma de [ADR 0021](adr/0021-contrato-de-inventario-con-materiales.md) y el resultado tipado de [ADR 0028](adr/0028-forma-del-resultado-contractual-del-puerto-de-materiales.md) (sin duplicar su inventario) |
 
 Cada puerto tiene un adaptador *fake* determinista usado por los tests de
 contrato (`tests/test_contract_*.py`). Un puerto sin adaptador real no es deuda
