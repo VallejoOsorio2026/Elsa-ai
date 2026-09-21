@@ -5,11 +5,17 @@ Documento de cierre redactado según
 (`CLAUDE.md`, regla 26).
 
 - **Fecha:** 2026-09-21
-- **Estado:** **M4-NORMATIVO cerrado y documentado. M4 operativo permanece
-  abierto.**
+- **Estado:** **M4-NORMATIVO = CERRADO Y DOCUMENTADO.**
+  **M4 OPERATIVO = ABIERTO.**
 - **Repositorio:** `VallejoOsorio2026/Elsa-ai`
 - **Main / base:** `880ccf24656198fb7cd134b69f069af7c974c0ed`
-- **Rama:** `claude/beautiful-cori-0yk4de`
+- **Rama de trabajo:** `claude/beautiful-cori-0yk4de`
+- **Pull request:** [#36](https://github.com/VallejoOsorio2026/Elsa-ai/pull/36)
+  — **MERGED** el 2026-09-21T20:06:34Z
+- **Merge commit:** `42482ef4f26d8e8e97cc790308e5ca66dd188ec5`
+- **Main final:** `42482ef4f26d8e8e97cc790308e5ca66dd188ec5`
+- **CI post-merge:** ✅ **SUCCESS** — run
+  [`35649004508`](https://github.com/VallejoOsorio2026/Elsa-ai/actions/runs/35649004508)
 
 > **Qué cierra este documento y qué no.**
 >
@@ -33,8 +39,8 @@ REPOSITORIO**, **DECISIÓN TOMADA**, **INFERENCIA**, **PENDIENTE**.
 > convención ya aplicada en los cierres de 5.0.a, 5.0.b, B9a–B9c y 5.0.c.1.
 > Todas las declaraciones que aquella sesión exigía están presentes: **§19.1 y
 > §19.2** declaran el estado de M4 en los términos textuales pedidos, **§17**
-> deja el merge en PENDIENTE, **§19.4** contiene el checklist de cierre y
-> **§21** la regla de continuidad.
+> registra el merge con su evidencia real, **§19.4** contiene el checklist de
+> cierre y **§21** la regla de continuidad.
 
 ---
 
@@ -488,7 +494,7 @@ fuera del repositorio. El subbloque es íntegramente documental.
 | **2** | **La sesión proponía una rama** (`docs/m4-normativo-null-inventory`) distinta de la que su propia restricción impone | Se reportó y se usó la rama impuesta, declarándolo en §15 |
 | **3** | **`source_file_label` no tenía definido el significado de su nulo** en ningún documento. No estaba previsto en el encargo | Se resolvió dentro del alcance normativo de M4: queda clasificado como `DATO_DESCONOCIDO` en ADR 0027 §7 |
 | **4** | **Se encontró un tercer sentido de `null`, en código** (`src/elsa/ports/materials.py`), contrario a ADR 0021 §8 | **No se corrigió**, por pertenecer a M1. Registrado como dependencia N2 |
-| **5** | **`gitleaks` no está disponible** en el contenedor de la sesión, y el encargo prohíbe instalar herramientas nuevas | No se ejecutó localmente. Se declara PENDIENTE de CI en §6 y §19.4, sin fingir que pasó |
+| **5** | **`gitleaks` no está disponible** en el contenedor de la sesión, y el encargo prohíbe instalar herramientas nuevas | No se ejecutó localmente, y no se fingió que pasara. **Resuelto en CI**, sobre la historia completa (§17.1) |
 | **6** | **El primer borrador de este documento mezcló** el esquema de 18 apartados con el del estándar, produciendo 24 | Se detectó antes del commit y se rehízo conforme al estándar. **No llegó a la historia de Git** |
 
 ---
@@ -500,7 +506,11 @@ rebase, sin squash y sin reescritura de historia.
 
 **Control de alcance ejecutado antes del commit** (§7): la lista de archivos se
 limita a `docs/`. Ningún archivo bajo `src/`, `tests/`, `scripts/`, `supabase/`
-ni `web/`.
+ni `web/`. **El pull request integrado tocó 6 archivos, los 6 bajo `docs/`**,
+con 1361 líneas añadidas y 3 eliminadas.
+
+**La integración fue un merge commit real** (`42482ef`, dos padres), conforme a
+la instrucción de no usar squash ni rebase.
 
 ---
 
@@ -509,9 +519,11 @@ ni `web/`.
 | Rama | Uso |
 |---|---|
 | `claude/beautiful-cori-0yk4de` | **La usada.** Creada por la sesión anterior, a la altura exacta de `origin/main` al comenzar |
+| `docs/m4-normativo-cierre-final` | **La del cierre documental final.** Creada desde `origin/main` ya en `42482ef`, para registrar la evidencia real del merge |
 | `docs/m4-normativo-null-inventory` | **No se creó.** Era la propuesta de la sesión, descartada por la restricción que impone la rama anterior |
 
-**La rama se conserva tras el pull request. No se borra.**
+**Ninguna rama se borra.** `claude/beautiful-cori-0yk4de` se conserva tras el
+merge, en `0d45171`.
 
 > Se declara la desviación para que nadie busque una rama que no existe.
 
@@ -522,6 +534,10 @@ ni `web/`.
 | Commit | Contenido |
 |---|---|
 | `9dd78ee17b5ea7908c6d069111554d6e85d96659` | `docs(adr): decide M4 null and inventory metadata semantics` — ADR 0027, documento de cierre, notas fechadas y actualización de los documentos de estado |
+| `c34f76a385260cee291c25edba81ab1565400497` | `docs(pilot): record commit, pull request and CI state in the M4 closure` |
+| `0d451711e9669a54d759b7f95b49b4f5a6539878` | `docs(pilot): record the green CI result in the M4 closure` |
+| `42482ef4f26d8e8e97cc790308e5ca66dd188ec5` | **Merge commit de [#36](https://github.com/VallejoOsorio2026/Elsa-ai/pull/36).** Padres: `880ccf2` (main) y `0d45171` (head). Merge commit real: **sin squash y sin rebase** |
+| Cierre documental final | El commit que trae esta versión del documento, en la rama `docs/m4-normativo-cierre-final`. **Su propio SHA no se incrusta aquí**: un documento no puede contener su propio hash. Es trazable por su pull request (§17.2) |
 
 ---
 
@@ -532,11 +548,15 @@ ni `web/`.
 | **Pull request** | [#36](https://github.com/VallejoOsorio2026/Elsa-ai/pull/36) |
 | **Título** | `docs(adr): decide M4 null and inventory metadata semantics` |
 | **Base** | `main` |
-| **CI** | ✅ **verde** — ver §17.1 |
-| **Merge** | **PENDIENTE** |
-| **Main final** | **PENDIENTE**, hasta el merge |
-
-**El merge no se ejecuta en este subbloque, y la rama se conserva.**
+| **Estado** | ✅ **MERGED** |
+| **CI del PR** | ✅ **verde** — ver §17.1 |
+| **Merge** | ✅ `42482ef4f26d8e8e97cc790308e5ca66dd188ec5` |
+| **Fecha de integración** | **2026-09-21T20:06:34Z** |
+| **Método** | **Merge commit real.** Sin squash, sin rebase |
+| **Padres del merge** | `880ccf24656198fb7cd134b69f069af7c974c0ed` · `0d451711e9669a54d759b7f95b49b4f5a6539878` |
+| **Main final** | ✅ `42482ef4f26d8e8e97cc790308e5ca66dd188ec5` |
+| **CI post-merge** | ✅ **SUCCESS** — ver §17.1 |
+| **Rama** | **conservada** en `0d45171`, no borrada |
 
 ### 17.1 CI
 
@@ -561,6 +581,34 @@ aquí:
   `ELSA_TEST_DATABASE_URL`, se ejecutaron contra el servicio
   `pgvector/pgvector:pg16` del flujo de trabajo y pasaron.
 
+**CI post-merge sobre `main` — HECHO MEDIDO.**
+
+| Campo | Valor |
+|---|---|
+| **Run ID** | [`35649004508`](https://github.com/VallejoOsorio2026/Elsa-ai/actions/runs/35649004508) |
+| **Evento** | `push` sobre `main` |
+| **Commit probado** | `42482ef4f26d8e8e97cc790308e5ca66dd188ec5` |
+| **Conclusión del run** | ✅ **success** |
+| **Lint, types and tests** | ✅ **success** |
+| **Secret scan (gitleaks)** | ✅ **success** |
+
+> **`main` quedó verde después de integrar este trabajo.** Es la condición que
+> convierte «listo para cierre tras merge» en **cerrado**.
+
+### 17.2 Pull request del cierre documental final
+
+Esta versión del documento —la que incorpora la evidencia real del merge— entra
+por un pull request propio desde `docs/m4-normativo-cierre-final`, titulado
+`docs(project): finalize M4 normative closure`. Contiene **únicamente** este
+archivo.
+
+> **Por qué su CI post-merge no se transcribe aquí.** Registrarlo exigiría un
+> commit posterior, cuyo CI exigiría otro, sin final. Ese CI **sí se verifica**
+> antes de declarar el cierre (§19.4), y queda consultable en el historial de
+> `main`. Lo que este documento transcribe es la evidencia del trabajo que
+> cierra: el merge de [#36](https://github.com/VallejoOsorio2026/Elsa-ai/pull/36)
+> y su CI post-merge.
+
 ---
 
 ## 18. Migraciones
@@ -582,7 +630,7 @@ inferir**, de forma versionada y auditable.
 
 ### 19.1 Qué parte de M4 queda cerrada
 
-> ## **M4-NORMATIVO = CERRADO**
+> ## **M4-NORMATIVO = CERRADO Y DOCUMENTADO**
 
 **DECISIÓN TOMADA**, documentada en
 [ADR 0027](adr/0027-semantica-de-null-y-disponibilidad-de-metadata-del-inventario.md)
@@ -609,8 +657,17 @@ y en este documento. Concretamente, quedan **inequívocas**:
    [cierre de 5.0.b](bloque-5-0-b-contrato-materiales-cierre.md) §20**, que
    quedan resueltos.
 
-**El cierre es efectivo tras el merge del pull request** (§17, §19.4). Hasta
-entonces el estado es **LISTO PARA CIERRE TRAS MERGE**.
+**El cierre es efectivo**, y las tres condiciones que lo hacían depender del
+merge están cumplidas y medidas:
+
+1. [#36](https://github.com/VallejoOsorio2026/Elsa-ai/pull/36) **mergeado** con
+   merge commit real `42482ef` (§17).
+2. **CI post-merge de `main` en verde**, run `35649004508` (§17.1).
+3. **`main` contiene el ADR 0027 y este documento** (§16).
+
+La regla del proyecto —**bloque cerrado = bloque documentado en un `.md`**— se
+cumple: el documento existe, está en `main`, y lleva la evidencia real del
+merge en lugar de un marcador pendiente.
 
 ### 19.2 Qué parte de M4 sigue abierta
 
@@ -662,12 +719,18 @@ implementación futura fuera incorrecta sin que nadie lo notara.
 | 13 | **Historia normativa conservada** en ADR 0021 y ADR 0025 | ✅ §5.6 |
 | 14 | **CI requerido en verde** | ✅ §17.1 |
 | 15 | **PR creado** | ✅ [#36](https://github.com/VallejoOsorio2026/Elsa-ai/pull/36) |
-| 16 | **PR NO mergeado** | ✅ por diseño |
+| 16 | **PR #36 mergeado**, con merge commit real | ✅ `42482ef` |
+| 17 | **CI post-merge de `main` en verde** | ✅ run `35649004508` |
+| 18 | **`main` contiene el documento definitivo** | ✅ §16 |
+| 19 | **M4 operativo sigue marcado ABIERTO** | ✅ §19.2 |
+| 20 | **No se trabajó ningún otro pendiente** | ✅ §2 |
 
 **Estado resultante:**
 
-- **M4-NORMATIVO: LISTO PARA CIERRE TRAS MERGE.**
+- **M4-NORMATIVO: CERRADO Y DOCUMENTADO.**
 - **M4 OPERATIVO: ABIERTO.**
+- **M8: ABIERTO**, con el criterio de cierre de ADR 0021 §8.3 intacto y sin
+  cumplir.
 
 ---
 
