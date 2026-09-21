@@ -800,6 +800,15 @@ dos listas de responsables que puedan divergir son peores que ninguna.
 La asignación real debe resolverse **antes del primer tester** y forma parte de
 M7. Debe poder cambiar **sin modificar este ADR**.
 
+> **Actualizado el 2026-09-21 por
+> [ADR 0026](0026-gobernanza-y-cierre-de-m7.md).**
+> El ocupante **ya está asignado**, exactamente donde este apartado dispuso: en
+> el repositorio de Materiales, junto a la definición canónica del contrato.
+> **El texto normativo de arriba no cambia**, y sigue vigente en todos sus
+> términos: este ADR sigue sin nombrar a ninguna persona, ELSA sigue sin
+> mantener una segunda fuente de verdad, y el ocupante sigue pudiendo cambiar
+> **sin modificar este ADR**.
+
 ### 17. Compatibilidad con lote futuro
 
 **No se implementa lote.** M2 sigue abierto y no bloqueante.
@@ -863,6 +872,20 @@ canónica y la ubicación de la asignación operativa.
 
 **M7 sigue siendo bloqueante y no se declara cerrado** hasta asignar el
 ocupante real y materializar la gobernanza correspondiente.
+
+> **Actualizado el 2026-09-21 por
+> [ADR 0026](0026-gobernanza-y-cierre-de-m7.md).**
+> Las **dos** condiciones que este apartado enumera como pendientes se
+> cumplieron: el ocupante está asignado y la gobernanza está materializada en el
+> repositorio de Materiales. **M7 queda cerrado y deja de ser bloqueante.**
+>
+> El título de este apartado y su texto **se conservan** porque describen
+> correctamente el estado en el momento de aquella decisión.
+>
+> Cerrar M7 **no** cierra M1: la fachada contractual, el descriptor y las
+> pruebas contractuales del proveedor siguen sin existir. ADR 0026 §8 establece
+> además la secuencia —M7 cerrado **antes** de solicitar la fachada—, que es una
+> condición previa, **no** una autorización para solicitarla.
 
 ### 20. Lo que aprobar este ADR **no** significa
 
@@ -1073,6 +1096,25 @@ Materiales real.**
 > [ADR 0024](0024-validacion-real-frontera-codigo-sap-y-autenticacion-materiales.md),
 > conforme a la regla 25. **M3-A vale para el dominio observado del Piloto
 > Tampella V1**, no universalmente (ADR 0024 §10).
+
+> **Actualizado el 2026-09-21 por
+> [ADR 0026](0026-gobernanza-y-cierre-de-m7.md).**
+> Cambia de lectura **una sola fila**:
+>
+> | ID | Estado el 2026-09-21 | Bloqueante |
+> |---|---|---|
+> | **M7** | **Cerrado.** Rol, ocupante y gobernanza materializados; la asignación vive en el repositorio de Materiales y ELSA la referencia sin copiarla ([ADR 0026](0026-gobernanza-y-cierre-de-m7.md) §4, §9) | **No** |
+>
+> **M1, M2, M4, M6 y M8 conservan exactamente el estado que ya tenían**, con las
+> lecturas que les fijaron las notas anteriores de este mismo apartado. Ninguno
+> se cierra por asociación. En particular **M1 sigue abierto y bloqueante**, y el
+> §8.3 de este ADR sigue **intacto y sin cumplir**.
+>
+> La frase que encabeza este apartado —«ninguno se declara cerrado
+> operacionalmente mientras siga dependiendo de Materiales real»— **se respeta**:
+> M7 no es un punto que dependa de Materiales en ejecución, sino una decisión de
+> gobernanza materializada en un repositorio y verificable por lectura
+> ([ADR 0026](0026-gobernanza-y-cierre-de-m7.md) §16).
 
 ### 26. Trazabilidad de los requisitos de este ADR
 
