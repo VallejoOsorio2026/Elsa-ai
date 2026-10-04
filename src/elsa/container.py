@@ -10,10 +10,12 @@ y pool de conexiones): se abren en :meth:`Container.start` y se cierran en
 """
 
 import logging
+from collections.abc import Callable
 
 import httpx
 
 from elsa.adapters.fake_auth import FakeAuthAdapter
+from elsa.adapters.fake_materials import FakeMaterialsFacade
 from elsa.adapters.fake_materials_identity import FakeMaterialsIdentityAdapter
 from elsa.adapters.jwks import JwksCache
 from elsa.adapters.llama_cpp_llm import LlamaCppAdapter
@@ -27,6 +29,7 @@ from elsa.adapters.postgres_knowledge import PostgresKnowledgeRepository
 from elsa.adapters.postgres_permissions import PostgresPermissionsRepository
 from elsa.adapters.simulated_transcription import SimulatedTranscriptionAdapter
 from elsa.adapters.supabase_auth import SupabaseJwtAuthAdapter
+from elsa.adapters.supabase_materials import SupabaseMaterialsGateway
 from elsa.adapters.supabase_materials_identity import SupabaseMaterialsIdentityAdapter
 from elsa.config import (
     ArtifactStorageBackend,
@@ -42,6 +45,7 @@ from elsa.ports.auth import AuthPort, IdentityProviderUnavailableError
 from elsa.ports.contributions import ContributionsRepositoryPort
 from elsa.ports.knowledge import KnowledgeRepositoryPort, KnowledgeUnavailableError
 from elsa.ports.llm import LLMPort, LLMTimeoutError, LLMUnavailableError, ProbeableLLM
+from elsa.ports.materials import MaterialsPort
 from elsa.ports.materials_identity import MaterialsIdentityPort
 from elsa.ports.permissions import PermissionsRepositoryPort, PermissionsUnavailableError
 from elsa.ports.transcription import TranscriptionPort
@@ -54,7 +58,7 @@ _logger = logging.getLogger("elsa.container")
 # `llm` salió de esta lista en el Bloque 4.5: ya tiene adaptador real
 # (`LlamaCppAdapter`). Que esté conectado o no ahora depende de la
 # configuración, no de que falte código, y por eso tiene su propio reporte.
-_PLANNED_DEPENDENCIES: tuple[str, ...] = ("embeddings", "ocr", "reranker", "materials")
+_PLANNED_DEPENDENCIES: tuple[str, ...] = ("embeddings", "ocr", "reranker")
 
 _FAKE_DETAIL = "fake adapter (DEV only)"
 _PLANNED_DETAIL = "no adapter configured yet (planned for a later block)"
@@ -95,6 +99,7 @@ class Container:
         *,
         auth: AuthPort | None = None,
         materials_identity: MaterialsIdentityPort | None = None,
+        materials_inventory: Callable[[str], MaterialsPort] | None = None,
         permissions: PermissionsRepositoryPort | None = None,
         abuse_guard: AbuseGuardPort | None = None,
         knowledge: KnowledgeRepositoryPort | None = None,
@@ -137,6 +142,20 @@ class Container:
             self.materials_identity = materials_identity or self._build_materials_identity(
                 settings, self._http
             )
+
+        # El inventario de Materiales se consulta con la identidad del propio
+        # usuario, así que el contenedor no entrega un puerto sino una fábrica
+        # que lo ata al token **de esa petición**. Nada compartido guarda un JWT.
+        self._materials_gateway: SupabaseMaterialsGateway | None = None
+        self.materials_inventory: Callable[[str], MaterialsPort]
+        if materials_inventory is not None:
+            self.materials_inventory = materials_inventory
+        elif settings.auth_provider is AuthProvider.FAKE or self._http is None:
+            fake = FakeMaterialsFacade()
+            self.materials_inventory = lambda _token: fake
+        else:
+            self._materials_gateway = self._build_materials_gateway(settings, self._http)
+            self.materials_inventory = self._materials_gateway.for_token
 
         self.permissions: PermissionsRepositoryPort | None = permissions
         if self.permissions is None and settings.permissions_backend is PermissionsBackend.MEMORY:
@@ -280,6 +299,7 @@ class Container:
                 detail="simulated adapter: audio is recorded, speech is not recognised",
             )
         )
+        reports.append(self._materials_report())
         reports.extend(
             DependencyReport(
                 name=name,
@@ -290,6 +310,29 @@ class Container:
             for name in _PLANNED_DEPENDENCIES
         )
         return tuple(reports)
+
+    def _materials_report(self) -> DependencyReport:
+        """Estado del inventario de Materiales. **No se sondea.**
+
+        El ACL de Materiales solo da ``EXECUTE`` a ``authenticated``: sin una
+        sesión de usuario no hay forma honesta de preguntarle nada, ni siquiera
+        el descriptor. Por eso este reporte declara la configuración y no
+        inventa un ``ok``; la versión del contrato se comprueba con la primera
+        consulta autenticada (ADR 0021 §15.3).
+        """
+        if self._materials_gateway is None:
+            return DependencyReport(
+                name="materials",
+                status=DependencyStatus.DEGRADED,
+                critical=False,
+                detail=_FAKE_DETAIL,
+            )
+        return DependencyReport(
+            name="materials",
+            status=DependencyStatus.DEGRADED,
+            critical=False,
+            detail="configured; the contract is verified on the first authenticated query",
+        )
 
     async def _llm_report(self) -> DependencyReport:
         """El motor de generación nunca es crítico (regla 9 de CLAUDE.md).
@@ -438,6 +481,21 @@ class Container:
             leeway_seconds=settings.auth_jwt_leeway_seconds,
             jwks=jwks,
             symmetric_secret=None if secret is None else secret.get_secret_value(),
+        )
+
+    @staticmethod
+    def _build_materials_gateway(
+        settings: Settings, http: httpx.AsyncClient
+    ) -> SupabaseMaterialsGateway:
+        rpc_base_url = settings.materials_rpc_base_url
+        api_key = settings.materials_api_key
+        # La configuración garantiza ambos valores para el proveedor real.
+        assert rpc_base_url is not None and api_key is not None  # noqa: S101
+        return SupabaseMaterialsGateway(
+            rpc_base_url=rpc_base_url,
+            api_key=api_key,
+            http_client=http,
+            timeout_seconds=settings.materials_timeout_seconds,
         )
 
     @staticmethod

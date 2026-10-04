@@ -49,6 +49,7 @@ la configuración.
 | `ELSA_AUTH_TIMEOUT_SECONDS` | No | `5.0` | Timeout de las llamadas al proveedor de identidad. |
 | `ELSA_AUTH_JWKS_CACHE_SECONDS` | No | `600` | Vigencia del JWKS en caché. |
 | `ELSA_AUTH_JWKS_MIN_REFRESH_SECONDS` | No | `60` | Espera mínima entre refrescos del JWKS ante un `kid` desconocido. Evita que un token forjado provoque una descarga por petición; a cambio, una rotación tarda como mucho ese tiempo en reconocerse. |
+| `ELSA_MATERIALS_TIMEOUT_SECONDS` | No | `8.0` | Plazo de cada llamada al contrato de inventario de Materiales (consulta de disponibilidad por código exacto). Independiente de `ELSA_AUTH_TIMEOUT_SECONDS`, que es solo del proveedor de identidad. Debe ser mayor que 0. |
 
 ## Autorización (Supabase ELSA)
 

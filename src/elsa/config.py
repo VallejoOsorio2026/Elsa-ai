@@ -158,6 +158,14 @@ class Settings(BaseSettings):
     auth_jwks_cache_seconds: int = 600
     """Vigencia del JWKS en caché."""
 
+    materials_timeout_seconds: float = 8.0
+    """Plazo de cada llamada al contrato de inventario de Materiales.
+
+    Es independiente de ``auth_timeout_seconds``: aquella semántica es la del
+    proveedor de identidad (JWKS y perfil), y atar dos usos distintos al mismo
+    número haría que ajustar uno alterase el otro sin que nadie lo notara.
+    """
+
     auth_jwks_min_refresh_seconds: int = 60
     """Espera mínima entre refrescos del JWKS ante un ``kid`` desconocido.
 
@@ -595,6 +603,9 @@ class Settings(BaseSettings):
         if self.auth_timeout_seconds <= 0:
             raise ValueError("must be greater than zero")
 
+        if not math.isfinite(self.materials_timeout_seconds) or self.materials_timeout_seconds <= 0:
+            raise ValueError("ELSA_MATERIALS_TIMEOUT_SECONDS must be greater than zero")
+
         if self.artifact_storage_backend is ArtifactStorageBackend.MEMORY and not is_dev:
             raise ValueError(
                 "the in-memory artifact storage is only allowed in the DEV environment; "
@@ -703,6 +714,13 @@ class Settings(BaseSettings):
             overlap_tokens=self.document_chunk_overlap_tokens,
             chars_per_token=self.document_chunk_chars_per_token,
         )
+
+    @property
+    def materials_rpc_base_url(self) -> str | None:
+        """Base de las RPC PostgREST del contrato de inventario de Materiales."""
+        if self.materials_supabase_url is None:
+            return None
+        return f"{self.materials_supabase_url}/rest/v1/rpc"
 
     @property
     def materials_profiles_url(self) -> str | None:
