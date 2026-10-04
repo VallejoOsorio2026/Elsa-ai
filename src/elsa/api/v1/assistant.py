@@ -20,15 +20,39 @@ Tres reglas de fondo:
   recibe archivos: solo su declaración, para poder validar los límites y
   responder que el camino del conocimiento es «Agregar conocimiento». Un
   adjunto de conversación nunca se convierte en conocimiento por sí solo.
+
+Además, y **solo** cuando la pregunta trae un código exacto sin ambigüedad
+(:mod:`elsa.core.material_code`), la respuesta suma un bloque
+``availability`` con la disponibilidad que Materiales devuelve **en vivo**.
+Es aditivo: no sustituye ni altera la búsqueda sobre el BOM, y si Materiales
+no responde, el bloque lo declara y el resto de la respuesta sigue igual.
+Los hechos del bloque salen del contrato de Materiales; nada aquí los redacta
+un modelo ni los completa.
 """
+
+import logging
 
 from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 
-from elsa.api.deps import get_knowledge, get_settings
+from elsa.api.deps import bearer_token, get_container, get_knowledge, get_settings
 from elsa.api.errors import ApiError
 from elsa.api.v1.technical import resolve_asset
 from elsa.config import Settings
+from elsa.container import Container
+from elsa.core.capability_outcomes import (
+    UNBOUNDED_CLAIM_REFUSAL_MESSAGE,
+    CapabilityCallStatus,
+    CapabilityOutcome,
+    UncomposableOutcomeError,
+    interpret_inventory_lookup,
+)
+from elsa.core.coverage_policy import InventoryCoverageState
+from elsa.core.material_code import (
+    EXPECTED_MATERIALS_CONTRACT_VERSION,
+    CodeDetectionKind,
+    detect_exact_material_code,
+)
 from elsa.core.retrieval import Match, candidates_from, parse_query, search
 from elsa.ports.knowledge import (
     BomItemRecord,
@@ -36,6 +60,14 @@ from elsa.ports.knowledge import (
     KnowledgeRepositoryPort,
     TechnicalAssetRecord,
 )
+from elsa.ports.materials import (
+    MaterialLookupRequest,
+    MaterialsContractViolationError,
+    MaterialsLookupResult,
+    MaterialsPort,
+)
+
+_logger = logging.getLogger("elsa.api.assistant")
 
 router = APIRouter(prefix="/assistant/{domain}/{asset}", tags=["assistant"])
 
@@ -85,6 +117,66 @@ class FailureModeEvidence(BaseModel):
     matched_code: str | None = None
 
 
+class StockLocationEvidence(BaseModel):
+    """Una fila del material en el inventario. Sus campos proceden de la misma fila."""
+
+    center: str
+    warehouse: str
+    location: str | None = None
+    """Opaca: se muestra sin interpretar. Nula significa «llegó sin ubicación»."""
+    scope: str
+    available: str
+    committed: str
+
+
+class MaterialFactsEvidence(BaseModel):
+    """Lo que Materiales devolvió sobre el código.
+
+    Descripción, unidad y código antiguo son agregados por campo: no se
+    garantiza que provengan de la misma fila, y por eso no se presentan como tal.
+    """
+
+    code: str
+    description: str | None = None
+    unit: str | None = None
+    old_code: str | None = None
+    total_available: str
+    total_committed: str
+    totals_rule: str
+    """Regla de Materiales que produjo los totales: no son dato crudo de SAP."""
+    marked_for_discontinuation: bool
+    """Señal de riesgo de Materiales. Acompaña al hecho; no lo oculta ni lo degrada."""
+    locations: list[StockLocationEvidence] = Field(default_factory=list)
+
+
+class AvailabilityProvenance(BaseModel):
+    source: str
+    capability: str
+    contract_version: str
+    inventory_version: int
+    loaded_at: str
+    """Cuándo terminó la carga en Materiales. No es la fecha de extracción de SAP."""
+    read_at: str
+    """Cuándo preguntó ELSA."""
+    match_origin: str
+    coverage_state: str
+
+
+class AvailabilityBlock(BaseModel):
+    """Disponibilidad viva de un código exacto, con su procedencia y sus límites."""
+
+    status: str
+    """``matched`` · ``not_returned`` · ``no_active_inventory`` · ``unavailable`` ·
+    ``rejected`` · ``contract_error`` · ``ambiguous_code``."""
+    message: str
+    requested_code: str | None = None
+    answer_status: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    material: MaterialFactsEvidence | None = None
+    provenance: AvailabilityProvenance | None = None
+    scope_note: str | None = None
+
+
 class AskResponse(BaseModel):
     """Respuesta del piloto: siempre dice cómo se construyó."""
 
@@ -105,6 +197,8 @@ class AskResponse(BaseModel):
     components: list[ComponentEvidence] = Field(default_factory=list)
     failure_modes: list[FailureModeEvidence] = Field(default_factory=list)
     attachment_note: str | None = None
+    availability: AvailabilityBlock | None = None
+    """Solo cuando la pregunta trae un código exacto. Aditivo: nunca altera el BOM."""
 
 
 def _validate_attachments(
@@ -205,14 +299,56 @@ def _build_message(
     )
 
 
+def get_materials(
+    token: str = Depends(bearer_token),
+    container: Container = Depends(get_container),
+) -> MaterialsPort:
+    """Puerto de inventario atado al token **de esta petición**.
+
+    Se crea en cada petición y nada compartido lo conserva: el JWT vive en este
+    objeto solo mientras dura la respuesta.
+    """
+    return container.materials_inventory(token)
+
+
 @router.post("/ask", response_model=AskResponse)
 async def ask(
     payload: AskRequest,
     asset_record: TechnicalAssetRecord = Depends(resolve_asset),
     knowledge: KnowledgeRepositoryPort = Depends(get_knowledge),
     settings: Settings = Depends(get_settings),
+    materials: MaterialsPort = Depends(get_materials),
 ) -> AskResponse:
-    """Busca la pregunta en el conocimiento publicado del equipo."""
+    """Busca la pregunta en el BOM publicado y, si trae un código exacto, en Materiales."""
+    response = await _answer_from_published_knowledge(payload, asset_record, knowledge, settings)
+    detection = detect_exact_material_code(payload.question)
+    if detection.kind is CodeDetectionKind.NOT_APPLICABLE:
+        return response
+    if detection.kind is CodeDetectionKind.AMBIGUOUS:
+        response.availability = AvailabilityBlock(
+            status="ambiguous_code",
+            message=(
+                "Tu pregunta menciona más de un código de material. Consulto la disponibilidad "
+                "de un solo código a la vez: pregunta por uno y lo consulto."
+            ),
+        )
+        return response
+    assert detection.code is not None  # noqa: S101 - SINGLE siempre lleva código
+    response.availability = await _live_availability(
+        materials,
+        detection.code,
+        other_facts_available=bool(response.components or response.failure_modes),
+    )
+    return response
+
+
+async def _answer_from_published_knowledge(
+    payload: AskRequest,
+    asset_record: TechnicalAssetRecord,
+    knowledge: KnowledgeRepositoryPort,
+    settings: Settings,
+) -> AskResponse:
+    """La respuesta de siempre: búsqueda literal sobre el BOM y el AMEF publicados."""
     attachment_note = _validate_attachments(payload.attachments, settings)
     query = parse_query(payload.question)
 
@@ -294,3 +430,123 @@ async def ask(
         version_label=version_label,
     )
     return base
+
+
+# ---------------------------------------------------------------------
+# Disponibilidad viva en Materiales
+# ---------------------------------------------------------------------
+
+_SESSION_REJECTED_MESSAGE = (
+    "Materiales no aceptó tu sesión para esta consulta. Inicia sesión de nuevo. "
+    "No es una ausencia de información."
+)
+_FORBIDDEN_MESSAGE = (
+    "Materiales no autorizó esta consulta con tu sesión. No es una ausencia de información."
+)
+_REJECTED_MESSAGE = (
+    "Materiales rechazó la sesión o el perfil no está activo allí. No se muestra ningún "
+    "dato de inventario."
+)
+_CONTRACT_ERROR_MESSAGE = (
+    "La respuesta de Materiales no cumple el contrato acordado, así que no la muestro. "
+    "Es un fallo técnico, no una ausencia de información."
+)
+
+_STATUS_NAMES = {
+    (CapabilityCallStatus.OK, CapabilityOutcome.MATCHED): "matched",
+    (CapabilityCallStatus.OK, CapabilityOutcome.NOT_RETURNED): "not_returned",
+    (CapabilityCallStatus.NO_ACTIVE_INVENTORY, None): "no_active_inventory",
+    (CapabilityCallStatus.UNAVAILABLE, None): "unavailable",
+}
+
+
+async def _live_availability(
+    materials: MaterialsPort, code: str, *, other_facts_available: bool
+) -> AvailabilityBlock:
+    """Consulta el código **tal cual** y traduce el resultado sin añadirle nada."""
+    request = MaterialLookupRequest(
+        contract_version=EXPECTED_MATERIALS_CONTRACT_VERSION, material_code=code
+    )
+    try:
+        result = await materials.lookup_material_by_code(request)
+        return _availability_from(
+            materials, result, code, other_facts_available=other_facts_available
+        )
+    except (MaterialsContractViolationError, UncomposableOutcomeError):
+        _logger.warning("materials response rejected", extra={"category": "contract"})
+        return AvailabilityBlock(
+            status="contract_error", message=_CONTRACT_ERROR_MESSAGE, requested_code=code
+        )
+
+
+def _availability_from(
+    materials: MaterialsPort,
+    result: MaterialsLookupResult,
+    code: str,
+    *,
+    other_facts_available: bool,
+) -> AvailabilityBlock:
+    if result.call_status is CapabilityCallStatus.REJECTED:
+        # Se resuelve antes de componer: no hay política de respuesta para esto.
+        return AvailabilityBlock(status="rejected", message=_REJECTED_MESSAGE, requested_code=code)
+
+    interpreted = interpret_inventory_lookup(
+        result.as_capability_result(), other_facts_available=other_facts_available
+    )
+    block = AvailabilityBlock(
+        status=_STATUS_NAMES[(result.call_status, result.outcome)],
+        message=interpreted.message,
+        requested_code=code,
+        answer_status=interpreted.status.value,
+        warnings=[warning.value for warning in interpreted.warnings],
+    )
+
+    if result.call_status is CapabilityCallStatus.UNAVAILABLE:
+        failure = getattr(materials, "last_failure", None)
+        if failure == "auth_401":
+            block.message = _SESSION_REJECTED_MESSAGE
+        elif failure == "forbidden":
+            block.message = _FORBIDDEN_MESSAGE
+        return block
+
+    if result.coverage is not None and result.coverage.state is InventoryCoverageState.UNKNOWN:
+        # Alcance desconocido: se dice, y no se disfraza de completo ni de incompleto.
+        block.scope_note = UNBOUNDED_CLAIM_REFUSAL_MESSAGE
+
+    if result.material is not None and result.attribution is not None:
+        facts = result.material
+        attribution = result.attribution
+        block.material = MaterialFactsEvidence(
+            code=facts.code,
+            description=facts.descripcion,
+            unit=facts.unidad,
+            old_code=facts.material_antiguo,
+            total_available=str(facts.total_disponible.value),
+            total_committed=str(facts.total_comprometido.value),
+            totals_rule=facts.total_disponible.rule_reference,
+            marked_for_discontinuation=facts.dado_de_baja.value,
+            locations=[
+                StockLocationEvidence(
+                    center=location.centro,
+                    warehouse=location.almacen,
+                    location=location.ubicacion,
+                    scope=location.ambito,
+                    available=str(location.disponible),
+                    committed=str(location.comprometido),
+                )
+                for location in facts.stock_locations
+            ],
+        )
+        block.provenance = AvailabilityProvenance(
+            source=attribution.source,
+            capability=attribution.capability,
+            contract_version=attribution.contract_version,
+            inventory_version=attribution.source_version.version_number,
+            loaded_at=attribution.source_version.loaded_at.isoformat(),
+            read_at=attribution.read_at.isoformat(),
+            match_origin=attribution.match_origin.value,
+            coverage_state=(
+                result.coverage.state.value if result.coverage is not None else "unknown"
+            ),
+        )
+    return block

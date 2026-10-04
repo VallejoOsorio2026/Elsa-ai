@@ -141,10 +141,122 @@ function buildAnswer(answer) {
   if (answer.failure_modes.length > 0) {
     body.append(buildFailureModes(answer.failure_modes));
   }
+  if (answer.availability) {
+    body.append(buildAvailability(answer.availability));
+  }
   if (answer.attachment_note) {
     body.append(notice('info', answer.attachment_note, 'Adjuntos'));
   }
   return body;
+}
+
+const AVAILABILITY_NOTICE = {
+  matched: null,
+  not_returned: 'warn',
+  no_active_inventory: 'warn',
+  ambiguous_code: 'info',
+  unavailable: 'error',
+  rejected: 'error',
+  contract_error: 'error',
+};
+
+/**
+ * Disponibilidad consultada en vivo a Materiales para un código exacto.
+ *
+ * Todo lo que se muestra viene del contrato de Materiales; la interfaz no
+ * completa, no deduce y no convierte una ausencia en inexistencia. La
+ * procedencia y el límite del alcance van siempre junto al hecho.
+ */
+function buildAvailability(block) {
+  const section = el('div', { class: 'evidence stack-sm' }, [
+    el('h3', {
+      text: block.requested_code
+        ? `Disponibilidad en Materiales · código ${block.requested_code}`
+        : 'Disponibilidad en Materiales',
+    }),
+  ]);
+
+  const level = AVAILABILITY_NOTICE[block.status];
+  if (level) section.append(notice(level, block.message));
+  else section.append(el('p', { text: block.message }));
+
+  const material = block.material;
+  if (material) {
+    section.append(
+      el('p', {}, [
+        el('strong', { text: 'Material: ' }),
+        `${material.code}${material.description ? ` · ${material.description}` : ''}`,
+      ]),
+      el('p', {}, [
+        el('strong', { text: 'Disponible: ' }),
+        `${material.total_available} ${material.unit || ''}`.trim(),
+        ' · ',
+        el('strong', { text: 'Comprometido: ' }),
+        `${material.total_committed} ${material.unit || ''}`.trim(),
+      ]),
+      el('p', {
+        class: 'muted',
+        text: `Los totales los calcula Materiales (regla ${material.totals_rule}); no son un dato crudo de SAP.`,
+      }),
+    );
+    if (material.marked_for_discontinuation) {
+      section.append(
+        notice(
+          'warn',
+          'Materiales marca este material como posible baja. Es una señal de riesgo, no un estado de SAP.',
+        ),
+      );
+    }
+    if (material.locations.length > 0) section.append(buildLocations(material.locations));
+  }
+
+  const provenance = block.provenance;
+  if (provenance) {
+    section.append(
+      el('p', {
+        class: 'muted',
+        text:
+          `Fuente: ${provenance.source}, inventario versión ${provenance.inventory_version} ` +
+          `(carga terminada ${provenance.loaded_at}). Consultado ${provenance.read_at}. ` +
+          `Coincidencia: ${provenance.match_origin}. Contrato ${provenance.contract_version}.`,
+      }),
+    );
+  }
+  if (block.scope_note) {
+    section.append(el('p', { class: 'muted', text: block.scope_note }));
+  }
+  return section;
+}
+
+function buildLocations(locations) {
+  return el('div', { class: 'table-scroll' }, [
+    el('table', {}, [
+      el('thead', {}, [
+        el('tr', {}, [
+          el('th', { text: 'Centro' }),
+          el('th', { text: 'Almacén' }),
+          el('th', { text: 'Ubicación' }),
+          el('th', { text: 'Ámbito' }),
+          el('th', { text: 'Disponible' }),
+          el('th', { text: 'Comprometido' }),
+        ]),
+      ]),
+      el(
+        'tbody',
+        {},
+        locations.map((row) =>
+          el('tr', {}, [
+            el('td', { text: row.center }),
+            el('td', { text: row.warehouse }),
+            el('td', { class: 'mono', text: row.location || 'sin ubicación' }),
+            el('td', { text: row.scope }),
+            el('td', { text: row.available }),
+            el('td', { text: row.committed }),
+          ]),
+        ),
+      ),
+    ]),
+  ]);
 }
 
 function matchLabel(row) {
