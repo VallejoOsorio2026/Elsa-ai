@@ -30,8 +30,8 @@ from elsa.ports.materials import (
 pytestmark = pytest.mark.anyio
 
 BASE = "https://materials.example.test/rest/v1/rpc"
-API_KEY = "sb_publishable_TESTKEY0123456789"
-TOKEN = "eyJ.TEST-USER-JWT.signature"
+API_KEY = "sb_publishable_is_public_by_design"
+TOKEN = "the-user-own-jwt"
 
 DESCRIPTOR: dict[str, Any] = {
     "contract_version": "1",
