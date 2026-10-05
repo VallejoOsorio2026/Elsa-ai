@@ -28,8 +28,11 @@ se valida la coherencia estructural.
 
 from __future__ import annotations
 
+import math
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from types import MappingProxyType
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -41,6 +44,8 @@ from pydantic import (
     JsonValue,
     SecretStr,
     StrictInt,
+    TypeAdapter,
+    field_validator,
     model_validator,
 )
 
@@ -60,6 +65,7 @@ __all__ = [
     "ErrorCode",
     "ErrorMessage",
     "Heartbeat",
+    "Message",
     "MessageType",
     "NodeId",
     "Operation",
@@ -70,6 +76,7 @@ __all__ = [
     "Response",
     "can_transition",
     "cancel_effect",
+    "parse_message",
 ]
 
 PROTOCOL_VERSION: Literal["1"] = "1"
@@ -144,7 +151,7 @@ class RequestState(StrEnum):
     CANCELLED = "cancelled"
 
 
-ALLOWED_TRANSITIONS: dict[RequestState, frozenset[RequestState]] = {
+_TRANSITIONS: dict[RequestState, frozenset[RequestState]] = {
     RequestState.QUEUED: frozenset(
         {RequestState.DISPATCHED, RequestState.EXPIRED, RequestState.CANCELLED}
     ),
@@ -170,8 +177,14 @@ ALLOWED_TRANSITIONS: dict[RequestState, frozenset[RequestState]] = {
     RequestState.EXPIRED: frozenset(),
     RequestState.CANCELLED: frozenset(),
 }
-"""Transiciones permitidas. Los estados terminales no tienen salida. No hay
-camino de vuelta a ``queued``: una solicitud en vuelo **no se reejecuta**."""
+
+ALLOWED_TRANSITIONS: Mapping[RequestState, frozenset[RequestState]] = MappingProxyType(_TRANSITIONS)
+"""Transiciones permitidas (solo lectura). Los estados terminales no tienen salida.
+No hay camino de vuelta a ``queued``: una solicitud en vuelo **no se reejecuta**.
+
+``running`` es un estado del modelo del relay, **no observable en el cable en V1**:
+no existe un mensaje que lo anuncie, así que ``dispatched`` puede pasar directo a
+``completed`` o ``failed``."""
 
 
 def can_transition(current: RequestState, target: RequestState) -> bool:
@@ -317,6 +330,16 @@ class Request(_NodeScoped):
         return data
 
 
+def _all_finite(value: JsonValue) -> bool:
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, list):
+        return all(_all_finite(item) for item in value)
+    if isinstance(value, dict):
+        return all(_all_finite(item) for item in value.values())
+    return True
+
+
 class Response(_NodeScoped):
     """Resultado exitoso. PC1 → Render.
 
@@ -329,6 +352,15 @@ class Response(_NodeScoped):
     request_id: UUID
     result: dict[str, JsonValue]
 
+    @field_validator("result")
+    @classmethod
+    def _result_is_finite_json(cls, value: dict[str, JsonValue]) -> dict[str, JsonValue]:
+        """Rechaza ``NaN`` e infinitos: JSON no los admite y el serializador los
+        convertiría en ``null`` en silencio, perdiendo el dato."""
+        if not _all_finite(value):
+            raise ValueError("result must not contain NaN or infinite numbers")
+        return value
+
 
 class ErrorMessage(_NodeScoped):
     """Fallo de una solicitud o del protocolo. PC1 → Render (o Render → PC1)."""
@@ -340,9 +372,6 @@ class ErrorMessage(_NodeScoped):
     detail: str | None = Field(default=None, max_length=ERROR_DETAIL_MAX_LENGTH)
     """Saneado y acotado por el productor. Nunca trazas, rutas físicas, secretos
     ni ``repr`` de excepciones internas."""
-    local_status: StrictInt | None = Field(default=None, ge=100, le=599)
-    """Estado HTTP que devolvió ELSA local, si lo hubo; evita perder esa
-    información al mapear a un ``ErrorCode``."""
 
 
 class Cancel(_NodeScoped):
@@ -350,3 +379,24 @@ class Cancel(_NodeScoped):
 
     message_type: Literal[MessageType.CANCEL] = MessageType.CANCEL
     request_id: UUID
+
+
+Message = Annotated[
+    Register | Heartbeat | Request | Response | ErrorMessage | Cancel,
+    Field(discriminator="message_type"),
+]
+"""Unión discriminada por ``message_type`` de los mensajes del cable."""
+
+_MESSAGE_ADAPTER: TypeAdapter[Message] = TypeAdapter(Message)
+
+
+def parse_message(
+    raw: str | bytes,
+) -> Register | Heartbeat | Request | Response | ErrorMessage | Cancel:
+    """Decodifica un mensaje del cable. **Es la vía de entrada para datos externos.**
+
+    El ``message_type`` es obligatorio aquí: validar contra un modelo concreto lo
+    rellenaría por defecto y, como ``register`` y ``heartbeat`` tienen los mismos
+    campos, un mensaje sin etiqueta sería ambiguo.
+    """
+    return _MESSAGE_ADAPTER.validate_json(raw)

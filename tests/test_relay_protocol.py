@@ -30,6 +30,7 @@ from elsa.relay.protocol import (
     Response,
     can_transition,
     cancel_effect,
+    parse_message,
 )
 
 TOKEN = "synthetic-user-access-token"
@@ -304,13 +305,11 @@ def test_error_detail_is_bounded_and_request_id_is_optional() -> None:
         )
 
 
-def test_local_status_must_be_a_plausible_http_status() -> None:
-    assert (
-        ErrorMessage.model_validate(_node(code="FORBIDDEN", local_status=403)).local_status == 403
-    )
-    for bad in [0, 99, 600, "403"]:
-        with pytest.raises(ValidationError):
-            ErrorMessage.model_validate(_node(code="FORBIDDEN", local_status=bad))
+def test_error_has_no_transport_status_field() -> None:
+    # El protocolo no se acopla al HTTP local: el consumidor traduce ErrorCode.
+    assert "local_status" not in ErrorMessage.model_fields
+    with pytest.raises(ValidationError):
+        ErrorMessage.model_validate(_node(code="FORBIDDEN", local_status=403))
 
 
 # --- Respuesta: JSON contractual -----------------------------------------
@@ -495,7 +494,7 @@ def test_every_message_round_trips_through_json_without_loss() -> None:
         Heartbeat.model_validate(_node()),
         Response.model_validate(_node(request_id=REQUEST_ID, result={"a": [1, {"b": None}]})),
         ErrorMessage.model_validate(
-            _node(request_id=REQUEST_ID, code="LOCAL_ERROR", detail="fallo", local_status=502)
+            _node(request_id=REQUEST_ID, code="LOCAL_ERROR", detail="fallo")
         ),
         Cancel.model_validate(_node(request_id=REQUEST_ID)),
     ]
@@ -547,3 +546,68 @@ def test_cancellation_semantics_by_state() -> None:
     assert cancel_effect(RequestState.FAILED) is CancelEffect.TOO_LATE
     assert cancel_effect(RequestState.EXPIRED) is CancelEffect.NOT_APPLICABLE
     assert cancel_effect(RequestState.CANCELLED) is CancelEffect.NOT_APPLICABLE
+
+
+# --- Revisión: endurecimiento --------------------------------------------
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_response_result_rejects_non_finite_numbers(value: float) -> None:
+    for result in ({"x": value}, {"x": [1, {"y": value}]}):
+        with pytest.raises(ValidationError):
+            Response.model_validate(_node(request_id=REQUEST_ID, result=result))
+
+
+def test_response_result_keeps_finite_numbers_without_loss() -> None:
+    result = {"a": 1, "b": 2.5, "c": [0.0, -1], "d": None}
+    response = Response.model_validate(_node(request_id=REQUEST_ID, result=result))
+    assert json.loads(response.model_dump_json())["result"] == result
+
+
+def test_parse_message_routes_each_wire_message_by_its_type() -> None:
+    wires: list[tuple[type[Any], Any]] = [
+        (Register, Register.model_validate(_node())),
+        (Heartbeat, Heartbeat.model_validate(_node())),
+        (Request, _request()),
+        (Response, Response.model_validate(_node(request_id=REQUEST_ID, result={}))),
+        (ErrorMessage, ErrorMessage.model_validate(_node(code="TIMEOUT"))),
+        (Cancel, Cancel.model_validate(_node(request_id=REQUEST_ID))),
+    ]
+    for model, message in wires:
+        raw = (
+            json.dumps(message.to_wire_dict())
+            if isinstance(message, Request)
+            else message.model_dump_json()
+        )
+        parsed = parse_message(raw)
+        assert type(parsed) is model
+        assert parsed == message
+
+
+def test_parse_message_requires_the_type_tag_so_register_and_heartbeat_are_not_ambiguous() -> None:
+    untagged = json.dumps({"protocol_version": "1", **_node(node_session_id=str(SESSION_ID))})
+    with pytest.raises(ValidationError):
+        parse_message(untagged)
+    with pytest.raises(ValidationError):
+        parse_message(json.dumps({**json.loads(untagged), "message_type": "teapot"}))
+    with pytest.raises(ValidationError):
+        parse_message("not json")
+
+
+def test_parse_message_rejects_unknown_versions_and_extra_fields() -> None:
+    register = json.loads(Register.model_validate(_node()).model_dump_json())
+    with pytest.raises(ValidationError):
+        parse_message(json.dumps({**register, "protocol_version": "2"}))
+    with pytest.raises(ValidationError):
+        parse_message(json.dumps({**register, "url": "http://example.invalid"}))
+
+
+def test_transition_table_is_read_only() -> None:
+    with pytest.raises(TypeError):
+        ALLOWED_TRANSITIONS[RequestState.COMPLETED] = frozenset({RequestState.RUNNING})  # type: ignore[index]
+
+
+def test_dispatched_can_finish_without_a_running_signal() -> None:
+    # V1 no tiene un mensaje que anuncie `running`: el relay no lo ve en el cable.
+    assert can_transition(RequestState.DISPATCHED, RequestState.COMPLETED)
+    assert can_transition(RequestState.DISPATCHED, RequestState.FAILED)

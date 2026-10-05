@@ -1,7 +1,8 @@
 # D2 — Acceso remoto seguro a ELSA: auditoría, arquitectura híbrida y diseño del transporte
 
 **Estado:** auditoría + decisión de arquitectura formalizada + **diseño** del
-transporte. **No es un cierre.** No se implementó nada, no se instaló software, no
+transporte. El contrato lógico V1 está en [ADR 0030](adr/0030-protocolo-relay-render-pc1-v1.md) (D2.1);
+los nombres de mensajes y campos de §7.3 son conceptuales y **prevalece el ADR 0030**. **No es un cierre.** No se implementó nada, no se instaló software, no
 se abrió ningún puerto y no se tocó ninguna configuración de Windows, red, router,
 Render o Supabase.
 
@@ -269,11 +270,11 @@ Free**; la salida alternativa es un plan de pago (decisión del responsable).
 
 | Mensaje | Dirección | Mapeo sobre long polling | Contenido |
 |---|---|---|---|
-| **REGISTER** | PC1 → Render | `POST` de registro | `node_id`, versión del agente, `epoch` nuevo generado por el nodo. Render responde con parámetros (ventana de espera, límites) |
+| **REGISTER** | PC1 → Render | `POST` de registro | `node_id` y `node_session_id` (el «epoch» de este documento) nuevo generado por el nodo; **sin versión del agente ni otros datos** (ADR 0030). Los parámetros de la respuesta de Render son transporte |
 | **HEARTBEAT** | PC1 → Render | implícito en cada espera; opcional `POST` explícito si el nodo está ocupado | `node_id`, `epoch`, indicadores mínimos (p. ej. «ELSA local responde», «LLM degradado: sí/no») |
 | **REQUEST** | Render → PC1 | cuerpo de la respuesta a la espera | sobre de solicitud (abajo) |
 | **RESPONSE** | PC1 → Render | `POST` por `request_id` | `request_id`, `epoch`, estado HTTP, cabeceras permitidas, cuerpo |
-| **ERROR** | PC1 → Render | `RESPONSE` con tipo de fallo | `request_id`, `error_kind` (`local_error`, `route_not_allowed`, `local_timeout`, `duplicate`), sin trazas |
+| **ERROR** | PC1 → Render | `RESPONSE` con tipo de fallo | `request_id`, `code` (`ErrorCode` cerrado de ADR 0030: p. ej. `LOCAL_ERROR`, `FORBIDDEN`, `TIMEOUT`, `DUPLICATE_REQUEST`), `detail` acotado y sin trazas |
 | **CANCEL** | Render → PC1 | lista en la respuesta a la espera | `request_id` cancelados (el navegador se fue o venció el plazo) |
 
 **Sobre de solicitud (REQUEST):** `request_id` (UUID generado por Render) · `created_at` ·
@@ -288,8 +289,8 @@ queued ──▶ dispatched ──▶ running ──▶ completed
    └────────────┴─────────────┴─────▶ expired      (+ cancelled, terminal)
 ```
 
-`queued` y `expired` los fija Render; `dispatched` cuando se entrega al nodo; `running` cuando el
-nodo confirma; `completed`/`failed` según su RESPONSE. **Todo en memoria**; no hay persistencia en el
+`queued` y `expired` los fija Render; `dispatched` cuando se entrega al nodo; `running` **no es
+observable en el cable en V1** (no hay ACK; ver ADR 0030 §12); `completed`/`failed` según su RESPONSE. **Todo en memoria**; no hay persistencia en el
 piloto (§8.5).
 
 ### 7.4 Identidad del nodo y autenticación Render ↔ PC1

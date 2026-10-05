@@ -59,14 +59,18 @@ rechaza. No hay negociación automática de versiones: falla cerrado.
 | `heartbeat` | PC1 → Render | `node_id`, `node_session_id`. No es telemetría |
 | `request` | Render → PC1 | `request_id`, `node_id`, `node_session_id`, `operation`, `params`, `user_access_token`, `created_at`, `expires_at` |
 | `response` | PC1 → Render | `request_id`, `node_id`, `node_session_id`, `result` (objeto JSON opaco) |
-| `error` | PC1 → Render | `request_id` (opcional), `node_id`, `node_session_id`, `code`, `detail`, `local_status` |
+| `error` | PC1 → Render | `request_id` (opcional), `node_id`, `node_session_id`, `code`, `detail` |
 | `cancel` | Render → PC1 | `request_id`, `node_id`, `node_session_id` |
 
 No hay `ACK`: **no se demostró una invariante contractual que lo necesite** y el
 HTTP/long polling futuro no debe contaminar el protocolo lógico. Si D2.2 o D2.3
 descubren que hace falta, se reporta y se añade con una decisión explícita.
 
-Todos los modelos **rechazan campos desconocidos** y son inmutables. Una
+Todos los modelos **rechazan campos desconocidos** y son inmutables. Los datos
+externos se decodifican con **`parse_message`**, una unión discriminada por
+`message_type` que **exige la etiqueta**: validar contra un modelo concreto la
+rellenaría por defecto y, como `register` y `heartbeat` tienen los mismos
+campos, un mensaje sin etiqueta sería ambiguo. Una
 extensión exige un campo explícito o una versión nueva.
 
 ### 6. Identidad del nodo
@@ -104,7 +108,7 @@ Límites alineados con el endpoint actual (un test compara ambos y falla si
 divergen): `question` de 1 a 2000 caracteres; `filename` y `content_type` ≤ 255;
 `byte_size` ≥ 0 y entero. `domain` y `asset` solo exigen **no vacío**:
 `resolve_asset` los trata como strings de ruta (`strip().lower()`), sin charset
-contractual, y este ADR **no inventa uno** (ver §21).
+contractual, y este ADR **no inventa uno** (ver §20 y consecuencia 6).
 
 ### 10. Autenticación del nodo
 
@@ -135,8 +139,12 @@ queued ──▶ dispatched ──▶ running ──▶ completed
    └────────────┴─────────────┴──────▶ expired | cancelled
 ```
 
-`ALLOWED_TRANSITIONS` y `can_transition()` lo codifican. Los estados terminales
-no tienen salida y **nada vuelve a `queued`**.
+`ALLOWED_TRANSITIONS` (solo lectura) y `can_transition()` lo codifican. Los
+estados terminales no tienen salida y **nada vuelve a `queued`**.
+
+**`running` no es observable en el cable en V1:** no hay un mensaje que lo
+anuncie (no hay `ACK`), de modo que `dispatched` puede pasar directamente a
+`completed` o `failed`. El estado se conserva como parte del modelo del relay.
 
 ### 13. Errores
 
@@ -146,9 +154,16 @@ Códigos **cerrados**: `INVALID_REQUEST`, `UNAUTHORIZED`, `FORBIDDEN`,
 at-most-once y es más preciso que `INVALID_REQUEST`.
 
 `detail` es opcional, **acotado (≤ 200)** y lo sanea el productor: nada de
-trazas, rutas físicas, secretos ni `repr` de excepciones. `local_status`
-(100–599, opcional) conserva el estado HTTP de ELSA local para no perderlo al
-mapear a un código.
+trazas, rutas físicas, secretos ni `repr` de excepciones.
+
+**No hay `local_status`.** Durante la revisión se eliminó un campo que
+reenviaba el estado HTTP de ELSA local: acoplaba el protocolo lógico al HTTP de
+loopback, era ambiguo para errores que no vienen de HTTP, admitía valores sin
+sentido en un error (200, 3xx) y es redundante. El consumidor **traduce
+`ErrorCode`** a su propio estado (p. ej. el relay a HTTP hacia el navegador).
+**PENDIENTE D2.2:** decidir si la interfaz necesita más que el `ErrorCode`
+(por ejemplo, distinguir «activo no encontrado»); si hace falta, se añadirá un
+campo **explícito y lógico**, no un código HTTP.
 
 ### 14. Expiración
 
@@ -189,8 +204,9 @@ acción.
 Solo el `user_access_token` es secreto y está enmascarado. No hay datos del
 host, secretos del nodo, rutas ni inventario en el contrato. `result` es JSON
 **contractual** (`JsonValue`): un objeto con valores JSON válidos, no cualquier
-objeto Python, y el protocolo **no interpreta** su contenido (BOM, Materiales,
-LLM).
+objeto Python, **sin `NaN` ni infinitos** (JSON no los admite y el serializador
+los convertiría en `null` perdiendo el dato), y el protocolo **no interpreta** su
+contenido (BOM, Materiales, LLM).
 
 ### 19. Compatibilidad
 
@@ -206,7 +222,11 @@ atrás con un receptor V1. Toda ampliación es campo explícito versionado o V2.
 - El **tamaño máximo** de `result` y de la solicitud completa: **PENDIENTE D2.2**.
 - El **número máximo de adjuntos** y el tope de bytes totales: hoy los fija la
   configuración del endpoint, no el contrato: **PENDIENTE D2.2/D2.4**.
-- El endurecimiento de `domain`/`asset`: **PENDIENTE D2.4**.
+- El endurecimiento de `domain`/`asset` en el contrato: **PENDIENTE D2.4** (la
+  mitigación obligatoria de D2.3 está en la consecuencia 6).
+- El **tope de longitud** de `user_access_token` y del `detail`/`question` en
+  conjunto: **PENDIENTE D2.2** (hoy solo `question` y los adjuntos tienen tope).
+- Si la interfaz necesita algo más que `ErrorCode` (ver §13): **PENDIENTE D2.2**.
 - El login definitivo y el Modo ELSA.
 
 ---
@@ -221,10 +241,23 @@ atrás con un receptor V1. Toda ampliación es campo explícito versionado o V2.
 4. Un cambio de transporte no obliga a cambiar el contrato.
 5. `can_transition` y `cancel_effect` son puros y pequeños; **no** son una
    máquina de estados. El relay la construirá en D2.2.
-6. **Obligación para D2.3:** como `domain` y `asset` no tienen charset
-   contractual, el agente debe codificarlos como **un único segmento de ruta**
-   (sin `/`, `..` ni reinterpretar), de modo que un valor extraño no cambie el
-   endpoint al que se llama.
+6. **Obligación para D2.3 (verificada en la revisión).** `domain` y `asset` no
+   tienen charset contractual, y el contrato **no lo endurece** para no rechazar
+   activos válidos. La mitigación **no** es una expresión regular sino esta
+   combinación:
+   - `operation = assistant.ask` y la ruta local **construida por código fijo**
+     (`/api/v1/assistant/{domain}/{asset}/ask` contra la base loopback
+     configurada); **nunca** una URL, host ni puerto recibidos de Render;
+   - cada valor se inserta como **un único segmento**, codificado
+     (`urllib.parse.quote(valor, safe="")`);
+   - **además, el agente rechaza `.` y `..`** (y cualquier segmento que tras
+     decodificar contenga `/`): se comprobó que `httpx` **colapsa** esos
+     segmentos *antes* de enviar (`.../assistant/d/../ask` →
+     `/api/v1/assistant/ask`), de modo que sin ese rechazo un valor extraño
+     cambiaría el endpoint llamado. La codificación por sí sola no lo evita.
+   - D2.3 debe incluir pruebas de estos casos.
+7. **Decodificación:** los datos externos entran por `parse_message`. Validar un
+   mensaje contra un modelo concreto sin etiqueta no es una vía de entrada.
 
 ## Riesgos
 
