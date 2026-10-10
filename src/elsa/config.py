@@ -12,6 +12,7 @@ imprimen al representar la configuración ni aparecen en los logs.
 """
 
 import math
+import re
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
@@ -21,6 +22,7 @@ from pydantic import SecretStr, ValidationError, field_validator, model_validato
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from elsa.documents.model import ChunkingPolicy
+from elsa.relay.protocol import NODE_ID_PATTERN
 
 _LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
@@ -397,6 +399,37 @@ class Settings(BaseSettings):
     """Inactividad tras la cual una sesión deja de contar como activa."""
 
     # ---------------------------------------------------------------
+    # Relay Render–PC1 (D2.2, ADR 0031)
+    # ---------------------------------------------------------------
+
+    relay_enabled: bool = False
+    """Habilita el relay y monta sus rutas. Apagado por defecto (fail-closed):
+    con él apagado no existe ninguna ruta de nodo."""
+
+    relay_node_id: str | None = None
+    """Identidad configurada del único nodo del piloto. Obligatoria si el relay
+    está habilitado."""
+
+    relay_node_token_sha256: SecretStr | None = None
+    """SHA-256 (hex, 64 caracteres) del secreto del nodo. Render guarda solo el
+    hash; el secreto crudo vive únicamente en PC1."""
+
+    relay_node_token_sha256_previous: SecretStr | None = None
+    """Hash anterior opcional, para rotar el secreto sin corte."""
+
+    relay_node_ttl_seconds: float = 45.0
+    """Sin señal del nodo durante este tiempo, el nodo pasa a OFFLINE."""
+
+    relay_long_poll_seconds: float = 25.0
+    """Espera máxima de un poll. Debe ser menor que el TTL del nodo."""
+
+    relay_request_ttl_seconds: float = 120.0
+    """Vida máxima de una solicitud desde que se somete."""
+
+    relay_max_pending: int = 16
+    """Máximo de solicitudes vivas (en cola + en vuelo)."""
+
+    # ---------------------------------------------------------------
     # Validadores
     # ---------------------------------------------------------------
 
@@ -462,7 +495,7 @@ class Settings(BaseSettings):
             raise ValueError(f"must include an http(s) scheme: {value!r}")
         return url
 
-    @field_validator("auth_jwt_audience", "auth_jwt_issuer", "materials_api_key")
+    @field_validator("auth_jwt_audience", "auth_jwt_issuer", "materials_api_key", "relay_node_id")
     @classmethod
     def _empty_string_is_none(cls, value: str | None) -> str | None:
         if value is None:
@@ -470,7 +503,13 @@ class Settings(BaseSettings):
         stripped = value.strip()
         return stripped or None
 
-    @field_validator("auth_jwt_secret", "database_url", "bootstrap_admin_token")
+    @field_validator(
+        "auth_jwt_secret",
+        "database_url",
+        "bootstrap_admin_token",
+        "relay_node_token_sha256",
+        "relay_node_token_sha256_previous",
+    )
     @classmethod
     def _empty_secret_is_none(cls, value: SecretStr | None) -> SecretStr | None:
         """Un secreto declarado sin valor es un secreto ausente.
@@ -546,6 +585,7 @@ class Settings(BaseSettings):
         "llm_context_tokens",
         "llm_max_output_tokens",
         "llm_concurrency",
+        "relay_max_pending",
     )
     @classmethod
     def _positive(cls, value: int) -> int:
@@ -645,6 +685,8 @@ class Settings(BaseSettings):
                 "ELSA_INGESTION_MAX_UPLOAD_BYTES"
             )
 
+        self._validate_relay()
+
         # La coherencia de los límites del chunking la comprueba la propia
         # política, para que la regla viva en un solo sitio y no se puedan
         # separar.
@@ -654,6 +696,41 @@ class Settings(BaseSettings):
             raise ValueError(f"invalid document chunking limits: {error}") from None
 
         return self
+
+    def _validate_relay(self) -> None:
+        """Fail-closed: un relay habilitado nunca arranca sin autenticación.
+
+        Con el relay apagado no se exige nada. Los mensajes nombran la variable
+        pero jamás el valor recibido (es un hash de credencial).
+        """
+        if not self.relay_enabled:
+            return
+        if self.relay_node_id is None:
+            raise ValueError("ELSA_RELAY_NODE_ID is required when the relay is enabled")
+        if re.fullmatch(NODE_ID_PATTERN, self.relay_node_id) is None:
+            raise ValueError("ELSA_RELAY_NODE_ID must match [A-Za-z0-9._-]{1,64}")
+        if self.relay_node_token_sha256 is None:
+            raise ValueError("ELSA_RELAY_NODE_TOKEN_SHA256 is required when the relay is enabled")
+        for name, secret in (
+            ("ELSA_RELAY_NODE_TOKEN_SHA256", self.relay_node_token_sha256),
+            ("ELSA_RELAY_NODE_TOKEN_SHA256_PREVIOUS", self.relay_node_token_sha256_previous),
+        ):
+            if secret is None:
+                continue
+            if re.fullmatch(r"[0-9a-f]{64}", secret.get_secret_value()) is None:
+                raise ValueError(f"{name} must be a lowercase hex SHA-256 (64 characters)")
+        for name, seconds in (
+            ("ELSA_RELAY_NODE_TTL_SECONDS", self.relay_node_ttl_seconds),
+            ("ELSA_RELAY_LONG_POLL_SECONDS", self.relay_long_poll_seconds),
+            ("ELSA_RELAY_REQUEST_TTL_SECONDS", self.relay_request_ttl_seconds),
+        ):
+            if not math.isfinite(seconds) or seconds <= 0:
+                raise ValueError(f"{name} must be greater than zero")
+        if self.relay_long_poll_seconds >= self.relay_node_ttl_seconds:
+            raise ValueError(
+                "ELSA_RELAY_LONG_POLL_SECONDS must be smaller than ELSA_RELAY_NODE_TTL_SECONDS: "
+                "the node must poll again before being considered offline"
+            )
 
     def _validate_supabase_auth(self, *, is_dev: bool) -> None:
         if self.materials_supabase_url is None and (

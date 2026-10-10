@@ -49,6 +49,8 @@ from elsa.ports.materials import MaterialsPort
 from elsa.ports.materials_identity import MaterialsIdentityPort
 from elsa.ports.permissions import PermissionsRepositoryPort, PermissionsUnavailableError
 from elsa.ports.transcription import TranscriptionPort
+from elsa.relay.auth import NodeCredentialVerifier
+from elsa.relay.service import RelayPolicy, RelayService
 
 _logger = logging.getLogger("elsa.container")
 
@@ -129,6 +131,21 @@ class Container:
                 session_idle_timeout_seconds=settings.session_idle_timeout_seconds,
             )
         )
+
+        # Relay Render–PC1 (D2.2): solo existe si está habilitado. La
+        # validación de Settings ya garantizó node_id y hash.
+        self.relay: RelayService | None = None
+        self.relay_verifier: NodeCredentialVerifier | None = None
+        if settings.relay_enabled:
+            assert settings.relay_node_id is not None  # noqa: S101 - garantizado por Settings
+            assert settings.relay_node_token_sha256 is not None  # noqa: S101
+            previous = settings.relay_node_token_sha256_previous
+            self.relay = RelayService(RelayPolicy.from_settings(settings))
+            self.relay_verifier = NodeCredentialVerifier(
+                settings.relay_node_id,
+                settings.relay_node_token_sha256.get_secret_value(),
+                previous.get_secret_value() if previous is not None else None,
+            )
 
         if auth is not None and materials_identity is not None:
             self.auth = auth

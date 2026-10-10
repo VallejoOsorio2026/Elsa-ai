@@ -182,6 +182,37 @@ Tres cosas que conviene no descubrir por las malas:
   en el arranque «solo para verificar que el archivo existe», el servicio web
   pasaría a depender de que los pesos estén en disco.
 
+## Relay Render–PC1 (D2.2)
+
+Gateway público del acceso remoto híbrido ([ADR 0029](adr/0029-arquitectura-hibrida-render-pc1-para-acceso-remoto.md),
+[ADR 0031](adr/0031-transporte-https-long-polling-relay-render-pc1-pilot-0-1.md)).
+**Apagado por defecto**: con `ELSA_RELAY_ENABLED=false` no existe ninguna ruta
+de nodo. Con él encendido, `ELSA_RELAY_NODE_ID` y `ELSA_RELAY_NODE_TOKEN_SHA256`
+son obligatorios y su ausencia o un valor inválido impide el arranque.
+
+El nodo se autentica con la cabecera `X-Elsa-Node-Token` (nunca query, body ni
+cookie), distinta del JWT del usuario. Render conserva solo el SHA-256 del
+secreto: `printf '%s' "$SECRETO" | sha256sum`.
+
+**Limitaciones del piloto:** el estado vive en la memoria del proceso (un
+reinicio pierde la sesión del nodo y las solicitudes en vuelo) y solo se admite
+**una instancia**: el escalado horizontal y los varios workers no están
+soportados.
+
+| Variable | Obligatoria | Default | Descripción |
+|---|---|---|---|
+| `ELSA_RELAY_ENABLED` | No | `false` | Habilita el relay y monta `/api/v1/relay/node/*`. |
+| `ELSA_RELAY_NODE_ID` | Si el relay está habilitado | — | Identidad configurada del único nodo (`[A-Za-z0-9._-]{1,64}`). |
+| `ELSA_RELAY_NODE_TOKEN_SHA256` | Si el relay está habilitado | — | **Secreto (hash).** SHA-256 hexadecimal en minúscula (64 caracteres) del token del nodo. |
+| `ELSA_RELAY_NODE_TOKEN_SHA256_PREVIOUS` | No | — | **Secreto (hash).** Hash anterior, aceptado durante una rotación sin corte. |
+| `ELSA_RELAY_NODE_TTL_SECONDS` | No | `45` | Sin señal del nodo durante este tiempo, pasa a OFFLINE y lo en vuelo falla. |
+| `ELSA_RELAY_LONG_POLL_SECONDS` | No | `25` | Espera máxima de un poll. Debe ser **menor** que el TTL del nodo. |
+| `ELSA_RELAY_REQUEST_TTL_SECONDS` | No | `120` | Vida máxima de una solicitud. |
+| `ELSA_RELAY_MAX_PENDING` | No | `16` | Máximo de solicitudes vivas (cola + en vuelo); la siguiente se rechaza. |
+
+Los límites de tamaño (token de usuario 4096 caracteres, solicitud 16 KiB,
+respuesta 256 KiB) son constantes del código, justificadas en el ADR 0031.
+
 ## Solo para tests
 
 | Variable | Descripción |
