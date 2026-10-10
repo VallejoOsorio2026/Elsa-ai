@@ -4,6 +4,7 @@ Sin red real: ``httpx.ASGITransport`` contra la app en memoria.
 """
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
@@ -249,6 +250,30 @@ async def test_poll_and_result_from_an_unknown_or_old_session_are_rejected(
     assert outcome.code is ErrorCode.LOCAL_UNAVAILABLE
 
 
+async def test_expired_session_cannot_be_revived_through_http() -> None:
+    app = _app(relay_node_ttl_seconds=0.2, relay_long_poll_seconds=0.05)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as node:
+        assert (await _register(node, SESSION_A)).status_code == 200
+        await asyncio.sleep(0.3)  # vence el TTL del nodo: único sleep real de este test
+
+        for path, body in (
+            ("poll", _msg("heartbeat", SESSION_A)),
+            ("register", _msg("register", SESSION_A)),
+            (
+                "result",
+                _msg("response", SESSION_A, request_id=str(uuid4()), result={"message": "x"}),
+            ),
+        ):
+            response = await node.post(f"{BASE}/{path}", json=body, headers=AUTH)
+            assert response.status_code == 409, path
+            assert response.json()["error"]["code"] == "stale_session"
+
+        assert (await _register(node, SESSION_B)).status_code == 200
+        polled = await node.post(f"{BASE}/poll", json=_msg("heartbeat", SESSION_B), headers=AUTH)
+        assert polled.status_code == 200
+
+
 async def test_duplicate_and_unknown_results_are_rejected(
     node: httpx.AsyncClient, app: FastAPI
 ) -> None:
@@ -323,6 +348,33 @@ async def test_oversized_bodies_are_rejected(node: httpx.AsyncClient) -> None:
     )
     assert big_control.status_code == 413
     assert big_result.status_code == 413
+
+
+async def test_body_limit_boundary_is_exact(node: httpx.AsyncClient) -> None:
+    base = json.dumps(_msg("register")).encode()
+
+    def padded(size: int) -> bytes:
+        return base[:-1] + b" " * (size - len(base)) + b"}"
+
+    at_limit = await node.post(
+        f"{BASE}/register",
+        content=padded(1024),
+        headers={**AUTH, "content-type": "application/json"},
+    )
+    over_limit = await node.post(
+        f"{BASE}/register",
+        content=padded(1025),
+        headers={**AUTH, "content-type": "application/json"},
+    )
+    lying = await node.post(
+        f"{BASE}/register",
+        content=padded(1025),
+        headers={**AUTH, "content-type": "application/json", "content-length": "10"},
+    )
+
+    assert at_limit.status_code == 200
+    assert over_limit.status_code == 413
+    assert lying.status_code == 413
 
 
 async def test_oversized_chunked_body_is_cut_off_while_streaming(

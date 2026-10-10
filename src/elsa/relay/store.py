@@ -16,6 +16,11 @@ Reglas que este módulo hace cumplir:
   token del usuario y resuelve a quien espera **exactamente una vez**.
 - El token del usuario se descarta **en cuanto se despacha**: ya no hace falta
   en Render.
+- **Un ``node_session_id`` es de un solo uso.** Una sesión vencida por TTL o
+  reemplazada queda retirada y su id se recuerda mientras viva el proceso:
+  ni ``poll``, ni ``result`` ni ``register`` pueden revivirla. Solo un id
+  nuevo crea una sesión válida. Un reinicio de Render pierde este historial,
+  igual que el resto del estado.
 
 Limitación aceptada del piloto: todo vive en la memoria del proceso. Un
 reinicio pierde sesión y solicitudes en vuelo; solo se admite una instancia.
@@ -45,6 +50,7 @@ __all__ = [
     "PendingRequest",
     "RelayCapacityError",
     "RelayFailure",
+    "StaleSessionError",
 ]
 
 
@@ -65,12 +71,15 @@ class RelayCapacityError(Exception):
     """Se alcanzó el máximo de solicitudes vivas."""
 
 
+class StaleSessionError(Exception):
+    """La sesión del mensaje no es la vigente: desconocida, vencida o ya usada."""
+
+
 @dataclass
 class NodeSession:
     node_id: str
     session_id: UUID
     last_seen: datetime
-    offline_noted: bool = False
 
 
 @dataclass(eq=False)
@@ -95,6 +104,8 @@ class InMemoryRelayStore:
         self._queue: deque[UUID] = deque()
         self._cancels: deque[UUID] = deque()
         self._session: NodeSession | None = None
+        self._used_sessions: set[UUID] = set()
+        """Todo ``node_session_id`` visto en la vida del proceso (un solo uso)."""
 
     # -- consulta -------------------------------------------------------
 
@@ -140,38 +151,68 @@ class InMemoryRelayStore:
     def register(self, node_id: str, session_id: UUID, now: datetime) -> list[PendingRequest]:
         """Crea o reemplaza la sesión. Devuelve las solicitudes en vuelo fallidas.
 
-        Un ``session_id`` igual al vigente solo refresca. Uno nuevo invalida el
-        anterior: lo despachado a la sesión vieja **falla** (nunca se
-        reejecuta) y los cancels pendientes de la sesión vieja se descartan.
-        Las ``queued`` se conservan.
+        - El mismo ``session_id`` de la sesión **vigente** solo refresca (un
+          reintento del REGISTER cuya respuesta se perdió).
+        - Un ``session_id`` ya usado y no vigente (vencido o reemplazado) se
+          rechaza con :class:`StaleSessionError`: el nodo debe generar uno nuevo.
+        - Uno nuevo invalida el anterior: lo despachado a la sesión vieja
+          **falla** (nunca se reejecuta) y sus cancels se descartan. Las
+          ``queued`` se conservan.
+
+        El llamador retira antes las sesiones vencidas
+        (:meth:`retire_if_expired`).
         """
         current = self._session
-        if current is not None and current.session_id == session_id and current.node_id == node_id:
+        if current is not None and current.session_id == session_id:
             current.last_seen = now
-            current.offline_noted = False
             return []
+        if session_id in self._used_sessions:
+            raise StaleSessionError
+        failed = self._fail_dispatched("the node session was replaced")
+        self._cancels.clear()
+        self._session = NodeSession(node_id=node_id, session_id=session_id, last_seen=now)
+        self._used_sessions.add(session_id)
+        return failed
+
+    def retire_if_expired(self, now: datetime, ttl: timedelta) -> list[PendingRequest]:
+        """Retira la sesión si ``last_seen`` superó el TTL. Devuelve lo fallado.
+
+        La sesión retirada no vuelve: su id queda usado y las solicitudes
+        despachadas a ella fallan. Las ``queued`` esperan una sesión nueva.
+        """
+        session = self._session
+        if session is None or now - session.last_seen < ttl:
+            return []
+        failed = self._fail_dispatched("the node went offline")
+        self._cancels.clear()
+        self._session = None
+        return failed
+
+    def touch(self, session_id: UUID, now: datetime, ttl: timedelta) -> bool:
+        """Refresca ``last_seen``. ``False`` si no es la sesión vigente **y viva**.
+
+        Una sesión vencida no se refresca nunca: refrescarla la resucitaría.
+        """
+        session = self._session
+        if session is None or session.session_id != session_id:
+            return False
+        if now - session.last_seen >= ttl:
+            return False
+        session.last_seen = now
+        return True
+
+    def _fail_dispatched(self, detail: str) -> list[PendingRequest]:
         failed: list[PendingRequest] = []
         for entry in list(self._pending.values()):
             if entry.state is RequestState.DISPATCHED:
                 finished = self.finish(
                     entry.request_id,
                     RequestState.FAILED,
-                    RelayFailure(ErrorCode.LOCAL_UNAVAILABLE, "the node session was replaced"),
+                    RelayFailure(ErrorCode.LOCAL_UNAVAILABLE, detail),
                 )
                 if finished is not None:
                     failed.append(finished)
-        self._cancels.clear()
-        self._session = NodeSession(node_id=node_id, session_id=session_id, last_seen=now)
         return failed
-
-    def touch(self, session_id: UUID, now: datetime) -> bool:
-        """Refresca ``last_seen``. ``False`` si la sesión no es la vigente."""
-        session = self._session
-        if session is None or session.session_id != session_id:
-            return False
-        session.last_seen = now
-        session.offline_noted = False
-        return True
 
     # -- ciclo de vida de las solicitudes -------------------------------
 

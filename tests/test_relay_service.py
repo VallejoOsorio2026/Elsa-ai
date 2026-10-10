@@ -167,17 +167,96 @@ async def test_offline_node_fails_immediately() -> None:
     assert_clean(service)
 
 
-async def test_node_goes_offline_when_ttl_elapses_and_poll_revives_it() -> None:
+async def test_node_goes_offline_when_ttl_elapses_and_the_session_cannot_be_revived() -> None:
     service, clock = make_service()
-    register(service)
+    register(service, SESSION_A)
     assert service.is_online()
 
     clock.advance(46)
     assert not service.is_online()
     assert isinstance(await service.submit(params(), USER_TOKEN), RelayFailure)
 
-    assert await service.poll(heartbeat()) is None  # el poll es la señal de vida
+    # Ni el poll, ni el result, ni un REGISTER con el mismo id la resucitan.
+    with pytest.raises(StaleSessionError):
+        await service.poll(heartbeat(SESSION_A))
+    assert not service.is_online()
+    with pytest.raises(StaleSessionError):
+        service.accept_result(response(uuid4(), SESSION_A))
+    with pytest.raises(StaleSessionError):
+        register(service, SESSION_A)
+    assert not service.is_online()
+
+    # Solo un node_session_id nuevo crea una sesión válida.
+    register(service, SESSION_B)
     assert service.is_online()
+    assert await service.poll(heartbeat(SESSION_B)) is None
+
+
+async def test_dispatched_of_an_expired_session_never_reappears_but_queued_go_to_b() -> None:
+    service, clock = make_service()
+    register(service, SESSION_A)
+    dispatched_id, queued_id = uuid4(), uuid4()
+    dispatched = start_submit(service, request_id=dispatched_id)
+    await settle()
+    request = await poll_request(service, SESSION_A)
+    assert request.request_id == dispatched_id
+    queued = start_submit(service, request_id=queued_id)
+    await settle()
+
+    clock.advance(46)  # vence el TTL del nodo; la solicitud en cola sigue vigente
+    service.enforce_deadlines()
+
+    failed = await asyncio.wait_for(dispatched, 1)
+    assert isinstance(failed, RelayFailure)
+    assert failed.code is ErrorCode.LOCAL_UNAVAILABLE
+    for action in (
+        lambda: service.accept_result(response(dispatched_id, SESSION_A)),
+        lambda: register(service, SESSION_A),
+    ):
+        with pytest.raises(StaleSessionError):
+            action()
+    with pytest.raises(StaleSessionError):
+        await service.poll(heartbeat(SESSION_A))
+
+    register(service, SESSION_B)
+    delivered = await poll_request(service, SESSION_B)
+    assert delivered.request_id == queued_id
+    assert delivered.node_session_id == SESSION_B
+    assert await service.poll(heartbeat(SESSION_B)) is None  # la de A no reaparece
+
+    service.accept_result(response(queued_id, SESSION_B))
+    assert isinstance(await asyncio.wait_for(queued, 1), Response)
+    assert_clean(service)
+
+
+async def test_a_session_id_is_single_use_even_after_being_replaced() -> None:
+    service, _ = make_service()
+    register(service, SESSION_A)
+    register(service, SESSION_B)  # reemplaza a A
+
+    with pytest.raises(StaleSessionError):
+        register(service, SESSION_A)
+    # La sesión B sigue siendo la vigente y A no la desplazó.
+    assert service.is_online()
+    assert await service.poll(heartbeat(SESSION_B)) is None
+
+
+async def test_user_token_is_not_kept_in_the_submit_frame_while_waiting() -> None:
+    service, _ = make_service()
+    register(service)
+    task = start_submit(service)
+    await settle()
+
+    coro: Any = task.get_coro()
+    frame = coro.cr_frame
+    assert frame is not None
+    held = frame.f_locals
+    for name in ("secret", "trial", "user_access_token"):
+        assert name not in held
+
+    request = await poll_request(service)
+    service.accept_result(response(request.request_id))
+    await asyncio.wait_for(task, 1)
 
 
 async def test_error_from_node_becomes_a_failure_with_its_code() -> None:
@@ -350,11 +429,10 @@ async def test_request_expiry_with_injected_clock_blocks_late_response() -> None
     await settle()
     request = await poll_request(service)
     # El nodo sigue vivo (poll), pero la solicitud supera su plazo.
-    clock.advance(30)
-    assert await service.poll(heartbeat()) is None
-    clock.advance(30)
-    assert await service.poll(heartbeat()) is None
-    clock.advance(61)
+    for _ in range(3):
+        clock.advance(30)
+        assert await service.poll(heartbeat()) is None
+    clock.advance(31)
     service.enforce_deadlines()
 
     outcome = await asyncio.wait_for(task, 1)
@@ -388,7 +466,7 @@ async def test_node_ttl_fails_in_flight_work_without_any_other_operation() -> No
 
     assert isinstance(outcome, RelayFailure)
     assert outcome.code is ErrorCode.LOCAL_UNAVAILABLE
-    with pytest.raises(RequestNotPendingError):
+    with pytest.raises(StaleSessionError):
         service.accept_result(response(request.request_id))
     assert_clean(service)
 

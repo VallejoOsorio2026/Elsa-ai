@@ -50,6 +50,7 @@ from elsa.relay.store import (
     PendingRequest,
     RelayCapacityError,
     RelayFailure,
+    StaleSessionError,
 )
 
 __all__ = [
@@ -73,10 +74,6 @@ MAX_ERROR_WIRE_BYTES = 2 * 1024
 _MIN_WAIT_SECONDS = 0.001
 
 _logger = logging.getLogger("elsa.relay")
-
-
-class StaleSessionError(Exception):
-    """La sesión del mensaje no es la vigente (desconocida o antigua)."""
 
 
 class RequestNotPendingError(Exception):
@@ -147,9 +144,14 @@ class RelayService:
 
     def register(self, message: Register) -> None:
         now = self._clock()
+        self._expire_all(now)  # una sesión vencida se retira antes de decidir nada
         previous = self._store.session
         replaced = previous is not None and previous.session_id != message.node_session_id
-        failed = self._store.register(message.node_id, message.node_session_id, now)
+        try:
+            failed = self._store.register(message.node_id, message.node_session_id, now)
+        except StaleSessionError:
+            self._log("stale_session", node_session_id=message.node_session_id)
+            raise
         if replaced:
             self._log("node_session_replaced", node_session_id=message.node_session_id)
         for entry in failed:
@@ -169,10 +171,10 @@ class RelayService:
         session_id = message.node_session_id
         while True:
             now = self._clock()
-            if not self._store.touch(session_id, now):
+            self._expire_all(now)  # antes de refrescar: no se revive lo vencido
+            if not self._store.touch(session_id, now, self._ttl):
                 self._log("stale_session", node_session_id=session_id)
                 raise StaleSessionError
-            self._expire_all(now)
 
             cancelled_id = self._store.pop_cancel()
             if cancelled_id is not None:
@@ -207,7 +209,8 @@ class RelayService:
         ``request_id`` desconocido o expirado.
         """
         now = self._clock()
-        if not self._store.touch(message.node_session_id, now):
+        self._expire_all(now)  # antes de refrescar: no se revive lo vencido
+        if not self._store.touch(message.node_session_id, now, self._ttl):
             self._log("stale_session", node_session_id=message.node_session_id)
             raise StaleSessionError
 
@@ -277,26 +280,12 @@ class RelayService:
         if self._store.get(rid) is not None:
             return RelayFailure(ErrorCode.DUPLICATE_REQUEST)
 
-        secret = user_access_token.get_secret_value()
-        if not secret or len(secret) > MAX_USER_TOKEN_CHARS:
-            return RelayFailure(ErrorCode.INVALID_REQUEST, "invalid user access token")
-
         expires_at = now + timedelta(seconds=self._policy.request_ttl_seconds)
-        try:
-            trial = Request(
-                node_id=self._policy.node_id,
-                node_session_id=session.session_id,
-                request_id=rid,
-                operation=Operation.ASSISTANT_ASK,
-                params=params,
-                user_access_token=user_access_token,
-                created_at=now,
-                expires_at=expires_at,
-            )
-        except ValueError:
-            return RelayFailure(ErrorCode.INVALID_REQUEST, "the request is not valid")
-        if _wire_size(trial.to_wire_dict()) > MAX_REQUEST_WIRE_BYTES:
-            return RelayFailure(ErrorCode.INVALID_REQUEST, "the request exceeds the size limit")
+        rejected = self._validate_submission(
+            params, user_access_token, session.session_id, rid, now, expires_at
+        )
+        if rejected is not None:
+            return rejected
 
         loop = asyncio.get_running_loop()
         entry = PendingRequest(
@@ -308,6 +297,10 @@ class RelayService:
             waiter=loop.create_future(),
             dispatched_signal=loop.create_future(),
         )
+        # A partir de aquí la única referencia de este frame al token es la de
+        # ``entry``, que ``scrub_token`` suelta al despachar. El llamador
+        # conserva la suya mientras no la suelte: es cosa de D2.4.
+        del user_access_token
         try:
             self._store.add(entry)
         except RelayCapacityError:
@@ -320,6 +313,41 @@ class RelayService:
         except asyncio.CancelledError:
             self._cancel_entry(entry, self._clock())
             raise
+
+    def _validate_submission(
+        self,
+        params: AskParams,
+        user_access_token: SecretStr,
+        session_id: UUID,
+        request_id: UUID,
+        now: datetime,
+        expires_at: datetime,
+    ) -> RelayFailure | None:
+        """Valida token, estructura y tamaño del cable.
+
+        Es una función aparte a propósito: el token en claro y el ``Request`` de
+        prueba viven solo en este frame, que desaparece al retornar, y no en el
+        de ``submit``, que espera hasta el plazo de la solicitud.
+        """
+        secret = user_access_token.get_secret_value()
+        if not secret or len(secret) > MAX_USER_TOKEN_CHARS:
+            return RelayFailure(ErrorCode.INVALID_REQUEST, "invalid user access token")
+        try:
+            trial = Request(
+                node_id=self._policy.node_id,
+                node_session_id=session_id,
+                request_id=request_id,
+                operation=Operation.ASSISTANT_ASK,
+                params=params,
+                user_access_token=user_access_token,
+                created_at=now,
+                expires_at=expires_at,
+            )
+        except ValueError:
+            return RelayFailure(ErrorCode.INVALID_REQUEST, "the request is not valid")
+        if _wire_size(trial.to_wire_dict()) > MAX_REQUEST_WIRE_BYTES:
+            return RelayFailure(ErrorCode.INVALID_REQUEST, "the request exceeds the size limit")
+        return None
 
     def cancel(self, request_id: UUID) -> CancelEffect:
         """Cancelación *best effort*. ``queued`` se retira; ``dispatched`` se avisa."""
@@ -345,9 +373,8 @@ class RelayService:
         """
         while not entry.waiter.done():
             now = self._clock()
-            finished = self._store.expire_entry(entry, now, self._ttl)
-            if finished is not None:
-                self._log_expiry(finished, now)
+            self._expire_all(now)  # retira la sesión vencida y falla lo que corresponda
+            if entry.waiter.done():
                 break
             deadline = self._store.next_deadline(entry, self._ttl, now)
             timeout = max((deadline - now).total_seconds(), _MIN_WAIT_SECONDS)
@@ -404,19 +431,18 @@ class RelayService:
             self._log_finished(event, finished, now)
 
     def _expire_all(self, now: datetime) -> None:
-        self._note_node_offline(now)
+        """Retira la sesión vencida y falla lo vencido. Idempotente.
+
+        Va **antes** de cualquier refresco de ``last_seen``: es lo que impide
+        que un poll o un result tardío resucite una sesión que ya cayó.
+        """
+        session = self._store.session
+        for finished in self._store.retire_if_expired(now, self._ttl):
+            self._log_expiry(finished, now)
+        if session is not None and self._store.session is None:
+            self._log("node_offline", node_session_id=session.session_id)
         for finished in self._store.expire_due(now, self._ttl):
             self._log_expiry(finished, now)
-
-    def _note_node_offline(self, now: datetime) -> None:
-        session = self._store.session
-        if (
-            session is not None
-            and not session.offline_noted
-            and not self._store.is_online(now, self._ttl)
-        ):
-            session.offline_noted = True
-            self._log("node_offline", node_session_id=session.session_id)
 
     def _log_expiry(self, finished: PendingRequest, now: datetime) -> None:
         # EXPIRED por plazo propio; FAILED por caída del nodo.

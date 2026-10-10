@@ -63,8 +63,24 @@ ruta, comando, archivo ni SQL: solo mensajes V1 con la operación
 - **Caída por TTL sin otra operación.** Cada `submit` espera con *deadlines*
   asíncronos propios (vencimiento de la solicitud y vigencia del nodo): no hay
   scheduler permanente ni dependencia de que llegue otra llamada.
-- **Respuestas rechazadas** (HTTP 409, sin efecto): sesión desconocida o
-  antigua, `request_id` desconocido, duplicado o expirado.
+- **El TTL vencido retira la sesión.** Pasado `NODE_TTL` sin señal, la
+  sesión queda **retirada** (stale) y lo despachado a ella falla. Ni `poll`, ni
+  `result`, ni `register` con ese mismo `node_session_id` la reviven (409
+  `stale_session`): el vencimiento se evalúa **antes** de refrescar
+  `last_seen`. La reconexión exige un `REGISTER` con un `node_session_id`
+  **nuevo**.
+- **Un `node_session_id` es de un solo uso** dentro de la vida del proceso:
+  una vez vencido o reemplazado no puede volver a registrarse. Solo se admite
+  el reintento del `REGISTER` de la sesión **vigente** y viva. Este historial
+  vive en memoria y se pierde con el reinicio de Render, igual que el resto
+  del estado (§6); crece un UUID por sesión registrada.
+- **`queued` puede sobrevivir y esperar un `REGISTER` nuevo** hasta su propio
+  TTL (120 s por defecto): no hay espera infinita. Se materializa entonces con
+  la sesión nueva, nunca con la caída.
+- **`dispatched` nunca se reproduce.** Lo entregado a una sesión que vence o
+  se reemplaza falla con `LOCAL_UNAVAILABLE`; no llega a la sesión siguiente.
+- **Respuestas rechazadas** (HTTP 409, sin efecto): sesión desconocida,
+  vencida o antigua, `request_id` desconocido, duplicado o expirado.
 - **Cancelación best effort.** `queued` se retira; `dispatched` genera un
   `Cancel` entregado en el siguiente poll, sin ACK.
 - **Nodo OFFLINE.** `submit` falla de inmediato con `LOCAL_UNAVAILABLE`. No
@@ -111,9 +127,15 @@ ese cambio de transporte sin romperse.
   sesión del nodo y toda solicitud en vuelo; PC1 debe volver a registrarse y el
   usuario debe reintentar manualmente. No hay base de datos, Redis, SQLite ni
   disco.
-- **Una única instancia lógica.** El escalado horizontal y los múltiples
-  workers con memoria independiente **no están soportados** en Pilot 0.1.
-  No se añade sincronización distribuida.
+- **Una única instancia lógica.** Pilot 0.1 requiere **un solo worker**: el
+  escalado horizontal y los múltiples workers con memoria independiente **no
+  están soportados**, y `WEB_CONCURRENCY > 1` tampoco (uvicorn lo toma como
+  número de workers por defecto y cada uno tendría su propio store; `render.yaml`
+  no lo fija y no debe fijarse). No se añade sincronización distribuida.
+- **Retención del token del usuario.** `submit` conserva una sola referencia
+  (la de la solicitud pendiente) y la suelta al despachar; el llamador conserva
+  la suya hasta que la libere. Python no garantiza borrado seguro de memoria: el
+  objetivo es minimizar referencias y tiempo de retención.
 - **Un único nodo configurado.**
 - **Sin límite de intentos de autenticación fallidos.** El secreto de alta
   entropía hace inviable la fuerza bruta; queda anotado, no resuelto.

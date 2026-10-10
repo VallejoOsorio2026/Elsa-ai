@@ -112,7 +112,11 @@ async def register(request: Request) -> JSONResponse:
     service, message = await _authenticated_message(request, _CONTROL_BODY_MAX_BYTES)
     if not isinstance(message, Register):
         raise _wrong_type()
-    service.register(message)
+    try:
+        service.register(message)
+    except StaleSessionError:
+        # Sesión vencida o ya usada: el nodo debe hacer REGISTER con un id nuevo.
+        raise ApiError(409, "Node session is not current.", code="stale_session") from None
     return JSONResponse(
         {
             "status": "registered",
