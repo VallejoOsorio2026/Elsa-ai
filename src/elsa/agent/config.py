@@ -231,16 +231,19 @@ def load_agent_config(env_file: str | Path | None = ".env") -> AgentConfig:
 
     El token del nodo sale de ``os.environ`` y de nada más.
     """
-    if env_file is not None:
-        # `_env_file` es un kwarg de runtime de BaseSettings que mypy no ve.
-        probe = _TokenInFileProbe(_env_file=env_file)  # type: ignore[call-arg]
-        if probe.node_token is not None:
-            raise AgentConfigurationError(
-                f"{NODE_TOKEN_ENV} must not be stored in the configuration file; "
-                "set it only in the process environment."
-            )
     try:
+        if env_file is not None:
+            # `_env_file` es un kwarg de runtime de BaseSettings que mypy no ve.
+            probe = _TokenInFileProbe(_env_file=env_file)  # type: ignore[call-arg]
+            if probe.node_token is not None:
+                raise AgentConfigurationError(
+                    f"{NODE_TOKEN_ENV} must not be stored in the configuration file; "
+                    "set it only in the process environment."
+                )
         settings = AgentSettings(_env_file=env_file)  # type: ignore[call-arg]
     except ValidationError as exc:
         raise AgentConfigurationError(_format_validation_error(exc)) from None
+    except UnicodeDecodeError:
+        # p. ej. un archivo escrito con `>` en Windows PowerShell 5.1 (UTF-16).
+        raise AgentConfigurationError("The configuration file must be UTF-8 encoded.") from None
     return AgentConfig(settings=settings, node_token=_node_token_from_environment(os.environ))

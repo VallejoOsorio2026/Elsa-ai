@@ -1,5 +1,6 @@
 """Cliente HTTPS del relay: clasificación, separación de credenciales y topes."""
 
+import gzip
 import json
 from collections.abc import Callable
 from uuid import UUID, uuid4
@@ -237,7 +238,11 @@ async def test_unreadable_relay_replies_never_crash_the_client(
         # Un 409 sin código legible no es stale ni not_pending: desajuste.
         assert poll.outcome is result is register.outcome is RelayOutcome.PROTOCOL
     elif make is _bad_gzip:
-        assert poll.outcome is result is register.outcome is RelayOutcome.TRANSIENT
+        # Se pidió identity: un cuerpo comprimido no se lee. El poll no trae nada;
+        # register y result valen por su estado HTTP.
+        assert poll.outcome is RelayOutcome.TRANSIENT and poll.message is None
+        assert result is RelayOutcome.OK
+        assert register.outcome is RelayOutcome.OK and register.long_poll_seconds is None
     else:
         # 200 con JSON ilegible: el poll no trae nada; register/result son 200.
         assert poll.outcome is RelayOutcome.TRANSIENT
@@ -246,13 +251,19 @@ async def test_unreadable_relay_replies_never_crash_the_client(
         assert register.outcome is RelayOutcome.OK and register.long_poll_seconds is None
 
 
-async def test_bad_gzip_is_a_transient_failure_with_only_the_type(
+async def test_compressed_bodies_are_rejected_before_being_inflated(
     client: RelayClient, relay: FakeRelay
 ) -> None:
-    relay.poll_steps.append(_bad_gzip())
+    """Una bomba gzip (64 MiB de ceros en ~64 KB) nunca se descomprime."""
+    bomb = gzip.compress(b"\x00" * (64 * 1024 * 1024))
+    relay.poll_steps.append(
+        httpx.Response(200, headers={"content-encoding": "gzip"}, stream=httpx.ByteStream(bomb))
+    )
     reply = await client.poll(_heartbeat())
     assert reply.outcome is RelayOutcome.TRANSIENT
-    assert reply.error == "DecodingError"
+    assert reply.error == "invalid_body"
+    [sent] = relay.requests
+    assert sent.headers["accept-encoding"] == "identity"
 
 
 @pytest.mark.parametrize(

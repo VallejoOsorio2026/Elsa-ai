@@ -25,8 +25,8 @@ poll. Mientras dura:
   nada, se olvidan sus ids y, tras esperar, se registra una sesión con id
   nuevo. Solo ``run`` registra: dos avisos simultáneos de sesión retirada
   producen una única transición. No hay replay.
-- **Fallos de configuración** (401/403/404/413/422): el agente termina con
-  :data:`EXIT_FATAL` en vez de insistir.
+- **Fallos de configuración** (401/403/404 y cualquier otro 4xx en
+  register/poll): el agente termina con :data:`EXIT_FATAL` en vez de insistir.
 
 Los logs solo llevan evento, identificadores, código, estado HTTP, intento y
 duración: nunca tokens, pregunta, adjuntos, resultado ni ``detail``.

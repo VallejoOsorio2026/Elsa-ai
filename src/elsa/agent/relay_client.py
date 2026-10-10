@@ -131,6 +131,15 @@ def _classify(status: int, raw: bytes | None) -> RelayOutcome:
 
 
 async def _read_capped(response: httpx.Response, limit: int) -> bytes | None:
+    """Lee el cuerpo con tope; ``None`` si lo supera o viene comprimido.
+
+    Se pide ``Accept-Encoding: identity`` y un cuerpo comprimido se rechaza
+    **antes** de leerlo: así lo que se lee son los bytes del cable y el tope no
+    puede burlarse con una bomba gzip que se infle en memoria.
+    """
+    encoding = response.headers.get("content-encoding", "identity").strip().lower()
+    if encoding not in ("", "identity"):
+        return None
     chunks: list[bytes] = []
     total = 0
     async for chunk in response.aiter_bytes():
@@ -196,6 +205,7 @@ class RelayClient:
             NODE_TOKEN_HEADER: self._node_token.get_secret_value(),
             "Content-Type": "application/json",
             "Accept": "application/json",
+            "Accept-Encoding": "identity",
         }
         try:
             async with self._http.stream(

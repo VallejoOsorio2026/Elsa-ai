@@ -37,9 +37,10 @@ en loopback. No escucha en ningún socket, no necesita puerto público, regla de
 firewall, VPN ni túnel. Un test de frontera comprueba los **imports directos**
 del paquete: ni servidores, ni `subprocess`, ni FastAPI, ni la API, el
 contenedor o los adaptadores de ELSA; de los módulos del relay solo admite
-nombres concretos (el contrato, `NODE_TOKEN_HEADER` y los límites
-`MAX_*_WIRE_BYTES`). De forma transitiva, `httpx` usa sockets y
-`elsa.relay.service` carga la configuración de ELSA sin efectos al importar;
+nombres concretos (el contrato, `NODE_TOKEN_HEADER`, los límites
+`MAX_*_WIRE_BYTES` y `elsa.logging.configure_logging`). De forma transitiva,
+`httpx` usa sockets, `elsa.relay.service` carga la configuración de ELSA sin
+efectos al importar y `elsa.logging` carga Starlette (por su middleware);
 ninguno abre un socket de escucha. Mover esos límites a un módulo neutro
 exige tocar D2.2 y queda como deuda anotada.
 
@@ -117,8 +118,12 @@ el proceso y está igualmente desaconsejado.
 - Fallo de red, timeout, 5xx, 429 o respuesta ilegible (gzip roto, JSON sin
   fin) → espera exponencial (1 s, ×2, techo 30 s, con jitter) y mismo id.
   Nunca hay reintento sin espera. El contador de esperas **no** vuelve a cero
-  con un `REGISTER` 200, solo con un poll exitoso: dos agentes con el mismo
-  nodo que se reemplazan mutuamente quedan frenados, no en un vaivén.
+  con un `REGISTER` 200, solo con un poll exitoso. Dos agentes con el mismo
+  nodo que se reemplazan mutuamente quedan **frenados, pero no detenidos**:
+  cuando la espera de uno supera el long poll, el otro completa un poll y su
+  contador vuelve a cero, así que el vaivén sigue a un ritmo de un reemplazo
+  cada ~15–30 s y se ve en los logs (`session_stale`). Un mismo `node_id` con
+  dos agentes es un error de operación, no un caso soportado.
 - 401/403 (credencial del nodo), 404 (relay deshabilitado o URL errónea) y
   cualquier otro 4xx en register/poll (desajuste de protocolo o configuración)
   son **fatales**: el proceso termina con código 2. No hay bucle de
@@ -260,6 +265,12 @@ cabeceras, pregunta, adjuntos, resultado, `detail` ni cuerpos del cable.
   puerto configurado antes que ELSA —por accidente o malicia— recibiría los
   Bearer de los usuarios. Es inherente a HTTP sobre loopback: ELSA debe
   arrancar antes que el agente, y PC1 no debe ser una máquina multiusuario.
+- **Compresión.** Hacia Render el agente pide `Accept-Encoding: identity` y no
+  descomprime un cuerpo comprimido: el tope de lectura mide bytes reales, de
+  modo que un relay comprometido no puede inflar la memoria con una bomba gzip.
+  El cliente local no fija esa cabecera y su tope se mide tras descomprimir; se
+  acepta porque ELSA local es de confianza y el riesgo residual es el de la
+  ocupación del puerto, ya descrito.
 - **Reinicio de Render**: pierde sesión, solicitudes e historial de ids
   (§2.4); el usuario repite lo que estaba en vuelo.
 

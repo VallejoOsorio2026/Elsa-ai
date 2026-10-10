@@ -235,3 +235,11 @@ def test_invalid_url_errors_never_echo_credentials(
     message = _error()
     assert variable in message
     assert "SyntheticPw123" not in message
+
+
+@pytest.mark.usefixtures("valid_environment")
+def test_a_non_utf8_configuration_file_fails_closed_without_traceback(tmp_path: Path) -> None:
+    """`>` en Windows PowerShell 5.1 escribe UTF-16: error legible, no una traza."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("ELSA_AGENT_MAX_QUEUED=2\n", encoding="utf-16")
+    assert "must be UTF-8" in _error(env_file)
