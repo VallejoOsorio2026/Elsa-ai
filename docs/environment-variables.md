@@ -229,6 +229,25 @@ proceso. Si aparece en el archivo de configuración (`.env` o el indicado con
 configura en Render como `ELSA_RELAY_NODE_TOKEN_SHA256`; nunca sale de PC1 más
 que en la cabecera `X-Elsa-Node-Token` hacia Render, y nunca llega a ELSA local.
 
+Cómo fijarlo en PC1 (PowerShell), **solo para la sesión** que arranca el agente:
+
+```powershell
+$env:ELSA_AGENT_NODE_TOKEN = "<secreto>"   # vive solo en esta ventana
+uv run python -m elsa.agent
+```
+
+**No uses `setx`** para este secreto: lo persiste en claro en el registro de
+Windows. Tampoco lo cargues desde otro archivo mediante el lanzador
+(`uv run --env-file`, `UV_ENV_FILE`): el agente solo puede comprobar su propio
+archivo de configuración, no lo que otro programa inyecta en el entorno.
+
+El agente **ignora el proxy del sistema** (`HTTP(S)_PROXY`, `.netrc`):
+`trust_env=False` es una decisión de Pilot 0.1 (ADR 0032 §2.3). Una red que
+exija proxy corporativo para salir a Internet no podrá llegar a Render hasta
+que se decida cómo configurarlo de forma explícita. ELSA debe arrancar antes
+que el agente: un proceso que ocupara antes su puerto loopback recibiría los
+tokens de los usuarios (ADR 0032 §3).
+
 | Variable | Obligatoria | Default | Descripción |
 |---|---|---|---|
 | `ELSA_AGENT_RELAY_URL` | Sí | — | Base del relay. Solo `https`, sin credenciales, ruta, query ni fragmento; las rutas `/api/v1/relay/node/*` las añade el agente. |

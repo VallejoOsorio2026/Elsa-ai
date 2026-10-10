@@ -34,8 +34,14 @@ despachada.
 El agente es un proceso aparte (`uv run python -m elsa.agent`) que **solo
 abre conexiones salientes**: HTTPS hacia el relay y HTTP hacia la ELSA local
 en loopback. No escucha en ningún socket, no necesita puerto público, regla de
-firewall, VPN ni túnel. Un test de frontera impide que el paquete importe
-servidores, `subprocess`, FastAPI, la API o los adaptadores de ELSA.
+firewall, VPN ni túnel. Un test de frontera comprueba los **imports directos**
+del paquete: ni servidores, ni `subprocess`, ni FastAPI, ni la API, el
+contenedor o los adaptadores de ELSA; de los módulos del relay solo admite
+nombres concretos (el contrato, `NODE_TOKEN_HEADER` y los límites
+`MAX_*_WIRE_BYTES`). De forma transitiva, `httpx` usa sockets y
+`elsa.relay.service` carga la configuración de ELSA sin efectos al importar;
+ninguno abre un socket de escucha. Mover esos límites a un módulo neutro
+exige tocar D2.2 y queda como deuda anotada.
 
 ### 2.2 ELSA solo en loopback
 
@@ -68,25 +74,56 @@ o `%` viaja codificado y ELSA decide si existe.
 
 Son dos clientes HTTP distintos: el del relay lleva la cabecera del nodo; el
 local no tiene cabeceras por defecto. Ambos con `follow_redirects=False` (una
-redirección se llevaría la cabecera del nodo) y `trust_env=False` (un proxy de
-entorno no intercepta el tráfico).
+redirección se llevaría la cabecera del nodo o el Bearer del usuario; un 30x
+local es `LOCAL_ERROR`) y `trust_env=False`.
+
+**`trust_env=False` es una decisión de Pilot 0.1**: el agente ignora el proxy
+del sistema, `HTTP(S)_PROXY` y `.netrc`, de modo que ninguna configuración de
+entorno puede desviar ni observar el tráfico. Riesgo futuro aceptado: un PC1 o
+una red que **exija** un proxy corporativo para salir a Internet no podrá
+conectar con Render hasta que se decida, con un ADR, cómo configurarlo de forma
+explícita.
+
+El token del nodo se fija en la sesión del proceso que arranca el agente (en
+PowerShell, `$env:ELSA_AGENT_NODE_TOKEN = "…"` en esa misma ventana o en el
+lanzador del servicio). **No se recomienda `setx`**: persiste el secreto en
+claro en el registro de Windows. La comprobación «no en archivo» cubre el
+archivo de configuración del agente; un lanzador externo que cargue variables
+desde otro archivo (`uv run --env-file`, `UV_ENV_FILE`) no es detectable desde
+el proceso y está igualmente desaconsejado.
 
 ### 2.4 Sesiones y reconexión
 
 - Cada arranque genera un `node_session_id` (UUID) nuevo, nunca persistido.
 - Un `REGISTER` sin respuesta se reintenta **con el mismo id**: el relay lo
   admite como refresco mientras la sesión esté vigente.
-- `409 stale_session` (TTL vencido, reemplazo o reinicio de Render) → se
-  cancela todo el trabajo de la sesión vieja **sin enviar su resultado** (el
-  relay ya lo falló), se olvidan los ids vistos y se registra una sesión con un
-  id **nuevo**. **No hay replay**: ningún `Request` anterior se reejecuta ni se
-  reenvía, y un id retirado no se reutiliza.
-- Fallo de red, timeout, 5xx o 429 → espera exponencial (1 s, ×2, techo 30 s,
-  con jitter) y mismo id. Nunca hay reintento sin espera.
+- `409 stale_session` en poll o result (TTL vencido, reemplazo, o reinicio de
+  Render, cuya memoria nueva no conoce la sesión) → se cancela todo el trabajo
+  de la sesión vieja **sin enviar su resultado** (el relay ya lo falló), se
+  olvidan los ids vistos, **se espera** (backoff con jitter) y se registra una
+  sesión con un id **nuevo**. **No hay replay**: ningún `Request` anterior se
+  reejecuta ni se reenvía, y el agente nunca reutiliza un id retirado.
+- **Una única transición.** Solo el bucle principal registra; una entrega que
+  recibe `stale_session` solo lo *señala*, y la señal se ignora si no es de la
+  sesión vigente o ya estaba pedida. Dos `stale_session` simultáneos (poll y
+  result) producen exactamente una transición A → B.
+- **Reinicio de Render y `REGISTER` en curso.** El historial de ids usados del
+  relay vive en la memoria de su proceso (ADR 0031 §3). Si un `REGISTER(A)`
+  pierde su respuesta y Render reinicia antes del reintento, el proceso nuevo
+  **acepta A como sesión nueva**: no es un refresco ni una resurrección. Es
+  inocuo: A nunca hizo poll, de modo que nada pudo despacharse a ella en
+  ninguno de los dos procesos, y el agente no tiene trabajo pendiente en la
+  fase de registro.
+- Fallo de red, timeout, 5xx, 429 o respuesta ilegible (gzip roto, JSON sin
+  fin) → espera exponencial (1 s, ×2, techo 30 s, con jitter) y mismo id.
+  Nunca hay reintento sin espera. El contador de esperas **no** vuelve a cero
+  con un `REGISTER` 200, solo con un poll exitoso: dos agentes con el mismo
+  nodo que se reemplazan mutuamente quedan frenados, no en un vaivén.
 - 401/403 (credencial del nodo), 404 (relay deshabilitado o URL errónea) y
-  413/422 en register/poll (desajuste de protocolo o configuración) son
-  **fatales**: el proceso termina con código 2. No hay bucle de reintentos
-  contra un fallo de configuración.
+  cualquier otro 4xx en register/poll (desajuste de protocolo o configuración)
+  son **fatales**: el proceso termina con código 2. No hay bucle de
+  reintentos contra un fallo de configuración. Un error inesperado termina con
+  código 1 registrando solo su tipo.
 
 ### 2.5 Poll durante la ejecución y concurrencia acotada
 
@@ -110,8 +147,13 @@ entorno no intercepta el tráfico).
   conteste de inmediato.
 - Un `request_id` ya visto en la sesión **se ignora sin responder**: enviar
   `DUPLICATE_REQUEST` haría fallar en el relay el original, que puede seguir
-  ejecutándose (ADR 0030 §16: «rechazará o reconocerá»). El registro de ids
-  vistos está acotado.
+  ejecutándose. Así se concreta ADR 0030 §16 («rechazará o **reconocerá**»):
+  reconocer = detectar e ignorar.
+- **La garantía at-most-once es del relay**, no del agente: el relay nunca
+  vuelve a encolar algo despachado y rechaza `request_id` duplicados. El
+  registro de ids vistos del agente es una **defensa secundaria**, acotada a
+  los últimos 1024 ids de la sesión (LRU): un id expulsado solo podría
+  ejecutarse otra vez si el relay lo reenviara, lo que D2.2 no hace.
 
 ### 2.6 Entrega del resultado sin reejecución
 
@@ -120,14 +162,20 @@ conserva serializado solo hasta terminar su entrega. `assistant.ask` **jamás
 se reejecuta**.
 
 - Envío inicial + **como mucho 3 reintentos** (0,5 s, 1 s, 2 s): un máximo de
-  **4 transmisiones del mismo cuerpo**, y ninguna después de `expires_at`.
+  **4 transmisiones del mismo cuerpo**, y ninguna —tampoco la primera—
+  después de `expires_at` según el reloj de PC1.
 - Se reintenta solo ante fallo de transporte, timeout, 5xx o 429. Ahí cae el
   **ACK perdido**: Render aceptó pero la respuesta HTTP no llegó; el
   reintento recibe `409 request_not_pending` y la entrega termina. Ese 409 es
   ambiguo a propósito (aceptado antes, o ya expirado/cancelado) y en ambos
   casos es seguro detenerse.
-- `409 stale_session` → se descarta y se renueva la sesión; 401/403 → fatal;
-  413/422 → se descarta y se registra.
+- `409 stale_session` → se descarta (nunca viaja con la sesión nueva) y se
+  renueva la sesión; 401/403/404 → fatal; 413/422 u otro 4xx → se descarta y
+  se registra.
+- Si el resultado no puede serializarse (p. ej. un surrogate suelto que UTF-8
+  no admite), se degrada a `LOCAL_ERROR` (`local:invalid_response`). Ninguna
+  tarea del agente termina con una excepción sin recoger, y de una excepción
+  solo se registra su tipo.
 - El agente serializa el JSON él mismo (UTF-8 sin escapar, separadores
   compactos) y comprueba los límites de ADR 0031 §4 **antes** de enviar: un
   resultado que no cabe se sustituye por `LOCAL_ERROR`
@@ -200,6 +248,20 @@ cabeceras, pregunta, adjuntos, resultado, `detail` ni cuerpos del cable.
 - **No se probó contra Render real**: los cortes de proxy de la plataforma se
   miden después (condición de reevaluación de ADR 0031 §5).
 - Sin despedida al terminar: la sesión cae en Render por TTL.
+- **`reply_dropped` ante un `/result` caído de forma prolongada.** Los
+  rechazos inmediatos esperan en una cola de 16. Con `/result` sano la cola no
+  se llena (cada respuesta corresponde a una solicitud que el relay aún cuenta
+  en su `max_pending` de 16). Si `/result` falla de forma sostenida, cada
+  respuesta tarda hasta ~43 s en agotar sus 4 intentos mientras el relay libera
+  plazas por expiración: la cola puede llenarse y la respuesta se descarta. La
+  solicitud vence entonces por TTL en vez de recibir `LOCAL_UNAVAILABLE`
+  rápido; su entrega habría fallado igual.
+- **Ocupación del puerto loopback.** Cualquier proceso local que escuche en el
+  puerto configurado antes que ELSA —por accidente o malicia— recibiría los
+  Bearer de los usuarios. Es inherente a HTTP sobre loopback: ELSA debe
+  arrancar antes que el agente, y PC1 no debe ser una máquina multiusuario.
+- **Reinicio de Render**: pierde sesión, solicitudes e historial de ids
+  (§2.4); el usuario repite lo que estaba en vuelo.
 
 ## 4. Consecuencias
 
