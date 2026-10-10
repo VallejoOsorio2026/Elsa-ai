@@ -29,6 +29,7 @@ from elsa.api.v1.contributions import router as contributions_router
 from elsa.api.v1.health import router as health_router
 from elsa.api.v1.knowledge import router as knowledge_router
 from elsa.api.v1.me import router as me_router
+from elsa.api.v1.relay import router as relay_router
 from elsa.api.v1.session import router as session_router
 from elsa.api.v1.technical import router as technical_router
 from elsa.config import Environment, Settings, load_settings
@@ -104,6 +105,9 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     app.include_router(assistant_router, prefix=API_V1_PREFIX)
     app.include_router(assets_router, prefix=API_V1_PREFIX)
     app.include_router(contributions_router, prefix=API_V1_PREFIX)
+    # Fail-closed (ADR 0031): sin relay habilitado no existe ninguna ruta de nodo.
+    if settings.relay_enabled:
+        app.include_router(relay_router, prefix=API_V1_PREFIX)
 
     # El montaje estático va al final a propósito: Starlette resuelve las
     # rutas en orden y el montaje de la raíz atrapa todo lo que llegue sin
