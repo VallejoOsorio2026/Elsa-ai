@@ -172,6 +172,7 @@ masiva de chunks sin alcance.
 | `POST /api/v1/admin/users/{id}/status` | Administrador | Habilita o deshabilita en ELSA |
 | `POST /api/v1/admin/users/{id}/admin` | Administrador | Otorga o retira la administración |
 | `GET /api/v1/admin/audit` | Administrador | Auditoría de cambios administrativos |
+| `POST /api/v1/relay/node/{register,poll,result}` | Credencial del **nodo** (`X-Elsa-Node-Token`), no JWT de usuario. Solo existen con `ELSA_RELAY_ENABLED=true` | Mensajes del protocolo V1 del relay Render–PC1 (ver «Acceso remoto híbrido») |
 
 Las sondas `/access/...` no recuperan conocimiento: existen para poder
 verificar la cadena de confianza de forma observable y desaparecerán cuando
@@ -406,9 +407,67 @@ Dos capacidades del piloto no existen todavía, y ninguna se disfraza:
 La bandera viaja con el aporte hasta la pantalla de revisión: quien aprueba
 tiene que saber si el texto se reconoció o lo escribió una persona.
 
+## Acceso remoto híbrido Render–PC1 (D2)
+
+ELSA corre en PC1 (modelo local, conocimiento, Materiales detrás de ELSA) y el
+ingeniero la usará desde un PC de PAPELSA. Render es el **extremo público e
+intermediario**; PC1 **inicia todas las conexiones** y nunca acepta tráfico
+entrante: sin puerto público, sin reenvío de puertos, sin regla de firewall
+entrante, sin VPN ni túnel ([ADR 0029](adr/0029-arquitectura-hibrida-render-pc1-para-acceso-remoto.md)).
+
+```
+PC PAPELSA ── navegador / HTTPS ──► Render: relay/gateway (D2.2)
+                                        ▲
+                                        │ HTTPS long polling, iniciado por PC1
+                                        │
+                              PC1: agente outbound-only (D2.3)
+                                        │ HTTP loopback (IP literal)
+                                        ▼
+                              PC1: ELSA local ─► conocimiento / Materiales / IA local
+```
+
+| Subbloque | Qué es | Implementado en código | Operativo en red real |
+|---|---|---|---|
+| D2.1 | Protocolo lógico V1 (`src/elsa/relay/protocol.py`, [ADR 0030](adr/0030-protocolo-relay-render-pc1-v1.md)) | **SÍ** | — (es contrato) |
+| D2.2 | Relay/gateway en memoria en la app FastAPI (`src/elsa/relay/`, `src/elsa/api/v1/relay.py`, [ADR 0031](adr/0031-transporte-https-long-polling-relay-render-pc1-pilot-0-1.md)); apagado por defecto | **SÍ** | **NO**: no está desplegado en Render |
+| D2.3 | Agente de PC1, proceso aparte `python -m elsa.agent` (`src/elsa/agent/`, [ADR 0032](adr/0032-agente-pc1-outbound-pilot-0-1.md)) | **SÍ** | **NO**: no está conectado a ningún Render |
+| D2.4 | Integración usuario ↔ relay (ruta pública, interfaz) | **NO** | **NO** |
+
+**Hoy no hay acceso remoto funcionando.** Relay y agente están probados entre
+sí y contra ELSA en memoria (`httpx.ASGITransport`, sin red); no existe
+despliegue real, secreto real del nodo ni conexión Render ↔ PC1.
+
+Reglas que la implementación hace cumplir:
+
+- **No es un proxy genérico.** La única operación es `assistant.ask`; el
+  agente construye por código fijo `POST /api/v1/assistant/{domain}/{asset}/ask`
+  contra una base loopback validada (IP literal 127.0.0.0/8 o `::1`; nunca
+  `localhost` ni una IP de red). Render no aporta host, URL, método ni
+  cabeceras. `domain` y `asset` viajan como un único segmento codificado; `.`,
+  `..`, separadores y caracteres de control se rechazan antes de llamar.
+- **Dos credenciales separadas.** El token del nodo solo viene del entorno del
+  proceso (un archivo de configuración que lo contenga impide arrancar) y solo
+  viaja en `X-Elsa-Node-Token` hacia Render, que guarda únicamente su SHA-256.
+  El token temporal del usuario viaja dentro del `Request` y solo se usa como
+  `Authorization: Bearer` hacia ELSA local, que es quien autoriza (ADR 0002).
+- **At-most-once sin replay.** El relay nunca vuelve a encolar lo despachado;
+  una sesión vencida o reemplazada (`stale_session`) se retira y el agente
+  registra un `node_session_id` nuevo tras una espera con backoff. Un resultado
+  se calcula una vez y se transmite como mucho 4 veces; `assistant.ask` nunca
+  se reejecuta por un ACK perdido.
+- **Señal de vida continua.** El agente mantiene un poll en vuelo mientras
+  ELSA ejecuta; la ejecución local está acotada (por defecto 1 a la vez y 4 en
+  espera) y `CANCEL` es *best effort*.
+- **Estado solo en memoria**, en ambos extremos: sin base de datos, Redis ni
+  disco. Un reinicio pierde la sesión y lo que estuviera en vuelo.
+
+Las limitaciones aceptadas del piloto —poll perdido sin ACK, cancelación que
+no detiene trabajo ya iniciado, reinicio de Render, proxy corporativo,
+ocupación del puerto loopback— están en ADR 0031 §6 y ADR 0032 §3.
+
 ## Qué no existe todavía (a propósito)
 
-OCR, reranking, agentes, transcripción real, integración con el motor de
+OCR, reranking, agentes de IA, transcripción real, integración con el motor de
 búsqueda de Materiales, IH06/IW13, Centro de Control y despliegue. Los
 bloques anteriores dejan las fronteras preparadas (puertos, health por
 dependencia, migraciones versionadas, cadena de confianza y modelo de
