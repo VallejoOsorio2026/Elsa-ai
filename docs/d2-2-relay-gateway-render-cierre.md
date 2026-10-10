@@ -1,8 +1,9 @@
 # Cierre formal — D2.2: Relay/Gateway Render
 
-- **Fecha:** 2026-10-10 (UTC; el PR #45 se mergeó el 2026-10-10 14:26 UTC)
-- **Estado:** **CERRADO** una vez mergeado este documento a `main` con el CI de `main` en verde
-  (ver §17 y el veredicto).
+- **Fecha:** 2026-10-10 (UTC; el PR funcional #45 se mergeó a las 14:26 UTC y el PR
+  documental #46 a las 14:45 UTC)
+- **Estado:** **CERRADO** — PR #45 y PR documental #46 mergeados en `main`, y CI de `main`
+  posterior al merge de #46 en verde (§17 y veredicto).
 - **Qué cierra:** el subbloque **D2.2** del bloque D2 (acceso remoto seguro a ELSA): la mitad
   pública (Render) de la comunicación remota Render ↔ PC1: el relay/gateway en memoria, con
   transporte HTTPS long polling para Pilot 0.1 (ADR 0031), probado íntegramente con un **nodo
@@ -231,8 +232,10 @@ Nada que registrar: Codex no participó en D2.2.
   estado del PR #45 y de las ejecuciones de CI de `cf7ad6d` y del merge `aee7db6`.
 - Scripts de apoyo en el directorio temporal de la sesión (no versionados): reproducción del
   defecto H1, comprobación de los límites exactos del body y generación del cuerpo del PR.
-- El PR #45 lo **creó y mergeó el responsable del proyecto** desde su navegador: el entorno de
-  la sesión no tiene `gh` y el navegador integrado no tenía sesión de GitHub.
+- Los PR #45 y #46 los **creó y mergeó el responsable del proyecto** desde su navegador: el
+  entorno de la sesión no tiene `gh` y el navegador integrado no tenía sesión de GitHub.
+- Consultas **solo lectura** a la API pública de GitHub para verificar el PR #46, el merge
+  `60b3c8c` y las ejecuciones de CI de `main` y de la rama documental.
 - No se tocó Render, Supabase, Materiales, PC1 ni la red.
 
 ## 13. Incidentes
@@ -244,7 +247,9 @@ Nada que registrar: Codex no participó en D2.2.
 | 3 | **H2 (MEDIO)** — el token del usuario seguía referenciado en el frame de `submit` (`secret`, `trial`, el parámetro) durante la espera | Validación en un helper; `del user_access_token` tras crear la entrada; test sobre el frame | Resuelto en `cf7ad6d` |
 | 4 | El informe de implementación contó 8 creados / 4 modificados | Cuenta correcta: 7 creados / 5 modificados / 12 | Corregido solo en el informe, sin commit |
 | 5 | Una captura del PR se leyó como SHA corto `ace7db6` | El SHA real es `aee7db6685297f167f04137150267fd56ecaca5e`, obtenido con Git | Resuelto |
-| 6 | `gh` no está instalado; el navegador integrado no tenía sesión | El PR se creó manualmente (§12) | Aceptado |
+| 6 | `gh` no está instalado; el navegador integrado no tenía sesión | Los PR se crearon manualmente (§12) | Aceptado |
+| 7 | Se informó el PR documental como mergeado cuando seguía **abierto** (#46 `open`, `main` aún en `aee7db6`) | Se verificó contra Git y la API pública, no se tomó la confirmación como evidencia, y se esperó al merge real (`60b3c8c`) | Resuelto |
+| 8 | El documento de cierre original dejaba como PENDIENTE su propio merge y el CI posterior, por lo que, ya mergeado, afirmaba un estado desactualizado | Esta versión final lo regulariza con la evidencia real (rama `docs/finalize-d2-2-closure`) | Resuelto con esta corrección |
 
 ## 14. Git
 
@@ -263,7 +268,8 @@ Nada que registrar: Codex no participó en D2.2.
 | Rama | Uso | Estado |
 |---|---|---|
 | `claude/d2-2-render-relay-gateway` | Trabajo funcional de D2.2 | Mergeada vía PR #45; **no eliminada** todavía |
-| `docs/closure-d2-2-render-relay-gateway` | Este documento de cierre | Creada desde `main` (`aee7db6`) |
+| `docs/closure-d2-2-render-relay-gateway` | Documento de cierre original | Mergeada vía PR #46; **no eliminada** todavía |
+| `docs/finalize-d2-2-closure` | Corrección final de la evidencia de este documento | Creada desde `main` (`60b3c8c`); pendiente de su propio merge y de la limpieza posterior |
 
 ## 16. Commits
 
@@ -275,15 +281,19 @@ Nada que registrar: Codex no participó en D2.2.
 | `aa3151675c89fac2442156d600c8eac5618ce5e6` | `docs(env): variables del relay Render-PC1` |
 | `cf7ad6d6f65ccfe3d30c5746cad1973181cc9c0d` | `fix(relay): retire expired node sessions` |
 | `aee7db6685297f167f04137150267fd56ecaca5e` | Merge del PR #45 en `main` |
+| `0f3bd37a624b98c35bb9c4d3117b7206eec236d9` | `docs(project): cierre formal D2.2 relay gateway Render` |
+| `60b3c8c7f52259d60b2a2843113c6bad396575b8` | Merge del PR #46 en `main` |
 
-**HECHO DEL REPOSITORIO:** los 5 commits funcionales son ancestros de `origin/main`
-(comprobado con `git merge-base --is-ancestor`).
+**HECHO DEL REPOSITORIO:** los 5 commits funcionales y `0f3bd37` son ancestros de
+`origin/main` (comprobado con `git merge-base --is-ancestor`). El commit de la corrección final
+de este documento lo registra el historial de la rama `docs/finalize-d2-2-closure`.
 
 ## 17. Pull requests
 
 | PR | Estado | Detalle |
 |---|---|---|
 | #45 | **Mergeado** el 2026-10-10 14:26 UTC | `feat(relay): implement Render-PC1 relay gateway Pilot 0.1`; 5 commits, 12 archivos, +2568 / −2; base `main`; merge `aee7db6685297f167f04137150267fd56ecaca5e` |
+| #46 | **Mergeado** el 2026-10-10 14:45 UTC | `docs(project): cierre formal D2.2 relay gateway Render`; 1 commit (`0f3bd37`), 1 archivo (+400 / −0); base `main`; merge `60b3c8c7f52259d60b2a2843113c6bad396575b8` |
 
 CI (**HECHO MEDIDO** por la API pública de GitHub, en solo lectura):
 
@@ -291,11 +301,14 @@ CI (**HECHO MEDIDO** por la API pública de GitHub, en solo lectura):
 |---|---|---|---|---|
 | 38057189251 | push (rama) | `cf7ad6d` | SUCCESS, job 114227962891 | SUCCESS, job 114227963244 |
 | 38058590881 | pull_request (#45) | `cf7ad6d` | SUCCESS, job 114232027988 | SUCCESS, job 114232027740 |
-| 38059603166 | push (`main`, merge) | `aee7db6` | SUCCESS, job 114234985152 | SUCCESS, job 114234985029 |
+| 38059603166 | push (`main`, merge #45) | `aee7db6` | SUCCESS, job 114234985152 | SUCCESS, job 114234985029 |
+| 38060000492 | push (rama documental) | `0f3bd37` | SUCCESS, job 114236145010 | SUCCESS, job 114236144676 |
+| 38060902546 | push (`main`, merge #46) | `60b3c8c` | SUCCESS, job 114238779460 | SUCCESS, job 114238779325 |
 
-La ejecución 38059603166 en `main` terminó con `status = completed` y
-`conclusion = success`. El CI del merge de este documento de cierre se registra en el PR
-documental correspondiente y no se anticipa aquí (**PENDIENTE** hasta que exista).
+Las ejecuciones 38059603166 (merge #45) y 38060902546 (merge #46) en `main` terminaron con
+`status = completed` y `conclusion = success`. La ejecución 38060902546 es el **CI final de
+`main` posterior al merge documental**. Esta corrección de evidencia es solo Markdown; su
+propio merge y su CI se verifican aparte y no se anticipan aquí.
 
 ## 18. Migraciones
 
@@ -361,7 +374,7 @@ Ninguno de estos se cierra por asociación con D2.2.
 | 9 | **Rate limiting de node auth: riesgo aceptado del piloto.** No hay límite de intentos fallidos; se confía en un secreto de alta entropía y en 401 uniforme | Aceptado; reevaluar antes de producción |
 | 10 | Integración usuario ↔ relay: ruta pública, qué ve el usuario del estado, saneado de `RelayFailure.detail` antes de mostrarlo, liberar el `SecretStr` del usuario | D2.4 |
 | 11 | Observaciones menores de la revisión: acoplamiento `service.py` → `config.Settings` (H3, no aplicado); `RESPONSE` con mucho texto no ASCII escapado podría superar el tope del body HTTP (413 con la solicitud en vuelo hasta su TTL); `queued` con el nodo caído espera hasta su TTL; `auth_failed` sin límite en logs; el historial de ids usados crece un UUID por sesión | Revisar en D2.3 / D2.4 |
-| 12 | Eliminar la rama funcional `claude/d2-2-render-relay-gateway` una vez cerrado el bloque | Responsable |
+| 12 | Eliminar las ramas de D2.2 (`claude/d2-2-render-relay-gateway`, `docs/closure-d2-2-render-relay-gateway` y `docs/finalize-d2-2-closure`) tras el merge de la corrección final y el CI final de `main` | Responsable |
 | 13 | Instalar o disponer de `gh` en el entorno de trabajo si se quiere automatizar la creación de PR | Responsable (opcional) |
 
 ## 21. Siguiente bloque
@@ -390,11 +403,30 @@ conectado.
 | Ruff verde; 0 errores nuevos de mypy; secret review limpio | Cumplido |
 | CI del PR #45 y del merge en `main` en verde | Cumplido |
 | Dependencias nuevas = 0; PC1 real no conectado; red externa no utilizada | Cumplido |
-| Este documento mergeado en `main` con CI de `main` verde | **PENDIENTE** |
+| PR documental #46 mergeado y CI de `main` posterior (run 38060902546) en verde | Cumplido |
+| Este documento versionado en `main` y coherente con el estado final | Cumplido (con esta corrección) |
 
 ## Veredicto
 
-El trabajo funcional de D2.2 está **integrado en `main`** (merge
-`aee7db6685297f167f04137150267fd56ecaca5e`) con CI en verde. D2.2 quedará **formalmente
-cerrado** cuando este documento esté mergeado en `main` y el CI de `main` correspondiente a
-ese merge esté en verde. **D2 sigue abierto**; no hay acceso remoto funcionando.
+**D2.2 — RELAY/GATEWAY RENDER CERRADO FORMALMENTE: SÍ.**
+
+- PR funcional #45 **mergeado** (`aee7db6685297f167f04137150267fd56ecaca5e`), CI verde.
+- PR documental #46 **mergeado** (`60b3c8c7f52259d60b2a2843113c6bad396575b8`); CI de `main`
+  posterior (run 38060902546) con Lint/types/tests y Gitleaks en **SUCCESS**.
+- Evidencia funcional preservada sobre `cf7ad6d`: 1708 passed, 230 skipped, 2 failed
+  (baseline Windows), 3 warnings; regresiones D2.2 = 0.
+
+Estado que se mantiene:
+
+```text
+PC1 REAL CONECTADO:     NO
+RED EXTERNA OPERATIVA:  NO
+DEPLOY REAL RENDER:     NO
+DEPENDENCIAS NUEVAS:    0
+```
+
+**D2 sigue abierto**; no hay acceso remoto funcionando. Los pendientes de §20 continúan
+abiertos y no se cierran por asociación: D2.3 (agente PC1), conexión real Render ↔ PC1,
+secreto y autenticación reales del nodo, despliegue real en Render, medición real de long
+polling y timeouts, rate limiting de node auth, integración usuario ↔ relay, login real,
+Modo ELSA y prueba PAPELSA. **Siguiente bloque: D2.3 — agente PC1** (no iniciado).
