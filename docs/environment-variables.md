@@ -213,6 +213,38 @@ soportados.
 Los límites de tamaño (token de usuario 4096 caracteres, solicitud 16 KiB,
 respuesta 256 KiB) son constantes del código, justificadas en el ADR 0031.
 
+## Agente PC1 (D2.3)
+
+Proceso aparte que corre **en PC1** (`uv run python -m elsa.agent`) y conecta
+la ELSA local con el relay de Render, **solo con conexiones salientes**
+([ADR 0032](adr/0032-agente-pc1-outbound-pilot-0-1.md)). ELSA ignora estas
+variables y el agente ignora las de ELSA: la configuración de uno no exige la
+del otro. Se valida al arrancar; una configuración inválida termina el proceso
+con código `2` y un mensaje que nombra la variable sin repetir su valor.
+
+**El token del nodo es la excepción a la regla general de `.env`:**
+`ELSA_AGENT_NODE_TOKEN` **solo** se acepta desde la variable de entorno del
+proceso. Si aparece en el archivo de configuración (`.env` o el indicado con
+`--env-file`), el agente **no arranca**. Es el secreto crudo cuyo SHA-256 se
+configura en Render como `ELSA_RELAY_NODE_TOKEN_SHA256`; nunca sale de PC1 más
+que en la cabecera `X-Elsa-Node-Token` hacia Render, y nunca llega a ELSA local.
+
+| Variable | Obligatoria | Default | Descripción |
+|---|---|---|---|
+| `ELSA_AGENT_RELAY_URL` | Sí | — | Base del relay. Solo `https`, sin credenciales, ruta, query ni fragmento; las rutas `/api/v1/relay/node/*` las añade el agente. |
+| `ELSA_AGENT_NODE_ID` | Sí | — | Identidad del nodo (`[A-Za-z0-9._-]{1,64}`); debe coincidir con `ELSA_RELAY_NODE_ID`. |
+| `ELSA_AGENT_NODE_TOKEN` | Sí | — | **Secreto. Solo variable de entorno del proceso**, nunca en archivo. Entre 32 y 512 caracteres ASCII imprimibles, sin espacios. |
+| `ELSA_AGENT_LOCAL_BASE_URL` | No | `http://127.0.0.1:8000` | ELSA local. Solo `http` sobre una **IP literal de loopback** (127.0.0.0/8 o `[::1]`); se rechaza `localhost`, cualquier IP de red y cualquier nombre. |
+| `ELSA_AGENT_LOCAL_TIMEOUT_SECONDS` | No | `110` | Techo de una llamada a ELSA local (0 < x ≤ 300). Nunca se extiende más allá del vencimiento de la solicitud. |
+| `ELSA_AGENT_POLL_TIMEOUT_SECONDS` | No | `35` | Timeout de lectura de un poll (0 < x ≤ 60). Debe superar el long poll del relay. |
+| `ELSA_AGENT_MAX_CONCURRENCY` | No | `1` | Llamadas simultáneas a ELSA local (1–4). |
+| `ELSA_AGENT_MAX_QUEUED` | No | `4` | Solicitudes admitidas en espera de turno (0–16); las siguientes se rechazan con `LOCAL_UNAVAILABLE`. |
+| `ELSA_AGENT_LOG_LEVEL` | No | `INFO` | Nivel de log del agente. Los logs nunca llevan tokens, pregunta, adjuntos ni resultado. |
+
+Los plazos internos (backoff 1 s → 30 s, ritmo mínimo del poll vacío 1 s,
+reintentos de `/result` a 0,5/1/2 s con un máximo de 4 transmisiones, margen
+de entrega 2 s) son constantes del código, justificadas en el ADR 0032.
+
 ## Solo para tests
 
 | Variable | Descripción |
