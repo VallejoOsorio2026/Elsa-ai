@@ -10,7 +10,9 @@ agente actúa en consecuencia.
 - Sin redirecciones (se llevarían la cabecera del nodo) ni proxy de entorno.
 - Los cuerpos se serializan aquí, compactos y en UTF-8 sin escapar: lo que
   el relay mide (ADR 0031 §4) es exactamente lo que se envía.
-- Las respuestas se leen **por trozos y con tope**.
+- Las respuestas se leen **por trozos y con tope**. Una respuesta ilegible
+  (gzip roto, JSON anidado sin fin, números absurdos) se clasifica como
+  fallo transitorio: nunca tumba ni cuelga al agente.
 - Lo que llega por poll entra por ``parse_message`` y se exige que sea un
   ``Request`` o un ``Cancel`` del nodo y de la sesión vigentes; cualquier
   otra cosa se descarta sin ejecutarla ni responderla.
@@ -19,6 +21,7 @@ agente actúa en consecuencia.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -101,7 +104,7 @@ def _error_code(raw: bytes | None) -> str | None:
         return None
     try:
         body = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):
         return None
     error = body.get("error") if isinstance(body, dict) else None
     code = error.get("code") if isinstance(error, dict) else None
@@ -143,9 +146,20 @@ def _json_object(raw: bytes | None) -> dict[str, Any] | None:
         return None
     try:
         body = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):
         return None
     return body if isinstance(body, dict) else None
+
+
+def _finite_seconds(value: object) -> float | None:
+    """Un número de segundos finito y positivo, o ``None``. Nunca lanza."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    try:
+        seconds = float(value)
+    except OverflowError:
+        return None
+    return seconds if math.isfinite(seconds) and seconds > 0 else None
 
 
 class RelayClient:
@@ -192,8 +206,9 @@ class RelayClient:
                 timeout=timeout or httpx.USE_CLIENT_DEFAULT,
             ) as response:
                 return response.status_code, await _read_capped(response, limit), None
-        except httpx.TransportError as exc:
-            # Solo el tipo: el texto de la excepción no se registra ni se propaga.
+        except httpx.HTTPError as exc:
+            # Red, timeout, o cuerpo ilegible (``DecodingError``). Solo el tipo:
+            # el texto de la excepción no se registra ni se propaga.
             return None, None, type(exc).__name__
         finally:
             del headers
@@ -208,11 +223,10 @@ class RelayClient:
         if outcome is not RelayOutcome.OK:
             return RegisterReply(outcome, http_status=status)
         body = _json_object(raw)
-        long_poll = body.get("long_poll_seconds") if body else None
         return RegisterReply(
             RelayOutcome.OK,
             http_status=status,
-            long_poll_seconds=float(long_poll) if isinstance(long_poll, int | float) else None,
+            long_poll_seconds=_finite_seconds(body.get("long_poll_seconds") if body else None),
         )
 
     async def poll(self, message: Heartbeat) -> PollReply:
@@ -232,7 +246,7 @@ class RelayClient:
             return PollReply(RelayOutcome.OK, http_status=status)
         try:
             parsed = parse_message(json.dumps(payload))
-        except (ValidationError, TypeError, ValueError):
+        except (ValidationError, TypeError, ValueError, RecursionError):
             return PollReply(RelayOutcome.OK, http_status=status, discarded=True)
         if (
             not isinstance(parsed, Request | Cancel)

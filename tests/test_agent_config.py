@@ -222,3 +222,16 @@ def test_out_of_range_values_prevent_start(
 ) -> None:
     monkeypatch.setenv(variable, value)
     assert variable in _error()
+
+
+@pytest.mark.usefixtures("valid_environment")
+@pytest.mark.parametrize("variable", ["ELSA_AGENT_LOCAL_BASE_URL", "ELSA_AGENT_RELAY_URL"])
+def test_invalid_url_errors_never_echo_credentials(
+    monkeypatch: pytest.MonkeyPatch, variable: str
+) -> None:
+    """`urlsplit` rechaza este netloc con un mensaje que lo repetiría entero."""
+    scheme = "http" if "LOCAL" in variable else "https"
+    monkeypatch.setenv(variable, f"{scheme}://u:SyntheticPw123＃@127.0.0.1:8000")
+    message = _error()
+    assert variable in message
+    assert "SyntheticPw123" not in message

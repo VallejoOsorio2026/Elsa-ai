@@ -20,23 +20,24 @@ from uuid import UUID, uuid4
 
 import httpx
 import pytest
-from pydantic import SecretStr
+from pydantic import JsonValue, SecretStr
 
 import elsa.agent as agent_package
 from elsa.agent.__main__ import main, run_agent
 from elsa.agent.config import AgentConfig, AgentSettings
-from elsa.agent.local_client import ElsaLocalClient
-from elsa.agent.relay_client import RelayClient
+from elsa.agent.local_client import ElsaLocalClient, LocalSuccess
+from elsa.agent.relay_client import RelayClient, encode_message
 from elsa.agent.runner import (
     BACKOFF_MAX_SECONDS,
+    EXIT_CRASH,
     EXIT_FATAL,
     MIN_EMPTY_POLL_SECONDS,
     REPLY_QUEUE_MAX,
     NodeAgent,
 )
 from elsa.relay.auth import NODE_TOKEN_HEADER
-from elsa.relay.protocol import Cancel, Request
-from elsa.relay.service import MAX_RESPONSE_WIRE_BYTES
+from elsa.relay.protocol import Cancel, Request, Response
+from elsa.relay.service import MAX_RESPONSE_WIRE_BYTES, _wire_size
 from tests.agent_fakes import (
     ATTACHMENT_NAME,
     LOCAL_BASE,
@@ -356,7 +357,10 @@ async def test_expired_request_is_not_executed(
 
 
 async def test_request_that_expires_while_queued_is_not_executed(
-    relay: FakeRelay, elsa: FakeLocalElsa, sleeps: SleepRecorder
+    relay: FakeRelay,
+    elsa: FakeLocalElsa,
+    sleeps: SleepRecorder,
+    agent_logs: _ListHandler,
 ) -> None:
     now = [datetime.now(UTC)]
     elsa.hold()
@@ -367,12 +371,35 @@ async def test_request_that_expires_while_queued_is_not_executed(
         relay.push_request(first)
         relay.push_request(second)
         await wait_until(lambda: agent.active_jobs == 2)
-        now[0] += timedelta(seconds=60)  # el segundo vence mientras espera turno
+        now[0] += timedelta(seconds=40)  # solo el segundo vence mientras espera turno
         elsa.release()
-        await wait_until(lambda: len(relay.results) == 2)
+        await wait_until(lambda: agent.active_jobs == 0)
     assert len(elsa.requests) == 1
-    second_result = _results(relay)[str(second.request_id)][0]
-    assert second_result["code"] == "TIMEOUT"
+    # El primero se entrega; del segundo no se transmite nada: ya venció.
+    assert list(_results(relay)) == [str(first.request_id)]
+    assert "result_undelivered" in _events(agent_logs)
+
+
+async def test_no_result_is_transmitted_after_expiry(
+    relay: FakeRelay,
+    elsa: FakeLocalElsa,
+    sleeps: SleepRecorder,
+    agent_logs: _ListHandler,
+) -> None:
+    """Tampoco el primer envío: un resultado vencido no viaja."""
+    now = [datetime.now(UTC)]
+    elsa.hold()
+    agent = _build(relay, elsa, sleeps, clock=lambda: now[0])
+    async with _running(agent):
+        session = await _registered(relay, agent)
+        relay.push_request(make_request(session, ttl_seconds=30))
+        await elsa.started.wait()
+        now[0] += timedelta(seconds=31)
+        elsa.release()
+        await wait_until(lambda: "result_undelivered" in _events(agent_logs))
+        await wait_until(lambda: agent.active_jobs == 0)
+    assert len(elsa.requests) == 1
+    assert relay.results == []
 
 
 async def test_local_call_never_outlives_the_request(
@@ -808,28 +835,43 @@ async def test_logs_never_contain_secrets_or_payloads(
 
 
 def test_agent_package_respects_its_boundaries() -> None:
-    """Solo saliente y sin depender de la app: lo comprueba el código, no una promesa."""
-    allowed_elsa = (
-        "elsa.agent",
-        "elsa.relay.protocol",
-        "elsa.relay.auth",
-        "elsa.relay.service",
-        "elsa.logging",
-    )
+    """Solo saliente y sin depender de la app: lo comprueba el código, no una promesa.
+
+    Comprueba los imports **directos** del paquete. De los módulos del relay y
+    de ELSA solo se admiten los nombres concretos que el agente necesita: el
+    contrato, la cabecera del nodo, los límites del cable y el formateador de
+    logs. Importar ``RelayService`` o la configuración de ELSA haría fallar
+    este test.
+    """
+    allowed_names: dict[str, set[str] | None] = {
+        "elsa.relay.protocol": None,  # el contrato completo
+        "elsa.relay.auth": {"NODE_TOKEN_HEADER"},
+        "elsa.relay.service": {
+            "MAX_ERROR_WIRE_BYTES",
+            "MAX_REQUEST_WIRE_BYTES",
+            "MAX_RESPONSE_WIRE_BYTES",
+        },
+        "elsa.logging": {"configure_logging"},
+    }
     forbidden = ("fastapi", "uvicorn", "http.server", "socketserver", "subprocess", "socket")
     package = Path(agent_package.__file__).parent
     for source in package.glob("*.py"):
         tree = ast.parse(source.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            names: list[str] = []
             if isinstance(node, ast.Import):
-                names = [alias.name for alias in node.names]
+                for alias in node.names:
+                    assert not alias.name.startswith(forbidden), f"{source.name}: {alias.name}"
+                    assert not alias.name.startswith("elsa"), f"{source.name}: {alias.name}"
             elif isinstance(node, ast.ImportFrom) and node.module:
-                names = [node.module]
-            for name in names:
-                assert not name.startswith(forbidden), f"{source.name} imports {name}"
-                if name.startswith("elsa"):
-                    assert name.startswith(allowed_elsa), f"{source.name} imports {name}"
+                module = node.module
+                assert not module.startswith(forbidden), f"{source.name}: {module}"
+                if module.startswith("elsa") and not module.startswith("elsa.agent"):
+                    assert module in allowed_names, f"{source.name} imports {module}"
+                    allowed = allowed_names[module]
+                    imported = {alias.name for alias in node.names}
+                    assert allowed is None or imported <= allowed, (
+                        f"{source.name} imports {imported - (allowed or set())} from {module}"
+                    )
             if isinstance(node, ast.Attribute):
                 assert node.attr not in ("start_server", "create_server"), source.name
 
@@ -865,3 +907,193 @@ async def test_run_agent_wires_the_configuration_and_stops_on_bad_credentials(
     [sent] = relay.requests
     assert sent.raw_path == "/api/v1/relay/node/register"
     assert sent.headers[NODE_TOKEN_HEADER.lower()] == NODE_TOKEN
+
+
+# ---------------------------------------------------------------------------
+# Revisión pre-PR: renovación con espera, una sola transición, fallos de
+# serialización, tamaño en bytes y arranque con el token en archivo
+# ---------------------------------------------------------------------------
+
+
+async def test_repeated_stale_sessions_back_off_and_register_200_does_not_reset(
+    relay: FakeRelay, elsa: FakeLocalElsa, sleeps: SleepRecorder
+) -> None:
+    """Dos agentes con el mismo nodo se reemplazarían sin freno: aquí hay espera."""
+    for _ in range(6):
+        relay.poll_steps.append(STALE)
+    agent = _build(relay, elsa, sleeps)
+    async with _running(agent):
+        await wait_until(lambda: len(relay.registers) == 7)
+        await wait_until(lambda: len(relay.polls) >= 8)
+    # Cada renovación espera, y REGISTER 200 no reinicia el contador.
+    assert sleeps.delays[:6] == [1.0, 2.0, 4.0, 8.0, 16.0, 30.0]
+    assert len(set(relay.session_ids)) == 7
+
+
+async def test_backoff_resets_only_after_a_successful_poll(
+    relay: FakeRelay, elsa: FakeLocalElsa, sleeps: SleepRecorder
+) -> None:
+    relay.poll_steps.extend([STALE, STALE])
+    relay.poll_steps.append(httpx.Response(200, json={"message": None}))
+    relay.poll_steps.append(STALE)
+    agent = _build(relay, elsa, sleeps)
+    async with _running(agent):
+        await wait_until(lambda: len(relay.registers) == 4)
+    # 1 s, 2 s; poll OK (ritmo de poll vacío); y el siguiente stale vuelve a 1 s.
+    assert sleeps.delays[0:2] == [1.0, 2.0]
+    assert sleeps.delays[2] <= MIN_EMPTY_POLL_SECONDS  # ritmo del poll vacío
+    assert sleeps.delays[3] == 1.0
+
+
+async def test_concurrent_stale_on_poll_and_result_renews_exactly_once(
+    relay: FakeRelay, elsa: FakeLocalElsa, sleeps: SleepRecorder
+) -> None:
+    gate = asyncio.Event()
+    blocked = {"poll": False, "result": False}
+
+    async def stale_after_gate(kind: str) -> httpx.Response:
+        blocked[kind] = True
+        await gate.wait()
+        return httpx.Response(409, json=error_body("stale_session"))
+
+    async def result_step(request: httpx.Request) -> httpx.Response:
+        return await stale_after_gate("result")
+
+    async def poll_step(request: httpx.Request) -> httpx.Response:
+        return await stale_after_gate("poll")
+
+    relay.result_steps.append(result_step)
+    agent = _build(relay, elsa, sleeps)
+    async with _running(agent):
+        session_a = await _registered(relay, agent)
+        relay.push_request(make_request(session_a))
+        await wait_until(lambda: blocked["result"])
+        relay.poll_steps.append(poll_step)
+        await wait_until(lambda: blocked["poll"])
+        gate.set()  # poll y result responden stale a la vez
+        await wait_until(lambda: len(relay.registers) == 2)
+        session_b = relay.session_ids[1]
+        await wait_until(
+            lambda: sum(UUID(p["node_session_id"]) == session_b for p in relay.polls) >= 3
+        )
+    assert session_b != session_a
+    assert len(relay.registers) == 2  # A → B, una sola vez
+    assert agent.session_id is None  # el agente se detuvo limpio
+    assert len(relay.results) == 1  # el resultado de A nunca viaja con B
+    assert relay.results[0]["node_session_id"] == str(session_a)
+    assert len(elsa.requests) == 1
+
+
+async def test_unencodable_result_degrades_to_a_sanitized_error(
+    relay: FakeRelay,
+    elsa: FakeLocalElsa,
+    sleeps: SleepRecorder,
+    agent_logs: _ListHandler,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    elsa.steps.append(
+        httpx.Response(200, content=f'{{"message": "{RESULT_TEXT} \\ud800"}}'.encode())
+    )
+    agent = _build(relay, elsa, sleeps)
+    async with _running(agent):
+        session = await _registered(relay, agent)
+        relay.push_request(make_request(session))
+        await wait_until(lambda: len(relay.results) == 1 and agent.active_jobs == 0)
+    gc.collect()  # una excepción sin recoger se reportaría al destruir la tarea
+    [result] = relay.results
+    assert (result["code"], result["detail"]) == ("LOCAL_ERROR", "local:invalid_response")
+    assert "result_encoding_failed" in _events(agent_logs)
+    text = "\n".join(
+        f"{r.getMessage()} {sorted(r.__dict__.items(), key=str)}"
+        for r in agent_logs.records + caplog.records
+    )
+    assert RESULT_TEXT not in text
+    assert "never retrieved" not in text
+
+
+async def test_unexpected_error_stops_the_agent_without_leaking_its_text(
+    relay: FakeRelay,
+    elsa: FakeLocalElsa,
+    sleeps: SleepRecorder,
+    agent_logs: _ListHandler,
+) -> None:
+    async def explode(request: httpx.Request) -> httpx.Response:
+        raise RuntimeError(f"unexpected {NODE_TOKEN} {USER_TOKEN}")
+
+    relay.poll_steps.append(explode)
+    agent = _build(relay, elsa, sleeps)
+    assert await asyncio.wait_for(agent.run(), 3) == EXIT_CRASH
+    assert "agent_crashed" in _events(agent_logs)
+    text = " ".join(f"{sorted(r.__dict__.items(), key=str)}" for r in agent_logs.records)
+    assert NODE_TOKEN not in text and USER_TOKEN not in text
+    assert _other_tasks() == set()
+
+
+def test_response_size_is_counted_in_utf8_bytes_like_the_relay(
+    relay: FakeRelay, elsa: FakeLocalElsa, sleeps: SleepRecorder
+) -> None:
+    agent = _build(relay, elsa, sleeps)
+    job_session, job_request = uuid4(), uuid4()
+
+    from elsa.agent.runner import _Job
+
+    job = _Job(request_id=job_request, session_id=job_session)
+    # Por debajo del límite: el cuerpo es exactamente lo que mide el relay.
+    small: dict[str, JsonValue] = {"m": "ñ€😀" * 1000}
+    body = agent._encode(job, LocalSuccess(small))
+    message = Response(
+        node_id=NODE_ID, node_session_id=job_session, request_id=job_request, result=small
+    )
+    assert body == encode_message(message)
+    assert len(body) == _wire_size(message.model_dump(mode="json"))
+
+    # Menos caracteres que el límite, pero más bytes UTF-8: no cabe.
+    big: dict[str, JsonValue] = {"m": "ñ" * (MAX_RESPONSE_WIRE_BYTES // 2 + 10)}
+    assert len(json.dumps(big, ensure_ascii=False)) < MAX_RESPONSE_WIRE_BYTES
+    rejected = json.loads(agent._encode(job, LocalSuccess(big)))
+    assert (rejected["code"], rejected["detail"]) == ("LOCAL_ERROR", "local:response_too_large")
+
+
+async def test_cancelled_request_is_released_without_waiting_for_the_gc(
+    relay: FakeRelay, elsa: FakeLocalElsa, sleeps: SleepRecorder
+) -> None:
+    elsa.hold()
+    agent = _build(relay, elsa, sleeps)
+    async with _running(agent):
+        session = await _registered(relay, agent)
+        request = make_request(session)
+        rid = request.request_id
+        relay.push_request(request)
+        del request
+        await elsa.started.wait()
+        gc.collect()
+        gc.disable()
+        try:
+            relay.push(
+                Cancel(node_id=NODE_ID, node_session_id=session, request_id=rid).model_dump(
+                    mode="json"
+                )
+            )
+            await wait_until(lambda: agent.active_jobs == 0 and elsa.cancelled == 1)
+            await asyncio.sleep(0.01)
+            alive = [o for o in gc.get_objects() if isinstance(o, Request) and o.request_id == rid]
+        finally:
+            gc.enable()
+    assert alive == []
+
+
+def test_main_refuses_a_node_token_in_the_env_file_even_with_one_in_the_environment(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    env_file = tmp_path / "agent.env"
+    env_file.write_text(
+        f"ELSA_AGENT_RELAY_URL={RELAY_BASE}\nELSA_AGENT_NODE_ID={NODE_ID}\n"
+        f"ELSA_AGENT_NODE_TOKEN=file-{'z' * 40}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ELSA_AGENT_NODE_TOKEN", NODE_TOKEN)
+    assert main(["--env-file", str(env_file)]) == EXIT_FATAL
+    err = capsys.readouterr().err
+    assert "must not be stored in the configuration file" in err
+    assert "zzzz" not in err and NODE_TOKEN not in err

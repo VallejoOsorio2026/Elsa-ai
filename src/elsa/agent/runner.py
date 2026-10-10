@@ -14,13 +14,17 @@ poll. Mientras dura:
   llena, la respuesta se descarta y el relay vence la solicitud por TTL.
 - **Sin busy loop.** Un poll vacío o descartado que vuelve antes de
   ``min_empty_poll_seconds`` espera hasta completarlo; los fallos de red o
-  5xx esperan con backoff exponencial y techo.
-- **At-most-once.** Un ``request_id`` visto en la sesión no se vuelve a
-  ejecutar; ``assistant.ask`` se ejecuta una sola vez y su resultado, ya
-  serializado, se transmite como mucho 4 veces (envío + 3 reintentos).
+  5xx, y cada renovación de sesión, esperan con backoff exponencial, jitter y
+  techo. El contador de fallos solo vuelve a cero con un poll exitoso.
+- **Una ejecución por solicitud.** ``assistant.ask`` se ejecuta una sola vez
+  y su resultado, ya serializado, se transmite como mucho 4 veces (envío + 3
+  reintentos), nunca después de ``expires_at``. La garantía at-most-once es
+  del relay (nunca reencola lo despachado); el registro de ids vistos del
+  agente es una **defensa secundaria** acotada (LRU por sesión).
 - **Sesión retirada** (``stale_session``): se cancela su trabajo sin enviar
-  nada, se olvidan sus ids y se registra una sesión con id nuevo. No hay
-  replay.
+  nada, se olvidan sus ids y, tras esperar, se registra una sesión con id
+  nuevo. Solo ``run`` registra: dos avisos simultáneos de sesión retirada
+  producen una única transición. No hay replay.
 - **Fallos de configuración** (401/403/404/413/422): el agente termina con
   :data:`EXIT_FATAL` en vez de insistir.
 
@@ -64,6 +68,7 @@ __all__ = [
     "BACKOFF_INITIAL_SECONDS",
     "BACKOFF_MAX_SECONDS",
     "DELIVERY_MARGIN_SECONDS",
+    "EXIT_CRASH",
     "EXIT_FATAL",
     "EXIT_OK",
     "MIN_EMPTY_POLL_SECONDS",
@@ -73,6 +78,7 @@ __all__ = [
 ]
 
 EXIT_OK = 0
+EXIT_CRASH = 1
 EXIT_FATAL = 2
 
 RESULT_RETRY_DELAYS = (0.5, 1.0, 2.0)
@@ -177,7 +183,11 @@ class NodeAgent:
     # -- ciclo de vida ------------------------------------------------------
 
     async def run(self) -> int:
-        """Corre hasta un fallo fatal (:data:`EXIT_FATAL`) o hasta ser cancelado."""
+        """Corre hasta un fallo fatal (:data:`EXIT_FATAL`) o hasta ser cancelado.
+
+        Un error inesperado termina con :data:`EXIT_CRASH` y se registra solo
+        su tipo: su texto podría contener datos de la solicitud.
+        """
         reply_worker = asyncio.create_task(self._reply_worker())
         self._log("agent_started")
         try:
@@ -185,9 +195,15 @@ class NodeAgent:
                 await self._register_session()
                 await self._poll_loop()
                 await self._retire_session()
+                # Renovar sin esperar convertiría un reemplazo mutuo (dos agentes
+                # con el mismo nodo) en un vaivén register/409 sin freno.
+                await self._backoff()
         except _FatalError as fatal:
             self._log(fatal.event, level=logging.ERROR)
             return EXIT_FATAL
+        except Exception as exc:
+            self._log("agent_crashed", level=logging.ERROR, error=type(exc).__name__)
+            return EXIT_CRASH
         finally:
             await self._shutdown(reply_worker)
             self._log("agent_stopped")
@@ -202,7 +218,7 @@ class NodeAgent:
                 Register(node_id=self._node_id, node_session_id=self._session_id)
             )
             if reply.outcome is RelayOutcome.OK:
-                self._failures = 0
+                # El contador de fallos no vuelve a cero aquí: solo con un poll OK.
                 self._log("node_registered")
                 if (
                     reply.long_poll_seconds is not None
@@ -397,6 +413,7 @@ class NodeAgent:
     # -- ejecución y entrega ------------------------------------------------
 
     async def _run_job(self, job: _Job, request: Request) -> None:
+        """Ejecuta y entrega. Nunca termina con una excepción sin recoger."""
         loop = asyncio.get_running_loop()
         expires_at = request.expires_at
         try:
@@ -411,11 +428,25 @@ class NodeAgent:
                 error_code=outcome.code.value if isinstance(outcome, LocalFailure) else None,
                 duration_ms=int((loop.time() - started) * 1000),
             )
-            body = self._encode(job, outcome)
+            body = self._encode_safely(job, outcome)
+            del outcome
             await self._deliver(_Delivery(job.request_id, job.session_id, body, expires_at))
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # Solo el tipo: el texto de la excepción podría llevar el resultado.
+            self._log(
+                "job_failed",
+                level=logging.ERROR,
+                request_id=job.request_id,
+                error=type(exc).__name__,
+            )
         finally:
             if self._jobs.get(job.request_id) is job:
                 del self._jobs[job.request_id]
+            # Rompe el ciclo tarea → excepción → frame → job → tarea, que
+            # retendría el Request hasta la próxima recolección cíclica.
+            job.task = None
 
     async def _execute(self, request: Request) -> LocalOutcome:
         remaining = (request.expires_at - self._clock()).total_seconds() - DELIVERY_MARGIN_SECONDS
@@ -469,8 +500,27 @@ class NodeAgent:
                 failure = LocalFailure(ErrorCode.LOCAL_ERROR, "local:response_too_large")
         return self._error_body(job.request_id, job.session_id, failure.code, failure.detail)
 
+    def _encode_safely(self, job: _Job, outcome: LocalOutcome) -> bytes:
+        """:meth:`_encode` que degrada cualquier fallo a un ``ErrorMessage`` saneado."""
+        try:
+            return self._encode(job, outcome)
+        except Exception as exc:
+            # p. ej. un surrogate suelto que UTF-8 no admite. Solo el tipo.
+            self._log(
+                "result_encoding_failed",
+                level=logging.ERROR,
+                request_id=job.request_id,
+                error=type(exc).__name__,
+            )
+            return self._error_body(
+                job.request_id, job.session_id, ErrorCode.LOCAL_ERROR, "local:invalid_response"
+            )
+
     async def _deliver(self, delivery: _Delivery) -> None:
-        """Transmite el mismo cuerpo hasta 4 veces. **Nunca** reejecuta la solicitud."""
+        """Transmite el mismo cuerpo hasta 4 veces. **Nunca** reejecuta la solicitud.
+
+        Ninguna transmisión, tampoco la primera, ocurre después de ``expires_at``.
+        """
         rid = delivery.request_id
         for attempt in range(len(RESULT_RETRY_DELAYS) + 1):
             if attempt:
@@ -478,6 +528,8 @@ class NodeAgent:
                 if self._clock() + timedelta(seconds=delay) >= delivery.expires_at:
                     break
                 await self._sleep(delay)
+            if self._clock() >= delivery.expires_at:
+                break
             if delivery.session_id != self._session_id:
                 self._log("result_discarded_stale", request_id=rid)
                 return

@@ -1,5 +1,7 @@
 """Cliente HTTPS del relay: clasificación, separación de credenciales y topes."""
 
+import json
+from collections.abc import Callable
 from uuid import UUID, uuid4
 
 import httpx
@@ -200,3 +202,72 @@ async def test_transport_failure_never_exposes_exception_text(
     assert reply.outcome is RelayOutcome.TRANSIENT
     assert reply.error == "ConnectError"
     assert NODE_TOKEN not in repr(reply)
+
+
+# ---------------------------------------------------------------------------
+# Respuestas ilegibles del relay o de su proxy: clasificadas, nunca fatales
+# ---------------------------------------------------------------------------
+
+
+def _bad_gzip() -> httpx.Response:
+    # Un stream: httpx descomprime al leer, como con una respuesta real.
+    return httpx.Response(
+        200, headers={"content-encoding": "gzip"}, stream=httpx.ByteStream(b"not gzip at all")
+    )
+
+
+def _deep_json() -> httpx.Response:
+    return httpx.Response(200, content=b'{"message": ' + b"[" * 30000 + b"]" * 30000 + b"}")
+
+
+def _deep_error() -> httpx.Response:
+    return httpx.Response(409, content=b'{"error": ' + b"[" * 3000 + b"]" * 3000 + b"}")
+
+
+@pytest.mark.parametrize("make", [_bad_gzip, _deep_json, _deep_error])
+async def test_unreadable_relay_replies_never_crash_the_client(
+    client: RelayClient, relay: FakeRelay, make: Callable[[], httpx.Response]
+) -> None:
+    for steps in (relay.poll_steps, relay.result_steps, relay.register_steps):
+        steps.append(make())
+    poll = await client.poll(_heartbeat())
+    result = await client.send_result(b"{}")
+    register = await client.register(Register(node_id=NODE_ID, node_session_id=SESSION))
+    if make is _deep_error:
+        # Un 409 sin código legible no es stale ni not_pending: desajuste.
+        assert poll.outcome is result is register.outcome is RelayOutcome.PROTOCOL
+    elif make is _bad_gzip:
+        assert poll.outcome is result is register.outcome is RelayOutcome.TRANSIENT
+    else:
+        # 200 con JSON ilegible: el poll no trae nada; register/result son 200.
+        assert poll.outcome is RelayOutcome.TRANSIENT
+        assert poll.message is None
+        assert result is RelayOutcome.OK
+        assert register.outcome is RelayOutcome.OK and register.long_poll_seconds is None
+
+
+async def test_bad_gzip_is_a_transient_failure_with_only_the_type(
+    client: RelayClient, relay: FakeRelay
+) -> None:
+    relay.poll_steps.append(_bad_gzip())
+    reply = await client.poll(_heartbeat())
+    assert reply.outcome is RelayOutcome.TRANSIENT
+    assert reply.error == "DecodingError"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [10**400, 1e999, -5, 0, True, "25", None, [25]],
+)
+async def test_absurd_long_poll_values_are_ignored(
+    client: RelayClient, relay: FakeRelay, value: object
+) -> None:
+    content = (
+        b'{"status": "registered", "long_poll_seconds": '
+        + (b"1e999" if value == 1e999 else json.dumps(value).encode())
+        + b"}"
+    )
+    relay.register_steps.append(httpx.Response(200, content=content))
+    reply = await client.register(Register(node_id=NODE_ID, node_session_id=SESSION))
+    assert reply.outcome is RelayOutcome.OK
+    assert reply.long_poll_seconds is None

@@ -63,8 +63,8 @@ class _Interposed(httpx.AsyncBaseTransport):
         return response
 
 
-@pytest.fixture
-def relay_app() -> FastAPI:
+def _new_relay_app() -> FastAPI:
+    """Un proceso de Render recién arrancado: relay real con la memoria vacía."""
     return create_app(
         make_test_settings(
             relay_enabled=True,
@@ -75,6 +75,11 @@ def relay_app() -> FastAPI:
             relay_request_ttl_seconds=10.0,
         )
     )
+
+
+@pytest.fixture
+def relay_app() -> FastAPI:
+    return _new_relay_app()
 
 
 @pytest.fixture
@@ -274,3 +279,118 @@ async def test_lost_ack_does_not_reexecute_and_the_user_gets_one_answer(
         await asyncio.sleep(0.01)
     assert len(_ask_paths(local_transport)) == 1
     assert len([p for p in relay_transport.paths if p.endswith("/result")]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Reinicio de Render: lo que hace REALMENTE el relay de D2.2 con memoria nueva
+# ---------------------------------------------------------------------------
+
+
+def _service(app: FastAPI) -> RelayService:
+    service = app.state.container.relay
+    assert isinstance(service, RelayService)
+    return service
+
+
+async def _quick_sleep(delay: float) -> None:
+    await asyncio.sleep(min(delay, 0.01))
+
+
+async def _until(predicate: Callable[[], bool], timeout: float = 3.0) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not predicate():
+        assert loop.time() < deadline, "condition not reached in time"
+        await asyncio.sleep(0.01)
+
+
+def _restart_agent(relay_transport: _Interposed, local_transport: _Interposed) -> NodeAgent:
+    return NodeAgent(
+        node_id=NODE_ID,
+        relay=RelayClient(
+            RELAY_BASE, SecretStr(NODE_TOKEN), poll_timeout_seconds=2.0, transport=relay_transport
+        ),
+        local=ElsaLocalClient(LOCAL_BASE, transport=local_transport),
+        sleep=_quick_sleep,
+        min_empty_poll_seconds=0.01,
+    )
+
+
+async def test_after_a_render_restart_poll_is_stale_and_a_new_session_is_registered(
+    local_transport: _Interposed,
+) -> None:
+    old_render, new_render = _new_relay_app(), _new_relay_app()
+    transport = _Interposed(httpx.ASGITransport(app=old_render))
+    node = _restart_agent(transport, local_transport)
+    task = asyncio.create_task(node.run())
+    try:
+        await _until(lambda: _service(old_render).is_online())
+        session_a = node.session_id
+
+        transport.inner = httpx.ASGITransport(app=new_render)  # Render reinicia
+        await _until(lambda: _service(new_render).is_online())
+
+        current = _service(new_render).store.session
+        assert current is not None
+        assert current.session_id != session_a  # poll con A → 409 → id nuevo
+        assert node.session_id == current.session_id
+        outcome = await asyncio.wait_for(
+            _service(new_render).submit(
+                AskParams(domain=DOMAIN, asset=ASSET_CODE, question=QUESTION),
+                SecretStr(ENGINEER_TOKEN),
+            ),
+            5,
+        )
+        assert isinstance(outcome, Response)
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
+async def test_a_register_retried_across_a_render_restart_is_accepted_with_the_same_id(
+    local_transport: _Interposed,
+) -> None:
+    """El historial de ids es por proceso de Render (ADR 0031 §3).
+
+    REGISTER(A) llega al Render viejo, la respuesta se pierde y Render reinicia:
+    el reintento con A se admite como sesión nueva. Es inocuo: A nunca hizo
+    poll, así que nada pudo despacharse a ella en ninguno de los dos procesos.
+    """
+    old_render, new_render = _new_relay_app(), _new_relay_app()
+    transport = _Interposed(httpx.ASGITransport(app=old_render))
+
+    async def lose_ack_and_restart(request: httpx.Request, response: httpx.Response) -> None:
+        # Solo el primer REGISTER: Render viejo lo acepta, la respuesta se pierde
+        # y el proceso se reemplaza por uno nuevo antes del reintento.
+        if request.url.path.endswith("/register"):
+            await response.aread()
+            transport.inner = httpx.ASGITransport(app=new_render)
+            transport.after = None
+            raise httpx.ReadError("ack lost while Render restarted")
+
+    transport.after = lose_ack_and_restart
+    node = _restart_agent(transport, local_transport)
+    task = asyncio.create_task(node.run())
+    try:
+        await _until(lambda: _service(new_render).is_online())
+        old_session = _service(old_render).store.session
+        new_session = _service(new_render).store.session
+        assert old_session is not None and new_session is not None
+        assert new_session.session_id == old_session.session_id == node.session_id
+        assert [p for p in transport.paths if p.endswith("/register")] == [
+            "/api/v1/relay/node/register",
+            "/api/v1/relay/node/register",
+        ]
+        outcome = await asyncio.wait_for(
+            _service(new_render).submit(
+                AskParams(domain=DOMAIN, asset=ASSET_CODE, question=QUESTION),
+                SecretStr(ENGINEER_TOKEN),
+            ),
+            5,
+        )
+        assert isinstance(outcome, Response)
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task

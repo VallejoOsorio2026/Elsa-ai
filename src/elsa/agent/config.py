@@ -55,7 +55,12 @@ class AgentConfigurationError(Exception):
 
 
 def _split(value: str) -> SplitResult:
-    parts = urlsplit(value.strip())
+    try:
+        # `urlsplit` puede lanzar con un mensaje que repite el netloc (con su
+        # contraseña, si la hubiera): se sustituye por uno sin el valor.
+        parts = urlsplit(value.strip())
+    except ValueError:
+        raise ValueError("is not a valid URL") from None
     try:
         parts.port  # noqa: B018 - valida el puerto (lanza ValueError si no es numérico)
     except ValueError:
