@@ -91,7 +91,9 @@ lanzador del servicio). **No se recomienda `setx`**: persiste el secreto en
 claro en el registro de Windows. La comprobación «no en archivo» cubre el
 archivo de configuración del agente; un lanzador externo que cargue variables
 desde otro archivo (`uv run --env-file`, `UV_ENV_FILE`) no es detectable desde
-el proceso y está igualmente desaconsejado.
+el proceso y está igualmente desaconsejado. Un archivo de configuración que no
+sea UTF-8 —incluido un UTF-16 sin BOM, detectado por sus bytes NUL— se rechaza
+sin interpretarlo y sin repetir su contenido.
 
 ### 2.4 Sesiones y reconexión
 
@@ -268,6 +270,11 @@ cabeceras, pregunta, adjuntos, resultado, `detail` ni cuerpos del cable.
 - **Compresión.** Hacia Render el agente pide `Accept-Encoding: identity` y no
   descomprime un cuerpo comprimido: el tope de lectura mide bytes reales, de
   modo que un relay comprometido no puede inflar la memoria con una bomba gzip.
+  El rechazo se registra como `relay_body_rejected` con el estado HTTP y el
+  código `compressed_body` (distinto de `invalid_body`, un cuerpo sin comprimir
+  pero ilegible); un fallo fatal registra también su estado HTTP y código. Un
+  409 comprimido sigue rechazado: no se lee, así que no puede ser
+  `stale_session`.
   El cliente local no fija esa cabecera y su tope se mide tras descomprimir; se
   acepta porque ELSA local es de confianza y el riesgo residual es el de la
   ocupación del puerto, ya descrito.

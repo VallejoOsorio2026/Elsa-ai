@@ -21,6 +21,7 @@ agente actúa en consecuencia.
 from __future__ import annotations
 
 import json
+import logging
 import math
 from dataclasses import dataclass
 from enum import StrEnum
@@ -49,6 +50,13 @@ __all__ = [
 ]
 
 NODE_ROUTE_PREFIX = "/api/v1/relay/node"
+COMPRESSED_BODY = "compressed_body"
+"""Error de diagnóstico: el relay (o un proxy) respondió comprimido pese a
+``Accept-Encoding: identity``. El cuerpo se rechaza sin leerlo."""
+INVALID_BODY = "invalid_body"
+"""Error de diagnóstico: cuerpo sin comprimir pero ilegible o fuera de contrato."""
+
+_logger = logging.getLogger("elsa.agent.relay")
 _POLL_BODY_MAX_BYTES = 32 * 1024
 """Un ``REQUEST`` cabe en 16 KiB (ADR 0031 §4) más la envoltura."""
 _CONTROL_BODY_MAX_BYTES = 4 * 1024
@@ -130,16 +138,13 @@ def _classify(status: int, raw: bytes | None) -> RelayOutcome:
     return RelayOutcome.PROTOCOL
 
 
-async def _read_capped(response: httpx.Response, limit: int) -> bytes | None:
-    """Lee el cuerpo con tope; ``None`` si lo supera o viene comprimido.
-
-    Se pide ``Accept-Encoding: identity`` y un cuerpo comprimido se rechaza
-    **antes** de leerlo: así lo que se lee son los bytes del cable y el tope no
-    puede burlarse con una bomba gzip que se infle en memoria.
-    """
+def _is_compressed(response: httpx.Response) -> bool:
     encoding = response.headers.get("content-encoding", "identity").strip().lower()
-    if encoding not in ("", "identity"):
-        return None
+    return encoding not in ("", "identity")
+
+
+async def _read_capped(response: httpx.Response, limit: int) -> bytes | None:
+    """Lee el cuerpo, ya sin comprimir, con tope; ``None`` si lo supera."""
     chunks: list[bytes] = []
     total = 0
     async for chunk in response.aiter_bytes():
@@ -200,7 +205,13 @@ class RelayClient:
         limit: int,
         timeout: httpx.Timeout | None = None,
     ) -> tuple[int | None, bytes | None, str | None]:
-        """``(estado, cuerpo o None si superó el tope, tipo de fallo de transporte)``."""
+        """``(estado, cuerpo o None, error de diagnóstico)``.
+
+        Se pide ``Accept-Encoding: identity`` y un cuerpo comprimido se rechaza
+        **antes** de leerlo: lo que se lee son los bytes del cable y el tope no
+        puede burlarse con una bomba gzip. El rechazo se registra con el estado
+        HTTP y el código ``compressed_body``; nunca el cuerpo ni las cabeceras.
+        """
         headers = {
             NODE_TOKEN_HEADER: self._node_token.get_secret_value(),
             "Content-Type": "application/json",
@@ -215,6 +226,17 @@ class RelayClient:
                 headers=headers,
                 timeout=timeout or httpx.USE_CLIENT_DEFAULT,
             ) as response:
+                if _is_compressed(response):
+                    _logger.warning(
+                        "relay_body_rejected",
+                        extra={
+                            "event": "relay_body_rejected",
+                            "endpoint": endpoint,
+                            "http_status": response.status_code,
+                            "error_code": COMPRESSED_BODY,
+                        },
+                    )
+                    return response.status_code, None, COMPRESSED_BODY
                 return response.status_code, await _read_capped(response, limit), None
         except httpx.HTTPError as exc:
             # Red, timeout, o cuerpo ilegible (``DecodingError``). Solo el tipo:
@@ -231,7 +253,7 @@ class RelayClient:
             return RegisterReply(RelayOutcome.TRANSIENT, error=error)
         outcome = _classify(status, raw)
         if outcome is not RelayOutcome.OK:
-            return RegisterReply(outcome, http_status=status)
+            return RegisterReply(outcome, http_status=status, error=error)
         body = _json_object(raw)
         return RegisterReply(
             RelayOutcome.OK,
@@ -247,10 +269,12 @@ class RelayClient:
             return PollReply(RelayOutcome.TRANSIENT, error=error)
         outcome = _classify(status, raw)
         if outcome is not RelayOutcome.OK:
-            return PollReply(outcome, http_status=status)
+            return PollReply(outcome, http_status=status, error=error)
         body = _json_object(raw)
         if body is None or "message" not in body:
-            return PollReply(RelayOutcome.TRANSIENT, http_status=status, error="invalid_body")
+            return PollReply(
+                RelayOutcome.TRANSIENT, http_status=status, error=error or INVALID_BODY
+            )
         payload = body["message"]
         if payload is None:
             return PollReply(RelayOutcome.OK, http_status=status)

@@ -226,11 +226,33 @@ def _format_validation_error(exc: ValidationError) -> str:
     return "\n".join(lines)
 
 
+def _reject_nul_bytes(env_file: str | Path) -> None:
+    """Rechaza un archivo con bytes NUL sin intentar interpretarlo.
+
+    Un UTF-16LE sin BOM se «decodifica» como UTF-8 válido con NUL intercalados:
+    la clave del token quedaría invisible para la comprobación «no en archivo».
+    No se intenta adivinar la codificación ni se repite el contenido.
+    """
+    path = Path(env_file)
+    if not path.is_file():
+        return  # sin archivo no hay nada que leer (pydantic-settings lo ignora igual)
+    try:
+        data = path.read_bytes()
+    except OSError:
+        raise AgentConfigurationError("The configuration file could not be read.") from None
+    if b"\x00" in data:
+        raise AgentConfigurationError(
+            "The configuration file must be UTF-8 encoded text without NUL bytes."
+        )
+
+
 def load_agent_config(env_file: str | Path | None = ".env") -> AgentConfig:
     """Carga y valida la configuración del agente. Falla cerrado.
 
     El token del nodo sale de ``os.environ`` y de nada más.
     """
+    if env_file is not None:
+        _reject_nul_bytes(env_file)
     try:
         if env_file is not None:
             # `_env_file` es un kwarg de runtime de BaseSettings que mypy no ve.

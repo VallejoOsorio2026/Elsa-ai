@@ -2,7 +2,8 @@
 
 import gzip
 import json
-from collections.abc import Callable
+import logging
+from collections.abc import Callable, Iterator
 from uuid import UUID, uuid4
 
 import httpx
@@ -261,7 +262,7 @@ async def test_compressed_bodies_are_rejected_before_being_inflated(
     )
     reply = await client.poll(_heartbeat())
     assert reply.outcome is RelayOutcome.TRANSIENT
-    assert reply.error == "invalid_body"
+    assert reply.error == "compressed_body"
     [sent] = relay.requests
     assert sent.headers["accept-encoding"] == "identity"
 
@@ -282,3 +283,79 @@ async def test_absurd_long_poll_values_are_ignored(
     reply = await client.register(Register(node_id=NODE_ID, node_session_id=SESSION))
     assert reply.outcome is RelayOutcome.OK
     assert reply.long_poll_seconds is None
+
+
+# ---------------------------------------------------------------------------
+# Diagnóstico de cuerpos comprimidos: distinguible y saneado
+# ---------------------------------------------------------------------------
+
+
+class _Records(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def relay_logs() -> Iterator[_Records]:
+    handler = _Records()
+    logger = logging.getLogger("elsa.agent.relay")
+    previous = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    try:
+        yield handler
+    finally:
+        logger.removeHandler(handler)
+        logger.setLevel(previous)
+
+
+def _compressed(status: int, payload: bytes) -> httpx.Response:
+    return httpx.Response(
+        status,
+        headers={"content-encoding": "gzip"},
+        stream=httpx.ByteStream(gzip.compress(payload)),
+    )
+
+
+async def test_compressed_and_invalid_bodies_are_reported_differently(
+    client: RelayClient, relay: FakeRelay
+) -> None:
+    relay.poll_steps.append(_compressed(200, b'{"message": null}'))
+    relay.poll_steps.append(httpx.Response(200, content=b"<html>proxy error</html>"))
+    compressed = await client.poll(_heartbeat())
+    invalid = await client.poll(_heartbeat())
+    assert (compressed.outcome, compressed.error) == (RelayOutcome.TRANSIENT, "compressed_body")
+    assert (invalid.outcome, invalid.error) == (RelayOutcome.TRANSIENT, "invalid_body")
+    assert compressed.http_status == invalid.http_status == 200
+
+
+async def test_a_compressed_409_is_still_rejected_and_never_read_as_stale(
+    client: RelayClient, relay: FakeRelay, relay_logs: _Records
+) -> None:
+    stale = json.dumps(error_body("stale_session")).encode()
+    relay.poll_steps.append(_compressed(409, stale))
+    relay.register_steps.append(_compressed(409, stale))
+    relay.result_steps.append(_compressed(409, stale))
+
+    poll = await client.poll(_heartbeat())
+    register = await client.register(Register(node_id=NODE_ID, node_session_id=SESSION))
+    result = await client.send_result(b"{}")
+
+    for reply in (poll, register):
+        assert reply.outcome is RelayOutcome.PROTOCOL  # no se lee: no puede ser STALE
+        assert (reply.http_status, reply.error) == (409, "compressed_body")
+    assert result is RelayOutcome.PROTOCOL
+
+    rejected = [r for r in relay_logs.records if getattr(r, "event", None) == "relay_body_rejected"]
+    assert [(r.endpoint, r.http_status, r.error_code) for r in rejected] == [  # type: ignore[attr-defined]
+        ("poll", 409, "compressed_body"),
+        ("register", 409, "compressed_body"),
+        ("result", 409, "compressed_body"),
+    ]
+    text = " ".join(f"{r.getMessage()} {sorted(r.__dict__.items(), key=str)}" for r in rejected)
+    for secret in (NODE_TOKEN, "stale_session", "content-encoding", "x-elsa-node-token"):
+        assert secret not in text

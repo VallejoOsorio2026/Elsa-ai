@@ -102,9 +102,13 @@ def _utc_now() -> datetime:
 
 
 class _FatalError(Exception):
-    def __init__(self, event: str) -> None:
+    def __init__(
+        self, event: str, *, http_status: int | None = None, error: str | None = None
+    ) -> None:
         super().__init__(event)
         self.event = event
+        self.http_status = http_status
+        self.error = error
 
 
 @dataclass(eq=False)
@@ -199,7 +203,13 @@ class NodeAgent:
                 # con el mismo nodo) en un vaivén register/409 sin freno.
                 await self._backoff()
         except _FatalError as fatal:
-            self._log(fatal.event, level=logging.ERROR)
+            # Diagnóstico saneado: estado HTTP y código, nunca cuerpo ni cabeceras.
+            self._log(
+                fatal.event,
+                level=logging.ERROR,
+                http_status=fatal.http_status,
+                error_code=fatal.error,
+            )
             return EXIT_FATAL
         except Exception as exc:
             self._log("agent_crashed", level=logging.ERROR, error=type(exc).__name__)
@@ -239,7 +249,9 @@ class NodeAgent:
                     error=reply.error,
                 )
             else:
-                raise _FatalError(_fatal_event(reply.outcome))
+                raise _FatalError(
+                    _fatal_event(reply.outcome), http_status=reply.http_status, error=reply.error
+                )
             await self._backoff()
 
     async def _poll_loop(self) -> None:
@@ -276,7 +288,9 @@ class NodeAgent:
                 )
                 await self._backoff()
                 continue
-            raise _FatalError(_fatal_event(reply.outcome))
+            raise _FatalError(
+                _fatal_event(reply.outcome), http_status=reply.http_status, error=reply.error
+            )
 
     def _dispatch(self, reply: PollReply) -> bool:
         """Atiende lo que trajo un poll. ``True`` si era un ``Request``."""

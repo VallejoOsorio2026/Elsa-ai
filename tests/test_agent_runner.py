@@ -1097,3 +1097,27 @@ def test_main_refuses_a_node_token_in_the_env_file_even_with_one_in_the_environm
     err = capsys.readouterr().err
     assert "must not be stored in the configuration file" in err
     assert "zzzz" not in err and NODE_TOKEN not in err
+
+
+async def test_compressed_fatal_reply_is_logged_with_status_and_code_only(
+    relay: FakeRelay,
+    elsa: FakeLocalElsa,
+    sleeps: SleepRecorder,
+    agent_logs: _ListHandler,
+) -> None:
+    import gzip
+
+    body = gzip.compress(json.dumps(error_body("stale_session")).encode())
+    relay.poll_steps.append(
+        httpx.Response(409, headers={"content-encoding": "gzip"}, stream=httpx.ByteStream(body))
+    )
+    agent = _build(relay, elsa, sleeps)
+    assert await asyncio.wait_for(agent.run(), 3) == EXIT_FATAL
+    [fatal] = [r for r in agent_logs.records if getattr(r, "event", None) == "relay_misconfigured"]
+    assert fatal.http_status == 409  # type: ignore[attr-defined]
+    assert fatal.error_code == "compressed_body"  # type: ignore[attr-defined]
+    events = _events(agent_logs)
+    assert "relay_body_rejected" in events
+    text = " ".join(f"{sorted(r.__dict__.items(), key=str)}" for r in agent_logs.records)
+    assert NODE_TOKEN not in text and 'stale_session"' not in text
+    assert len(relay.registers) == 1 and sleeps.delays == []

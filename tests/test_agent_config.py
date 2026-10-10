@@ -243,3 +243,16 @@ def test_a_non_utf8_configuration_file_fails_closed_without_traceback(tmp_path: 
     env_file = tmp_path / ".env"
     env_file.write_text("ELSA_AGENT_MAX_QUEUED=2\n", encoding="utf-16")
     assert "must be UTF-8" in _error(env_file)
+
+
+@pytest.mark.usefixtures("valid_environment")
+def test_a_configuration_file_with_nul_bytes_fails_closed_without_echo(tmp_path: Path) -> None:
+    """UTF-16LE sin BOM se leería como UTF-8 «válido» y ocultaría el token: se rechaza."""
+    secret = "file-token-" + "q" * 40
+    env_file = tmp_path / ".env"
+    env_file.write_bytes(
+        f"{NODE_TOKEN_ENV}={secret}\nELSA_AGENT_MAX_QUEUED=2\n".encode("utf-16-le")
+    )
+    message = _error(env_file)
+    assert "without NUL bytes" in message
+    assert "qqqq" not in message and "MAX_QUEUED" not in message
