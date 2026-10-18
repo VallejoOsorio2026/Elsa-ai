@@ -25,6 +25,7 @@ from elsa.api.v1.access import router as access_router
 from elsa.api.v1.admin import router as admin_router
 from elsa.api.v1.assets import router as assets_router
 from elsa.api.v1.assistant import router as assistant_router
+from elsa.api.v1.assistant_relay import router as assistant_relay_router
 from elsa.api.v1.contributions import router as contributions_router
 from elsa.api.v1.health import router as health_router
 from elsa.api.v1.knowledge import router as knowledge_router
@@ -32,7 +33,7 @@ from elsa.api.v1.me import router as me_router
 from elsa.api.v1.relay import router as relay_router
 from elsa.api.v1.session import router as session_router
 from elsa.api.v1.technical import router as technical_router
-from elsa.config import Environment, Settings, load_settings
+from elsa.config import AssistantExecutionMode, Environment, Settings, load_settings
 from elsa.container import Container
 from elsa.demo.seed import seed_demo_data
 from elsa.logging import RequestContextMiddleware, configure_logging
@@ -102,7 +103,12 @@ def create_app(settings: Settings | None = None, container: Container | None = N
     app.include_router(knowledge_router, prefix=API_V1_PREFIX)
     app.include_router(technical_router, prefix=API_V1_PREFIX)
     app.include_router(session_router, prefix=API_V1_PREFIX)
-    app.include_router(assistant_router, prefix=API_V1_PREFIX)
+    # Un solo router para la misma ruta (ADR 0033): en RELAY no existe la
+    # ejecución local, ni siquiera como respaldo.
+    if settings.assistant_execution_mode is AssistantExecutionMode.RELAY:
+        app.include_router(assistant_relay_router, prefix=API_V1_PREFIX)
+    else:
+        app.include_router(assistant_router, prefix=API_V1_PREFIX)
     app.include_router(assets_router, prefix=API_V1_PREFIX)
     app.include_router(contributions_router, prefix=API_V1_PREFIX)
     # Fail-closed (ADR 0031): sin relay habilitado no existe ninguna ruta de nodo.
@@ -121,6 +127,8 @@ def create_app(settings: Settings | None = None, container: Container | None = N
             "environment": settings.env.value,
             "auth_provider": settings.auth_provider.value,
             "permissions_backend": settings.permissions_backend.value,
+            "assistant_execution_mode": settings.assistant_execution_mode.value,
+            "relay_enabled": settings.relay_enabled,
         },
     )
     return app

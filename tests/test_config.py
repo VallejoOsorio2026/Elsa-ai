@@ -1,6 +1,7 @@
 """Tests de carga y validación de configuración."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -441,7 +442,7 @@ def test_chunking_limits_must_be_positive() -> None:
 # Modo de ejecución de assistant.ask (D2.4, ADR 0033)
 # ---------------------------------------------------------------------
 
-_RELAY_ON: dict[str, object] = {
+_RELAY_ON: dict[str, Any] = {
     "relay_enabled": True,
     "relay_node_id": "pc1-test",
     "relay_node_token_sha256": hash_node_token("synthetic-node-token-for-config-tests"),
