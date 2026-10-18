@@ -432,6 +432,7 @@ PC PAPELSA ── navegador / HTTPS ──► Render: relay/gateway (D2.2)
 | D2.2 | Relay/gateway en memoria en la app FastAPI (`src/elsa/relay/`, `src/elsa/api/v1/relay.py`, [ADR 0031](adr/0031-transporte-https-long-polling-relay-render-pc1-pilot-0-1.md)); apagado por defecto | **SÍ** | **NO**: no está desplegado en Render |
 | D2.3 | Agente de PC1, proceso aparte `python -m elsa.agent` (`src/elsa/agent/`, [ADR 0032](adr/0032-agente-pc1-outbound-pilot-0-1.md)) | **SÍ** | **NO**: no está conectado a ningún Render |
 | D2.4 | Integración usuario ↔ relay: la ruta pública `assistant.ask` en modo `relay` (`src/elsa/api/v1/assistant_relay.py`, [ADR 0033](adr/0033-modo-de-ejecucion-de-assistant-ask-local-o-relay.md)); `local` sigue siendo el default | **SÍ** | **NO**: Render real y PC1 real no están conectados |
+| D2.5 | Modo ELSA: supervisor de PC1 que arranca ELSA local y el agente en orden, informa del estado y los detiene (`src/elsa/pc1/`, `scripts/*-ElsaMode*.ps1`, [ADR 0034](adr/0034-modo-elsa-operativo-pc1-pilot-0-1.md), [runbook](pc1-modo-elsa-runbook.md)) | **SÍ** | **NO**: la conectividad con el relay no se verifica |
 
 **Hoy no hay acceso remoto funcionando.** La cadena completa —app pública en
 `relay`, relay, agente y ELSA local en `local`— está probada de extremo a
@@ -461,7 +462,8 @@ Reglas que la implementación hace cumplir:
   autentica (JWT y control de abuso) y **no** toca conocimiento, permisos ni
   Materiales: todo 403 de una pregunta viene de PC1. El resto de la API sigue
   sirviéndose en el proceso como antes; qué debe servir Render en `relay` queda
-  para D2.5. La respuesta del nodo se valida como
+  para un bloque posterior (D2.5 se dedicó al Modo ELSA de PC1). La respuesta
+  del nodo se valida como
   `AskResponse` antes de llegar al navegador y el `detail` del nodo nunca se
   expone. `relay` sin relay habilitado no arranca; la cabecera
   `X-Elsa-Relay-Hop` del agente impide la reentrada.
@@ -474,6 +476,31 @@ Reglas que la implementación hace cumplir:
 Las limitaciones aceptadas del piloto —poll perdido sin ACK, cancelación que
 no detiene trabajo ya iniciado, reinicio de Render, proxy corporativo,
 ocupación del puerto loopback— están en ADR 0031 §6 y ADR 0032 §3.
+
+### Modo ELSA en PC1 (D2.5)
+
+PC1 se opera con tres acciones —`Start-ElsaMode.ps1`, `Get-ElsaModeStatus.ps1`
+y `Stop-ElsaMode.ps1`— sobre un supervisor en primer plano
+(`python -m elsa.pc1`, [ADR 0034](adr/0034-modo-elsa-operativo-pc1-pilot-0-1.md)):
+
+```text
+START: preflight → ELSA local (127.0.0.1, local, sin relay) → readiness → agente → EN MARCHA
+STOP:  agente → ELSA local
+```
+
+- **Perfil PC1 forzado.** Modo `local`, relay propio deshabilitado y debug
+  apagado; el puerto sale de `ELSA_AGENT_LOCAL_BASE_URL` (IP exacta `127.0.0.1`).
+- **Readiness local, no conectividad.** El agente solo arranca si
+  `/health/ready` responde 200 (`ok` o `degraded`); la conexión con Render se
+  declara siempre «NO VERIFICADA».
+- **Propiedad por handle.** El supervisor solo detiene los procesos que lanzó;
+  nunca por un PID leído de archivo. En Windows, un Job Object con
+  `KILL_ON_JOB_CLOSE` impide hijos huérfanos si el supervisor muere.
+- **Instancia única** con un bloqueo del sistema operativo; un puerto ocupado
+  por un proceso ajeno hace fallar el arranque sin tocarlo.
+- **Sin reinicio automático.** Si un hijo termina, se detiene el otro.
+- **El token del nodo** solo llega al proceso del agente, por su entorno.
+- Phi/llama.cpp no forma parte del Modo ELSA: `assistant.ask` no lo usa.
 
 ## Qué no existe todavía (a propósito)
 

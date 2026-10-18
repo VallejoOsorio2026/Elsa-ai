@@ -287,6 +287,36 @@ Los plazos internos (backoff 1 s → 30 s, ritmo mínimo del poll vacío 1 s,
 reintentos de `/result` a 0,5/1/2 s con un máximo de 4 transmisiones, margen
 de entrega 2 s) son constantes del código, justificadas en el ADR 0032.
 
+## Modo ELSA en PC1 (D2.5)
+
+El Modo ELSA (`python -m elsa.pc1`, [ADR 0034](adr/0034-modo-elsa-operativo-pc1-pilot-0-1.md),
+[runbook](pc1-modo-elsa-runbook.md)) arranca ELSA local y el agente en orden.
+**No introduce variables nuevas**: lee las de ELSA y las del agente desde el
+`.env` de la raíz del repositorio y desde el entorno, y valida antes de arrancar
+nada que formen el **perfil PC1**:
+
+| Variable | Exigido por el Modo ELSA | Por qué |
+|---|---|---|
+| `ELSA_ASSISTANT_EXECUTION_MODE` | `local` | PC1 responde; nunca reenvía (ADR 0033). |
+| `ELSA_RELAY_ENABLED` | `false` | ELSA de PC1 no aloja un relay: menos superficie y sin recursión. |
+| `ELSA_DEBUG` | `false` | Regla 13. |
+| `ELSA_AGENT_LOCAL_BASE_URL` | `http://127.0.0.1:<puerto>`, con esa IP **exacta** y el puerto explícito | Es la **única** fuente del puerto de ELSA local. El agente admite cualquier IP de loopback; el Modo ELSA no, porque ELSA escucha solo en `127.0.0.1`. |
+| `ELSA_AGENT_RELAY_URL`, `ELSA_AGENT_NODE_ID` | Válidas según el agente (D2.3) | Se validan con la misma función que usa el agente. |
+
+Si algo no cumple, no se arranca ningún proceso y el mensaje nombra la variable
+sin repetir su valor. Los tres primeros valores se fijan además en el entorno
+del proceso de ELSA local, de modo que lo validado es lo que se ejecuta.
+
+El token del nodo sigue la regla del agente: `ELSA_AGENT_NODE_TOKEN` solo desde
+el entorno del proceso. Si no está y hay consola, el Modo ELSA lo pide sin eco,
+**después** de comprobar que no está en el archivo de configuración. Solo lo
+recibe el proceso del agente; a ELSA local se le entrega una copia del entorno
+sin esa variable. Nunca va en argumentos, archivos, `state.json` ni logs.
+
+El bind de ELSA local (`127.0.0.1`) es una constante del Modo ELSA, no una
+variable. El estado y los logs van a `%LOCALAPPDATA%\ELSA\mode\`, fuera del
+repositorio; sin `LOCALAPPDATA`, el Modo ELSA no arranca.
+
 ## Solo para tests
 
 | Variable | Descripción |

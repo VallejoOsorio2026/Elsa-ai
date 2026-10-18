@@ -250,8 +250,15 @@ operador ve un mensaje fijo y la ruta del log; nunca contenido del log ni trazas
 
 - `CTRL_BREAK_EVENT` exige que el supervisor tenga consola. Sin ella, la parada pasa
   al cierre forzado sobre el handle propio tras el plazo, y se informa como forzada.
-- Entre `Popen` y la asignación al Job Object hay una ventana mínima. uvicorn (sin
-  `--reload` ni `--workers`) y el agente no crean procesos nietos.
+- En un `.venv` de Windows, `python.exe` es un **lanzador** que crea el intérprete
+  real como hijo suyo: el handle que posee el supervisor es el del lanzador. El
+  intérprete hereda su grupo de procesos (le llega `CTRL_BREAK_EVENT`) y el
+  lanzador lo termina si él muere. Los tests de Windows comprueban la muerte del
+  **PID real del intérprete**, no la del lanzador, tras el cierre forzado, el
+  cierre del Job Object y la muerte del supervisor.
+- Entre `Popen` y la asignación al Job Object hay una ventana mínima. Fuera del
+  lanzador del venv, uvicorn (sin `--reload` ni `--workers`) y el agente no crean
+  procesos nietos.
 - Entre la comprobación del puerto y el bind de uvicorn hay una carrera. Si uvicorn
   no puede enlazar, termina, y readiness exige el hijo vivo antes y después del 200.
 - El token en el entorno del agente es legible por procesos del mismo usuario,
