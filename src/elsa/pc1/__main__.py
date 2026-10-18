@@ -129,8 +129,6 @@ def start(
                 "El último cierre de Modo ELSA no fue limpio. Se limpió su estado; "
                 "no se detuvo ningún proceso."
             )
-        rotate_logs(paths)
-        handler = _attach_supervisor_log(paths.log("supervisor"))
         out("Comprobando la configuración...")
         try:
             profile = check_profile(cwd / ".env", read_secret)
@@ -142,9 +140,14 @@ def start(
         except PreflightError as exc:
             out(f"No se puede iniciar Modo ELSA. {exc}")
             return EXIT_FAILED
+        # Se rota solo cuando de verdad se va a arrancar: un intento con la
+        # configuración mal no se lleva por delante el log de la ejecución anterior.
+        rotate_logs(paths)
+        handler = _attach_supervisor_log(paths.log("supervisor"))
         supervisor = supervisor_factory(profile=profile, paths=paths, cwd=cwd, reporter=out)
         return supervisor.run()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError):
+        # Ctrl+C (o fin de entrada) mientras se pedía el token.
         out("Inicio cancelado. No se inició ningún proceso.")
         return EXIT_FAILED
     finally:
@@ -171,7 +174,7 @@ def _age_seconds(timestamp: str) -> float | None:
 def _local_time(timestamp: str) -> str:
     try:
         return datetime.fromisoformat(timestamp).astimezone().strftime("%Y-%m-%d %H:%M:%S")
-    except ValueError:
+    except (ValueError, OverflowError, OSError):
         return "desconocido"
 
 
@@ -182,6 +185,9 @@ def _process_line(alive: bool, pid: int | None) -> str:
 
 
 def _supervisor_alive(paths: RuntimePaths) -> bool:
+    # Sin archivo de bloqueo no hay supervisor: no se crea (status solo lee).
+    if not paths.lock.exists():
+        return False
     lock = InstanceLock(paths.lock)
     if lock.acquire():
         lock.release()
@@ -294,11 +300,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     except RuntimeDirectoryError:
         _print("No se encontró la carpeta de datos locales del usuario (%LOCALAPPDATA%).")
         return EXIT_CONFIG
-    if args.command == "start":
-        return start(paths, Path.cwd(), read_secret=_secret_prompt())
-    if args.command == "status":
-        return status(paths)
-    return stop(paths)
+    try:
+        if args.command == "start":
+            return start(paths, Path.cwd(), read_secret=_secret_prompt())
+        if args.command == "status":
+            return status(paths)
+        return stop(paths)
+    except OSError:
+        # Carpeta de runtime o logs inaccesible (p. ej. un archivo bloqueado por otro
+        # programa). Mensaje fijo, sin traza: la ruta es conocida y no es secreta.
+        _print(
+            f"Modo ELSA no pudo usar su carpeta de datos locales ({paths.root}). "
+            "Compruebe que existe y que ningún programa tiene sus archivos bloqueados."
+        )
+        return EXIT_FAILED
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -147,6 +147,25 @@ def test_status_reports_a_stale_state_without_touching_it(
     assert paths.state.exists()  # status es de solo lectura
 
 
+def test_status_never_creates_the_lock_file(paths: RuntimePaths, out: list[str]) -> None:
+    paths.ensure()
+    assert cli.status(paths, out.append) == EXIT_OK
+    assert "Modo ELSA: DETENIDO" in out[0]
+    assert not paths.lock.exists()
+    assert sorted(p.name for p in paths.root.iterdir()) == ["logs"]
+
+
+def test_status_survives_an_impossible_start_time(
+    paths: RuntimePaths, out: list[str], live_supervisor: InstanceLock
+) -> None:
+    state = running_state(free_port())
+    write_state(
+        paths.state, RuntimeState(**{**state.__dict__, "started_at": "0001-01-01T00:00:00+14:00"})
+    )
+    assert cli.status(paths, out.append) == EXIT_OK
+    assert "Desde       : desconocido" in out[0]
+
+
 def test_status_running_and_ready_with_degradations(
     paths: RuntimePaths,
     out: list[str],
@@ -383,6 +402,58 @@ def test_start_with_invalid_configuration_starts_nothing(
     assert "ELSA_ASSISTANT_EXECUTION_MODE" in out[-1]
     assert recording.calls == []
     assert InstanceLock(paths.lock).acquire()  # el bloqueo se liberó
+
+
+def test_a_failed_preflight_does_not_rotate_the_previous_logs(
+    paths: RuntimePaths,
+    out: list[str],
+    tmp_path: Path,
+    clean_env: None,
+    recording: type[RecordingSupervisor],
+) -> None:
+    paths.ensure()
+    paths.log("supervisor").write_text("evidence of the last real run", encoding="utf-8")
+    write_env(tmp_path, free_port(), ELSA_DEBUG="true")
+    for _ in range(3):
+        assert cli.start(paths, tmp_path, out.append, supervisor_factory=recording) == EXIT_CONFIG
+    assert paths.log("supervisor").read_text(encoding="utf-8") == "evidence of the last real run"
+
+
+def test_ctrl_c_or_end_of_input_at_the_token_prompt_starts_nothing(
+    paths: RuntimePaths,
+    out: list[str],
+    tmp_path: Path,
+    clean_env: None,
+    recording: type[RecordingSupervisor],
+) -> None:
+    write_env(tmp_path, free_port())
+    for error in (KeyboardInterrupt, EOFError):
+
+        def prompt(error: type[BaseException] = error) -> str:
+            raise error
+
+        code = cli.start(
+            paths, tmp_path, out.append, read_secret=prompt, supervisor_factory=recording
+        )
+        assert code == EXIT_FAILED
+        assert out[-1] == "Inicio cancelado. No se inició ningún proceso."
+    assert recording.calls == []
+    assert InstanceLock(paths.lock).acquire()
+
+
+def test_main_reports_an_unusable_runtime_folder_without_a_trace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+
+    def unusable(self: RuntimePaths) -> None:
+        raise PermissionError(13, "locked by another program")
+
+    monkeypatch.setattr(RuntimePaths, "ensure", unusable)
+    assert cli.main(["start"]) == EXIT_FAILED
+    output = capsys.readouterr()
+    assert "no pudo usar su carpeta de datos locales" in output.out
+    assert "Traceback" not in output.out + output.err
 
 
 def test_start_without_token_and_without_console_fails_closed(
