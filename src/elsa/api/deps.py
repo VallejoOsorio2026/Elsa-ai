@@ -131,16 +131,15 @@ class VerifiedIdentity:
     token: str
 
 
-async def verified_identity(
-    request: Request,
-    token: str = Depends(bearer_token),
+async def admitted_identity(
     identity: AuthenticatedUser = Depends(authenticated_identity),
     container: Container = Depends(get_container),
-) -> AsyncIterator[VerifiedIdentity]:
-    """Aplica el control de abuso y comprueba el perfil en Materiales.
+) -> AsyncIterator[AuthenticatedUser]:
+    """Pasos 1 y 2: identidad autenticada y admitida por el control de abuso.
 
-    Es la base común de todo endpoint autenticado, incluido el bootstrap,
-    que todavía no tiene cuenta de ELSA sobre la que autorizar.
+    No consulta Materiales ni los permisos de ELSA. Es todo lo que hace Render
+    antes de encaminar una pregunta a PC1 (ADR 0033 §3); el resto de endpoints
+    sigue con :func:`verified_identity`.
     """
     verdict = await container.abuse_guard.acquire(
         user_id=identity.id,
@@ -164,13 +163,27 @@ async def verified_identity(
         )
 
     try:
-        profile = await _materials_profile(request, identity, token, container)
-        yield VerifiedIdentity(user=identity, profile=profile, token=token)
+        yield identity
     finally:
         await container.abuse_guard.release(
             user_id=identity.id,
             session_id=identity.session_id,
         )
+
+
+async def verified_identity(
+    request: Request,
+    token: str = Depends(bearer_token),
+    identity: AuthenticatedUser = Depends(admitted_identity),
+    container: Container = Depends(get_container),
+) -> VerifiedIdentity:
+    """Identidad admitida y, además, con perfil activo en Materiales.
+
+    Es la base común de todo endpoint autenticado, incluido el bootstrap,
+    que todavía no tiene cuenta de ELSA sobre la que autorizar.
+    """
+    profile = await _materials_profile(request, identity, token, container)
+    return VerifiedIdentity(user=identity, profile=profile, token=token)
 
 
 async def _materials_profile(
