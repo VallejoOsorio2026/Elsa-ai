@@ -24,7 +24,7 @@ windows_only = pytest.mark.skipif(sys.platform != "win32", reason="Windows-only 
 # Un hijo que avisa en su log de que ya instaló sus señales y espera.
 _SLEEPER = textwrap.dedent(
     """
-    import signal, sys, time
+    import os, signal, sys, time
     mode = sys.argv[1]
     if mode == "ignore":
         sig = getattr(signal, "SIGBREAK", signal.SIGINT)
@@ -34,7 +34,9 @@ _SLEEPER = textwrap.dedent(
             print("cleanup", flush=True)
             sys.exit(0)
         signal.signal(getattr(signal, "SIGBREAK", signal.SIGINT), stop)
-    print("ready", flush=True)
+    # El PID del intérprete real: en un venv de Windows, `python.exe` es un
+    # lanzador y el intérprete es su hijo.
+    print("ready", os.getpid(), flush=True)
     # Esperas cortas: en Windows `time.sleep` solo lo interrumpe SIGINT, y el
     # manejador de SIGBREAK no correría hasta que terminara la espera.
     for _ in range(1200):
@@ -67,6 +69,13 @@ def _wait_for_line(path: Path, line: str, timeout: float = 20.0) -> None:
             return
         time.sleep(0.05)
     raise AssertionError(f"{line!r} not seen in {path.name}")
+
+
+def _interpreter_pid(path: Path) -> int:
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("ready "):
+            return int(line.split()[1])
+    raise AssertionError(f"no interpreter pid in {path.name}")
 
 
 def test_launch_runs_the_exact_argv_with_the_exact_environment(tmp_path: Path) -> None:
@@ -105,6 +114,9 @@ def test_force_is_used_only_after_the_graceful_timeout(tmp_path: Path) -> None:
     assert child.stop(graceful_timeout=1.0) is StopOutcome.FORCED
     assert time.monotonic() - started >= 1.0
     assert child.returncode() is not None
+    if sys.platform == "win32":
+        # El kill sobre el handle propio también termina el intérprete real.
+        assert _windows_process_exits(_interpreter_pid(spec.log_path), 10_000)
 
 
 def test_stopping_an_exited_child_sends_nothing(tmp_path: Path) -> None:
@@ -188,9 +200,12 @@ def test_closing_the_job_object_terminates_its_children(tmp_path: Path) -> None:
     spec = _spec(tmp_path, "in-job", _SLEEPER, "plain")
     child = launch(spec, job)
     _wait_for_line(spec.log_path, "ready")
+    interpreter = _interpreter_pid(spec.log_path)
     assert child.returncode() is None
+    assert not _windows_process_exits(interpreter, 0)
     job.close()
     assert child.wait(10)
+    assert _windows_process_exits(interpreter, 10_000)
 
 
 @windows_only
@@ -217,8 +232,9 @@ def test_children_do_not_outlive_a_killed_supervisor(tmp_path: Path) -> None:
     )
     try:
         assert supervisor.stdout is not None
-        grandchild_pid = int(supervisor.stdout.readline().strip())
+        supervisor.stdout.readline()  # PID del lanzador: no basta comprobar ese
         _wait_for_line(tmp_path / "grandchild.log", "ready")
+        grandchild_pid = _interpreter_pid(tmp_path / "grandchild.log")
         assert not _windows_process_exits(grandchild_pid, 0)
         supervisor.kill()  # TerminateProcess: sin ningún código de limpieza
         supervisor.wait(10)

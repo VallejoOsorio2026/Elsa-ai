@@ -770,3 +770,36 @@ def test_real_processes_start_in_order_and_stop_in_order(
     assert FAKE_TOKEN not in all_runtime_text(paths)
     assert FAKE_TOKEN not in "\n".join(messages)
     _assert_no_connectivity_claims(messages)
+
+
+def test_the_real_elsa_app_runs_under_the_supervisor_and_shuts_down_gracefully(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, paths: RuntimePaths
+) -> None:
+    """uvicorn real con los flags del perfil PC1; agente falso. Sin red externa."""
+    port = free_port()
+    profile = make_profile(monkeypatch, tmp_path, port)
+    messages: list[str] = []
+
+    def reporter(message: str) -> None:
+        messages.append(message)
+        if "Modo ELSA: EN MARCHA" in message:
+            paths.stop_request.write_text("", encoding="utf-8")
+
+    environ = dict(os.environ)
+    environ[NODE_TOKEN_ENV] = FAKE_TOKEN
+    supervisor = Supervisor(
+        profile=profile,
+        paths=paths,
+        cwd=tmp_path,  # sin .env: solo el entorno de la prueba
+        reporter=reporter,
+        environ=environ,
+        commands=ChildCommands(elsa=elsa_command(port), agent=(sys.executable, "-c", FAKE_AGENT)),
+        timings=Timings(ready_timeout=90, ready_poll=0.2, agent_grace=0.5, watch_interval=0.1),
+    )
+    assert supervisor.run() == EXIT_OK
+    assert any(m.startswith("ELSA LOCAL: LISTA") for m in messages)
+    assert not any("se forzó su cierre" in m for m in messages)
+    elsa_log = paths.log(ELSA_NAME).read_text(encoding="utf-8", errors="replace")
+    assert f"Uvicorn running on http://127.0.0.1:{port}" in elsa_log
+    assert "Application shutdown complete" in elsa_log  # cierre ordenado de uvicorn
+    assert FAKE_TOKEN not in all_runtime_text(paths)
