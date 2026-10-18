@@ -433,6 +433,7 @@ PC PAPELSA ── navegador / HTTPS ──► Render: relay/gateway (D2.2)
 | D2.3 | Agente de PC1, proceso aparte `python -m elsa.agent` (`src/elsa/agent/`, [ADR 0032](adr/0032-agente-pc1-outbound-pilot-0-1.md)) | **SÍ** | **NO**: no está conectado a ningún Render |
 | D2.4 | Integración usuario ↔ relay: la ruta pública `assistant.ask` en modo `relay` (`src/elsa/api/v1/assistant_relay.py`, [ADR 0033](adr/0033-modo-de-ejecucion-de-assistant-ask-local-o-relay.md)); `local` sigue siendo el default | **SÍ** | **NO**: Render real y PC1 real no están conectados |
 | D2.5 | Modo ELSA: supervisor de PC1 que arranca ELSA local y el agente en orden, informa del estado y los detiene (`src/elsa/pc1/`, `scripts/*-ElsaMode*.ps1`, [ADR 0034](adr/0034-modo-elsa-operativo-pc1-pilot-0-1.md), [runbook](pc1-modo-elsa-runbook.md)) | **SÍ** | **NO**: la conectividad con el relay no se verifica |
+| D2.6 | Habilitación controlada Render ↔ PC1: servicio Render dedicado al relay, un solo worker, token efímero del nodo; su límite es **NODE ONLINE**, sin `assistant.ask` remoto ([ADR 0035](adr/0035-despliegue-piloto-relay-render-y-credencial-del-nodo.md), [runbook](render-pc1-conexion-real-runbook.md)) | — (configuración y operación; sin código) | **NO**: preparado, **no ejecutado** |
 
 **Hoy no hay acceso remoto funcionando.** La cadena completa —app pública en
 `relay`, relay, agente y ELSA local en `local`— está probada de extremo a
