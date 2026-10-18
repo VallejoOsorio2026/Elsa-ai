@@ -300,6 +300,21 @@ def assert_no_orphans(before: set[asyncio.Task[Any]]) -> None:
     assert leftover == set(), f"orphan tasks: {leftover}"
 
 
+_ROUTE_TASKS = frozenset({"_wait_for_disconnect", "RelayService.submit"})
+
+
+def route_tasks() -> list[str]:
+    """Tareas vivas de la ruta RELAY: la de ``submit`` y la del vigilante."""
+    names = (getattr(task.get_coro(), "__qualname__", "") for task in asyncio.all_tasks())
+    return sorted(name for name in names if name in _ROUTE_TASKS)
+
+
+def assert_no_route_tasks_left() -> None:
+    """Ni ``submit`` ni el vigilante siguen vivos. Sirve con un agente real
+    corriendo, cuyo long poll siempre está en vuelo y no es de la ruta."""
+    assert route_tasks() == []
+
+
 # ---------------------------------------------------------------------
 # Composición: un solo router por modo
 # ---------------------------------------------------------------------
@@ -668,6 +683,7 @@ async def test_a_client_disconnect_releases_the_request_and_sends_cancel(
     call = asyncio.create_task(public.app(_raw_scope(body), receive, send))
     request = await node.next_request()
     assert public.relay.store.pending_count == 1
+    assert route_tasks() == ["RelayService.submit", "_wait_for_disconnect"]
 
     gone.set()
     await asyncio.wait_for(call, timeout=3)
@@ -676,6 +692,7 @@ async def test_a_client_disconnect_releases_the_request_and_sends_cancel(
     assert isinstance(cancel, Cancel)
     assert cancel.request_id == request.request_id
     assert public.relay.store.pending_count == 0
+    assert_no_route_tasks_left()
     assert [entry["outcome"] for entry in logs.events("assistant_relayed")] == [
         "client_disconnected"
     ]

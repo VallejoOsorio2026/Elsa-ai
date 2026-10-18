@@ -39,7 +39,7 @@ from tests.conftest import ENGINEER_TOKEN, auth_header, make_test_settings
 from tests.test_api_assistant_relay import (
     LogLines,
     PublicApp,
-    assert_no_orphans,
+    assert_no_route_tasks_left,
     build_public_app,
     capture_elsa_logs,
 )
@@ -360,7 +360,6 @@ async def test_cancelling_the_public_request_cancels_the_call_in_pc1(
         await gate.wait()
 
     to_local.before = hold
-    before = asyncio.all_tasks()
     post = asyncio.create_task(_ask(user))
     await asyncio.wait_for(entered.wait(), 5)
 
@@ -374,7 +373,7 @@ async def test_cancelling_the_public_request_cancels_the_call_in_pc1(
     assert len(to_local.asks()) == 1
     gate.set()
     await asyncio.sleep(0)
-    assert_no_orphans(before)
+    assert_no_route_tasks_left()
 
 
 async def test_a_lost_session_fails_the_request_without_replay_and_the_agent_recovers(
