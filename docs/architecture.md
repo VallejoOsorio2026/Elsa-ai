@@ -435,10 +435,12 @@ PC PAPELSA ── navegador / HTTPS ──► Render: relay/gateway (D2.2)
 | D2.5 | Modo ELSA: supervisor de PC1 que arranca ELSA local y el agente en orden, informa del estado y los detiene (`src/elsa/pc1/`, `scripts/*-ElsaMode*.ps1`, [ADR 0034](adr/0034-modo-elsa-operativo-pc1-pilot-0-1.md), [runbook](pc1-modo-elsa-runbook.md)) | **SÍ** | **NO**: la conectividad con el relay no se verifica |
 | D2.6 | Habilitación controlada Render ↔ PC1: servicio Render dedicado al relay, un solo worker, token efímero del nodo; su límite es **NODE ONLINE**, sin `assistant.ask` remoto ([ADR 0035](adr/0035-despliegue-piloto-relay-render-y-credencial-del-nodo.md), [runbook](render-pc1-conexion-real-runbook.md)) | — (configuración y operación; sin código) | **SÍ, hasta NODE ONLINE**: ejecutado y validado en red real (estabilidad ≥ 20 min, OFFLINE/reconexión y restart de Render); sin `assistant.ask` remoto. Evidencia: [`d2-6-conexion-real-render-pc1-cierre.md`](d2-6-conexion-real-render-pc1-cierre.md) |
 
-**Hoy no hay acceso remoto funcionando.** La cadena completa —app pública en
-`relay`, relay, agente y ELSA local en `local`— está probada de extremo a
-extremo en memoria (`httpx.ASGITransport`, sin red); no existe despliegue real,
-secreto real del nodo ni conexión Render ↔ PC1.
+**Hoy no hay acceso remoto funcional para usuario final.** La cadena completa
+—app pública en `relay`, relay, agente y ELSA local en `local`— está probada de
+extremo a extremo en memoria (`httpx.ASGITransport`, sin red). D2.6 acreditó un
+despliegue piloto real y una conexión real Render ↔ PC1 hasta NODE ONLINE,
+incluyendo estabilidad, reconexión y recuperación ante restart; todavía no se ha
+habilitado ni validado `assistant.ask` remoto ni acceso desde PAPELSA.
 
 Reglas que la implementación hace cumplir:
 

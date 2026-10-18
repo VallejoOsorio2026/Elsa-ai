@@ -438,8 +438,9 @@ Todas las hizo el operador:
 ## 14. Git
 
 - Este cierre **crea** `docs/d2-6-conexion-real-render-pc1-cierre.md` y, con autorización
-  expresa del responsable, **modifica** solo la fila D2.6 de `docs/architecture.md`, en la rama
-  `claude/d2-6-cierre-documental`, creada desde `main` (`2054d26`).
+  expresa del responsable, **modifica** en `docs/architecture.md` solo la fila D2.6 y la frase
+  sobre el estado del acceso remoto, en la rama `claude/d2-6-cierre-documental`, creada desde
+  `main` (`2054d26`).
 - Ningún archivo de código, test, `render.yaml` ni otro documento cambia.
 - La ejecución de D2.6 no cambió el repositorio: al final de la sesión 1, `## main...origin/main`
   sin cambios (**HECHO MEDIDO por el operador**).
