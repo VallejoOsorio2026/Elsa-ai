@@ -457,9 +457,11 @@ Reglas que la implementación hace cumplir:
   se calcula una vez y se transmite como mucho 4 veces; `assistant.ask` nunca
   se reejecuta por un ACK perdido.
 - **Un modo por proceso, sin respaldo** (ADR 0033). `ELSA_ASSISTANT_EXECUTION_MODE`
-  monta una sola de las dos rutas de `assistant.ask`. En `relay` Render
+  monta una sola de las dos rutas de `assistant.ask`. En `relay` esa ruta
   autentica (JWT y control de abuso) y **no** toca conocimiento, permisos ni
-  Materiales: todo 403 viene de PC1. La respuesta del nodo se valida como
+  Materiales: todo 403 de una pregunta viene de PC1. El resto de la API sigue
+  sirviéndose en el proceso como antes; qué debe servir Render en `relay` queda
+  para D2.5. La respuesta del nodo se valida como
   `AskResponse` antes de llegar al navegador y el `detail` del nodo nunca se
   expone. `relay` sin relay habilitado no arranca; la cabecera
   `X-Elsa-Relay-Hop` del agente impide la reentrada.

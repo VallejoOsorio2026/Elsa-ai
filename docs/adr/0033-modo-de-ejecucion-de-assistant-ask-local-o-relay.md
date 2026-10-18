@@ -91,16 +91,30 @@ relay (ADR 0031) es protección de transporte, no una regla de negocio.
 ## 4. Validación de la respuesta del nodo
 
 `Response.result` es JSON opaco para el protocolo. Antes de devolverlo:
-`AskResponse.model_validate(result)` y, además, `domain` y `asset` del resultado
-deben coincidir con los pedidos. Si no: `503 local_node_invalid_response`, sin
-eco del contenido. Se devuelve el modelo validado, nunca el dict.
+`AskResponse.model_validate(result, strict=True)` —sin coerciones: `"true"` no
+es `True` ni `"9"` es `9`— y, además, `domain` y `asset` del resultado deben
+coincidir con los pedidos. Si no: `503 local_node_invalid_response`, sin eco del
+contenido. Se devuelve el modelo validado, nunca el dict.
+
+**Campos extra:** se descartan, no se rechazan. Es el contrato actual de
+`AskResponse` (no prohíbe extras) y no se cambia aquí: tolera un desfase de
+versión entre PC1 y Render, y nada no declarado cruza, porque el modelo los
+descarta al validar y `response_model` solo serializa lo declarado. Contrapartida
+aceptada: una deriva de contrato pasa en silencio. `strict` funciona porque
+todos los campos de `AskResponse` son tipos JSON nativos; un `datetime`, `UUID` o
+`Enum` futuro obligaría a revisarlo.
 
 ## 5. Errores públicos
 
-`RelayFailure.detail` **nunca** llega al cliente: solo elige una fila de una
-lista blanca. Los mensajes son fijos en Render. Todos los fallos del nodo son
-`503` con un código distinto, como el resto de dependencias del proyecto (en el
-repositorio no se usa 502 ni 504).
+`RelayFailure.detail` **nunca** llega al cliente ni a los logs: solo elige una
+fila de una lista blanca. Los mensajes son fijos en Render. Lo que tiene
+equivalente en el modo LOCAL conserva su estado (401, 403, 404, 422, 429); los
+fallos **del propio nodo** (fuera de línea, plazo, error, respuesta inválida,
+cancelación) son `503` con un código distinto, como el resto de dependencias
+del proyecto (en el repositorio no se usa 502 ni 504). Un `detail` desconocido
+cae en la fila genérica de su `ErrorCode`. Una excepción inesperada es el `500`
+genérico del proyecto y el evento `assistant_relayed` la registra como
+`internal_error`, no como cancelación.
 
 | ErrorCode | `detail` admitido | HTTP | `code` |
 |---|---|---|---|
@@ -153,6 +167,11 @@ Una ELSA de PC1 arrancada por error en `relay` no ejecuta nada: rechaza la
 petición del agente por la cabecera, y el usuario recibe «ELSA local no
 disponible».
 
+El rechazo ocurre antes de autenticar y emite un `WARNING` (`relay_hop_rejected`)
+sin datos de la petición: es la señal de una mala configuración. Un cliente
+anónimo puede generar esas líneas a voluntad, igual que ya genera la línea de
+acceso de cada petición; se acepta ese volumen.
+
 ## 8. Correlación y logs
 
 El `request_id` HTTP de Render ya acompaña todo log de la petición; la ruta
@@ -160,7 +179,15 @@ RELAY asigna el `relay_request_id` antes de `submit` y emite un único evento
 `assistant_relayed` con ambos, el resultado (`ok` o el `ErrorCode`), el código
 público, el estado HTTP y la duración. El agente envía `X-Request-ID =
 relay_request_id` a ELSA local, de modo que los logs de PC1 usan ese mismo id.
-Nunca se registran pregunta, token, resultado, `detail` ni adjuntos.
+Nunca se registran pregunta, token, resultado, `detail` ni adjuntos. Si el
+vigilante de desconexión falla, la espera termina igual (fail-safe) y se emite
+`disconnect_watcher_failed` con el tipo de error, nunca su texto.
+
+**Vida del token del usuario.** Render lo verifica una vez y lo entrega como
+`SecretStr` a `submit`; el relay lo suelta al despachar (`scrub_token`). Mientras
+dura la petición, la cadena sigue en la memoria del proceso (caché de
+dependencias de FastAPI y `scope` ASGI), igual que en el modo LOCAL: Python no
+permite borrarla. No se guarda ni se registra.
 
 ## Consecuencias
 
@@ -169,8 +196,22 @@ Nunca se registran pregunta, token, resultado, `detail` ni adjuntos.
 2. Render en RELAY no necesita conocimiento, permisos ni Materiales para
    responder; sí necesita verificar el JWT.
 3. Un usuario sin cuenta o sin alcance en PC1 recibe el 403 de PC1, no de Render.
-4. Reiniciar Render pierde las solicitudes en vuelo; no hay persistencia ni
+4. **Capacidad compartida (riesgo residual).** El relay admite como mucho
+   `ELSA_RELAY_MAX_PENDING` solicitudes vivas en total (16) y el control de abuso
+   limita a cada usuario a `ELSA_RATE_LIMIT_MAX_CONCURRENT_REQUESTS` simultáneas
+   (5), plaza que se conserva durante toda la espera. Render admite a toda
+   identidad autenticada, tenga o no cuenta en ELSA (eso lo decide PC1): con PC1
+   lento, cuatro cuentas pueden ocupar el relay y el resto recibe `503
+   local_node_unavailable` hasta que venzan los plazos. Memoria y solicitudes
+   siguen acotadas. Un cupo por usuario dentro del relay queda como decisión
+   futura explícita; en el piloto hay un solo usuario.
+5. **Solo `assistant.ask`.** Este ADR decide el modo de esa ruta. En `relay` el
+   resto de la API (`/me`, `/access`, `/admin`, `/knowledge`, `/technical`,
+   `/assets`, `/contributions`) y la siembra de datos demo siguen en el proceso,
+   como antes. Qué debe servir Render en `relay` frente a ADR 0029 §4 es materia
+   de D2.5 y de su propio ADR.
+6. Reiniciar Render pierde las solicitudes en vuelo; no hay persistencia ni
    *replay* (ADR 0031). Una solicitud en cola cuando el nodo cae espera una
    sesión nueva hasta su plazo (limitación aceptada en D2.2).
-5. Fuera de este ADR: despliegue real en Render, conexión real de PC1, login
+7. Fuera de este ADR: despliegue real en Render, conexión real de PC1, login
    definitivo y Modo ELSA (D2.5 en adelante).
