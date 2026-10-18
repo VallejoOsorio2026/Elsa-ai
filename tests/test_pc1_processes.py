@@ -193,6 +193,49 @@ def _windows_process_exits(pid: int, timeout_ms: int) -> bool:
         kernel32.CloseHandle(handle)
 
 
+def _windows_process_in_job(pid: int, job_handle: int) -> bool:
+    """`IsProcessInJob` sobre el PID dado. Solo consulta."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)  # noqa: B009
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.IsProcessInJob.argtypes = [
+        wintypes.HANDLE,
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.BOOL),
+    ]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    query_limited_information = 0x1000
+    handle = kernel32.OpenProcess(query_limited_information, False, pid)
+    assert handle, "process not found"
+    try:
+        result = wintypes.BOOL()
+        assert kernel32.IsProcessInJob(handle, job_handle, ctypes.byref(result))
+        return bool(result.value)
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+@windows_only
+def test_the_real_interpreter_behind_the_venv_launcher_is_inside_the_job(tmp_path: Path) -> None:
+    """La garantía no depende solo del PID que devuelve Popen (el lanzador del venv)."""
+    for attempt in range(5):
+        job = create_job_object()
+        assert job is not None
+        spec = _spec(tmp_path, f"in-job-{attempt}", _SLEEPER, "plain")
+        child = launch(spec, job)
+        try:
+            _wait_for_line(spec.log_path, "ready")
+            job_handle = getattr(job, "_handle")  # noqa: B009 - handle del job, solo lectura
+            assert _windows_process_in_job(child.pid, job_handle)
+            assert _windows_process_in_job(_interpreter_pid(spec.log_path), job_handle)
+        finally:
+            job.close()
+            child.wait(10)
+
+
 @windows_only
 def test_closing_the_job_object_terminates_its_children(tmp_path: Path) -> None:
     job = create_job_object()
