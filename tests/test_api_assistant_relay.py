@@ -18,7 +18,7 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator, Iterator, MutableMapping
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from typing import Any, cast
 from uuid import UUID, uuid4
@@ -112,12 +112,13 @@ def relay_settings(**overrides: object) -> Any:
     return make_test_settings(**values)
 
 
-def build_public_app(**overrides: object) -> PublicApp:
+def build_public_app(auth: FakeAuthAdapter | None = None, **overrides: object) -> PublicApp:
+    """Render en RELAY: relay real y trampas en conocimiento, permisos y Materiales."""
     settings = relay_settings(**overrides)
     knowledge = Tripwire("knowledge")
     permissions = Tripwire("permissions")
     identity = Tripwire("materials_identity")
-    auth = FakeAuthAdapter()
+    auth = auth or FakeAuthAdapter()
     calls: list[str] = []
 
     def inventory(_token: str) -> MaterialsPort:
@@ -258,7 +259,9 @@ class LogLines:
         return [entry for entry in parsed if entry.get("event") == name]
 
 
-class _Collect(logging.Handler):
+class CollectJsonLines(logging.Handler):
+    """Formatea cada registro al emitirse, con el ``request_id`` de su contexto."""
+
     def __init__(self, sink: LogLines) -> None:
         super().__init__(logging.DEBUG)
         self.setFormatter(JsonFormatter())
@@ -268,11 +271,12 @@ class _Collect(logging.Handler):
         self._sink.lines.append(self.format(record))
 
 
-@pytest.fixture
-def logs(public: PublicApp) -> Iterator[LogLines]:
-    """Líneas JSON tal como saldrían, formateadas en el momento (con su request_id)."""
+@contextmanager
+def capture_elsa_logs() -> Iterator[LogLines]:
+    """Líneas JSON del logger ``elsa`` tal como saldrían. Tras crear las apps:
+    ``create_app`` reinicia los handlers de ese logger."""
     sink = LogLines()
-    handler = _Collect(sink)
+    handler = CollectJsonLines(sink)
     logger = logging.getLogger("elsa")
     previous = logger.level
     logger.addHandler(handler)
@@ -282,6 +286,12 @@ def logs(public: PublicApp) -> Iterator[LogLines]:
     finally:
         logger.removeHandler(handler)
         logger.setLevel(previous)
+
+
+@pytest.fixture
+def logs(public: PublicApp) -> Iterator[LogLines]:
+    with capture_elsa_logs() as sink:
+        yield sink
 
 
 def assert_no_orphans(before: set[asyncio.Task[Any]]) -> None:
