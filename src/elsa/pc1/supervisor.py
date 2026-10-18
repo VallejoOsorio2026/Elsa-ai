@@ -343,6 +343,15 @@ class Supervisor:
             _logger.info("stop_requested", extra={"source": "ctrl_c"})
             self._report("Parada solicitada con Ctrl+C.")
             code = EXIT_OK
+        except Exception as exc:
+            # Solo el tipo: el texto de una excepción podría llevar datos. Sin traza
+            # en la consola; los hijos se detienen igual, en orden.
+            _logger.error("supervisor_crashed", extra={"error": type(exc).__name__})
+            self._report(
+                "Modo ELSA se detiene por un error interno inesperado. "
+                f"Log: {self._paths.log('supervisor')}"
+            )
+            code = EXIT_FAILED
         finally:
             self._shutdown()
             _logger.info("supervisor_stopped", extra={"exit_code": code})
@@ -430,6 +439,7 @@ class Supervisor:
                     f"Log: {self._paths.log(ELSA_NAME)}"
                 )
                 return readiness
+            self._write_state()  # latido: `status` no debe verlo como colgado
             self._sleep(self._timings.ready_poll)
 
     def _agent_survives_grace(self, elsa: ChildProcess, agent: ChildProcess) -> bool | None:
@@ -442,6 +452,7 @@ class Supervisor:
                 if code is not None:
                     self._child_exited(name, code, starting=True)
                     return False
+            self._write_state()
             self._sleep(self._timings.watch_interval)
         return True
 
@@ -476,31 +487,46 @@ class Supervisor:
         self._write_state()
 
     def _shutdown(self) -> None:
+        """Parada *best effort*: un paso que falla no impide los siguientes.
+
+        Lo que no se pudiera detener en orden lo termina el cierre del Job Object.
+        """
         with _ignoring_interrupts():
-            children = [c for c in (self._agent, self._elsa) if c is not None]
-            if children:
-                self._phase = Phase.STOPPING
-                self._write_state()
-                self._report("Deteniendo Modo ELSA...")
-            for child, timeout in (
-                (self._agent, self._timings.agent_stop),
-                (self._elsa, self._timings.elsa_stop),
-            ):
-                if child is None:
-                    continue
-                outcome = child.stop(timeout)
-                _logger.info("child_stopped", extra={"child": child.name, "outcome": outcome.value})
-                if outcome is StopOutcome.FORCED:
-                    self._report(
-                        f"{self._label(child.name)} no respondió a la parada ordenada en "
-                        f"{timeout:.0f} s; se forzó su cierre."
-                    )
-            if self._job is not None:
-                self._job.close()
-                self._job = None
-            clean_stale(self._paths)
-            self._agent = self._elsa = None
-            self._report("Modo ELSA detenido.")
+            try:
+                if self._agent is not None or self._elsa is not None:
+                    self._phase = Phase.STOPPING
+                    self._write_state()
+                    self._report("Deteniendo Modo ELSA...")
+                for child, timeout in (
+                    (self._agent, self._timings.agent_stop),
+                    (self._elsa, self._timings.elsa_stop),
+                ):
+                    if child is not None:
+                        self._write_state()  # latido antes de cada espera
+                        self._stop_child(child, timeout)
+            finally:
+                if self._job is not None:
+                    job, self._job = self._job, None
+                    job.close()
+                try:
+                    clean_stale(self._paths)
+                except OSError:
+                    _logger.warning("state_cleanup_failed")
+                self._agent = self._elsa = None
+                self._report("Modo ELSA detenido.")
+
+    def _stop_child(self, child: ChildProcess, timeout: float) -> None:
+        try:
+            outcome = child.stop(timeout)
+        except OSError:
+            _logger.error("child_stop_failed", extra={"child": child.name})
+            return
+        _logger.info("child_stopped", extra={"child": child.name, "outcome": outcome.value})
+        if outcome is StopOutcome.FORCED:
+            self._report(
+                f"{self._label(child.name)} no respondió a la parada ordenada en "
+                f"{timeout:.0f} s; se forzó su cierre."
+            )
 
     # -- apoyo --------------------------------------------------------------
 
@@ -551,7 +577,15 @@ class Supervisor:
         )
 
     def _write_state(self) -> None:
+        """El estado es informativo: si no se puede escribir (p. ej. el archivo está
+        abierto por un `status` o el antivirus), se registra y se sigue."""
         elsa, agent = self._elsa, self._agent
+        try:
+            self._write(elsa, agent)
+        except OSError:
+            _logger.warning("state_write_failed")
+
+    def _write(self, elsa: ChildProcess | None, agent: ChildProcess | None) -> None:
         write_state(
             self._paths.state,
             RuntimeState(

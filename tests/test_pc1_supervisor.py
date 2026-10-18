@@ -110,6 +110,7 @@ class World:
     messages: list[str] = field(default_factory=list)
     states: list[Phase] = field(default_factory=list)
     """Cada fase que el supervisor escribe en state.json, en orden."""
+    writes: list[RuntimeState] = field(default_factory=list)
 
     def clock(self) -> float:
         return self.now
@@ -224,6 +225,7 @@ def harness(
 
         def recording_write(path: Path, state: RuntimeState) -> None:
             world.states.append(state.phase)
+            world.writes.append(state)
             write_state(path, state)
 
         monkeypatch.setattr("elsa.pc1.supervisor.write_state", recording_write)
@@ -437,6 +439,105 @@ def test_the_heartbeat_is_refreshed_while_running(harness: Callable[..., Harness
     h.world.at(40, h.world.request_stop)
     h.run()
     assert len(set(beats)) == 3
+
+
+def _ticking_now() -> Callable[[], str]:
+    moments = (
+        f"2026-10-18T10:{second // 60:02d}:{second % 60:02d}+00:00" for second in range(3600)
+    )
+    return lambda: next(moments)
+
+
+def test_the_heartbeat_is_refreshed_while_starting_and_while_stopping(
+    harness: Callable[..., Harness],
+) -> None:
+    """Un arranque o una parada largos no deben parecer un supervisor colgado."""
+    h = harness(*([NOT_READY] * 10), READY)
+    h.supervisor._now = _ticking_now()
+    h.world.at(40, h.world.request_stop)
+    assert h.run() == EXIT_OK
+    starting = {w.heartbeat_at for w in h.world.writes if w.phase is Phase.STARTING}
+    stopping = [w for w in h.world.writes if w.phase is Phase.STOPPING]
+    assert len(starting) >= 10
+    assert len({w.heartbeat_at for w in stopping}) >= 3  # al entrar y antes de cada parada
+
+
+# ---------------------------------------------------------------------------
+# Robustez: estado no escribible y errores inesperados
+# ---------------------------------------------------------------------------
+
+
+def test_state_writes_that_fail_never_stop_the_node(
+    harness: Callable[..., Harness], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """En Windows, `os.replace` falla si un `status` tiene state.json abierto."""
+    h = harness(READY)
+    calls: list[Phase] = []
+
+    def flaky(path: Path, state: RuntimeState) -> None:
+        calls.append(state.phase)
+        if len(calls) % 2 == 0:
+            raise PermissionError(13, "file in use")
+        write_state(path, state)
+
+    monkeypatch.setattr("elsa.pc1.supervisor.write_state", flaky)
+    h.world.at(40, h.world.request_stop)
+    assert h.run() == EXIT_OK
+    assert Phase.RUNNING in calls
+    assert h.world.events[-3:] == [f"stop:{AGENT_NAME}", f"stop:{ELSA_NAME}", "job:closed"]
+    assert h.world.messages[-1] == "Modo ELSA detenido."
+
+
+def test_shutdown_stops_children_in_order_even_if_no_state_can_be_written(
+    harness: Callable[..., Harness], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    h = harness(READY)
+
+    def broken(*args: object) -> None:
+        raise PermissionError(13, "file in use")
+
+    monkeypatch.setattr("elsa.pc1.supervisor.write_state", broken)
+    monkeypatch.setattr("elsa.pc1.supervisor.clean_stale", broken)
+    h.world.at(20, h.world.request_stop)
+    assert h.run() == EXIT_OK
+    assert h.world.events[-3:] == [f"stop:{AGENT_NAME}", f"stop:{ELSA_NAME}", "job:closed"]
+    assert h.world.messages[-1] == "Modo ELSA detenido."
+
+
+def test_an_unexpected_error_stops_everything_in_order_without_a_trace(
+    harness: Callable[..., Harness],
+) -> None:
+    h = harness(READY)
+    calls = [0]
+
+    def probe() -> Readiness:
+        calls[0] += 1
+        if calls[0] > 2:
+            raise RuntimeError(f"unexpected {FAKE_TOKEN}")
+        return READY
+
+    h.supervisor._probe = probe
+    assert h.run() == EXIT_FAILED
+    assert h.world.events[-3:] == [f"stop:{AGENT_NAME}", f"stop:{ELSA_NAME}", "job:closed"]
+    text = "\n".join(h.world.messages)
+    assert "error interno inesperado" in text
+    assert str(h.world.paths.log("supervisor")) in text
+    assert FAKE_TOKEN not in text and "RuntimeError" not in text
+
+
+def test_a_child_whose_stop_fails_does_not_prevent_stopping_the_other(
+    harness: Callable[..., Harness],
+) -> None:
+    h = harness(READY)
+
+    def failing_stop(graceful_timeout: float) -> StopOutcome:
+        h.world.events.append(f"stop:{AGENT_NAME}")
+        raise OSError("cannot signal")
+
+    h.launcher.on_start[AGENT_NAME] = lambda child: setattr(child, "stop", failing_stop)
+    h.world.at(20, h.world.request_stop)
+    assert h.run() == EXIT_OK
+    assert h.world.events[-3:] == [f"stop:{AGENT_NAME}", f"stop:{ELSA_NAME}", "job:closed"]
 
 
 # ---------------------------------------------------------------------------
@@ -803,3 +904,75 @@ def test_the_real_elsa_app_runs_under_the_supervisor_and_shuts_down_gracefully(
     assert f"Uvicorn running on http://127.0.0.1:{port}" in elsa_log
     assert "Application shutdown complete" in elsa_log  # cierre ordenado de uvicorn
     assert FAKE_TOKEN not in all_runtime_text(paths)
+
+
+# Corre dentro de una consola propia y oculta. Reactiva Ctrl+C como en la consola
+# normal de un operador (un proceso puede heredarlo deshabilitado) y, al quedar EN
+# MARCHA, genera un Ctrl+C real para toda esa consola.
+_CTRL_C_SUPERVISOR = textwrap.dedent(
+    """
+    import ctypes, json, os, sys
+    from pathlib import Path
+    import pytest
+    from tests.test_pc1_supervisor import (
+        FAKE_TOKEN, fake_commands, free_port, log_records, make_profile,
+    )
+    from elsa.agent.config import NODE_TOKEN_ENV
+    from elsa.pc1.runtime import RuntimePaths
+    from elsa.pc1.supervisor import AGENT_NAME, ELSA_NAME, Supervisor, Timings
+
+    work, result = Path(sys.argv[1]), Path(sys.argv[2])
+    ctypes.windll.kernel32.SetConsoleCtrlHandler(None, False)
+    port = free_port()
+    profile = make_profile(pytest.MonkeyPatch(), work, port)
+    paths = RuntimePaths(work / "runtime")
+    paths.ensure()
+    messages = []
+
+    def reporter(message):
+        messages.append(message)
+        if "Modo ELSA: EN MARCHA" in message:
+            ctypes.windll.kernel32.GenerateConsoleCtrlEvent(0, 0)  # CTRL_C_EVENT
+
+    environ = dict(os.environ)
+    environ[NODE_TOKEN_ENV] = FAKE_TOKEN
+    code = Supervisor(
+        profile=profile, paths=paths, cwd=work, reporter=reporter, environ=environ,
+        commands=fake_commands(port),
+        timings=Timings(ready_poll=0.1, agent_grace=0.5, watch_interval=0.1),
+    ).run()
+    result.write_text(json.dumps({
+        "exit": code, "messages": messages,
+        "elsa": log_records(paths.log(ELSA_NAME)),
+        "agent": log_records(paths.log(AGENT_NAME)),
+    }), encoding="utf-8")
+    """
+)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="real console Ctrl+C is Windows-only")
+def test_a_real_ctrl_c_reaches_only_the_supervisor_which_stops_in_order(tmp_path: Path) -> None:
+    import subprocess
+
+    result = tmp_path / "result.json"
+    startupinfo = getattr(subprocess, "STARTUPINFO")()  # noqa: B009 - solo Windows
+    startupinfo.dwFlags |= getattr(subprocess, "STARTF_USESHOWWINDOW")  # noqa: B009
+    startupinfo.wShowWindow = 0  # ventana oculta
+    child = subprocess.Popen(
+        [sys.executable, "-c", _CTRL_C_SUPERVISOR, str(tmp_path), str(result)],
+        cwd=Path(__file__).resolve().parent.parent,
+        creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+        startupinfo=startupinfo,
+    )
+    try:
+        assert child.wait(timeout=90) == 0
+    finally:
+        if child.poll() is None:
+            child.kill()
+    report = json.loads(result.read_text(encoding="utf-8"))
+    assert report["exit"] == EXIT_OK
+    assert "Parada solicitada con Ctrl+C." in report["messages"]
+    # Los hijos no recibieron el Ctrl+C: cada uno hizo su limpieza al recibir su
+    # CTRL_BREAK, primero el agente y después ELSA.
+    assert report["agent"][-1]["cleanup"] < report["elsa"][-1]["cleanup"]
+    assert report["messages"][-1] == "Modo ELSA detenido."
