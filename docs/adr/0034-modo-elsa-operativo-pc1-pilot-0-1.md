@@ -173,8 +173,14 @@ supervisor libere el bloqueo. Ctrl+C en la ventana tiene el mismo efecto.
 ```text
 agente  → CTRL_BREAK_EVENT, espera hasta 10 s → si no sale, kill sobre su handle
 ELSA    → CTRL_BREAK_EVENT, espera hasta 20 s → si no sale, kill sobre su handle
-→ borrar state.json y stop.request → cerrar Job Object → liberar bloqueo
+→ cerrar Job Object → borrar state.json y stop.request → liberar bloqueo
 ```
+
+La parada es *best effort*: si un paso falla (por ejemplo, no se puede escribir
+`state.json` o no se puede señalar un hijo), los siguientes se ejecutan igual, y lo
+que no se pudiera detener en orden lo termina el cierre del Job Object. Un error
+interno inesperado del supervisor también pasa por esta parada, con un mensaje fijo
+y la ruta de `supervisor.log`; el log registra solo el tipo del error.
 
 Los hijos se crean en su propio grupo de procesos: el Ctrl+C del operador llega
 solo al supervisor, que es quien decide el orden.
@@ -206,8 +212,16 @@ cuanto readiness se recupera.
 | `DETENIÉNDOSE` | Parada ordenada en curso |
 | `DETENIDO` | No hay supervisor (bloqueo libre) |
 
-`status` es de solo lectura. Lee `state.json`, comprueba el bloqueo y sondea
-readiness por su cuenta.
+`status` es de solo lectura: no crea ni modifica archivos (sin `supervisor.lock`
+informa `DETENIDO`). Lee `state.json`, sondea readiness por su cuenta y, para saber
+si hay supervisor, intenta tomar el bloqueo y lo suelta al instante; un `start`
+que coincida exactamente en ese instante falla cerrado con código 3.
+
+El supervisor renueva el latido de `state.json` en todas las fases: en cada sondeo
+del arranque, durante la gracia del agente, cada 5 s en marcha y antes de cada
+espera de la parada. Si no puede escribir el archivo (en Windows, `os.replace`
+falla mientras otro proceso lo tiene abierto), lo registra y sigue: el estado es
+informativo y nunca detiene el nodo.
 
 ## 10. Secretos
 
@@ -215,9 +229,12 @@ readiness por su cuenta.
   consola, desde `getpass` (sin eco). Antes de pedirlo se comprueba —con la misma
   función del agente— que el token **no** está en el archivo de configuración: el
   fail-closed de D2.3 se conserva.
-- El token vive en la memoria del supervisor y en el entorno del hijo agente. El
-  hijo ELSA recibe una copia del entorno con la variable **eliminada
-  explícitamente**.
+- El token vive en la memoria del supervisor (`SecretStr` del perfil) y en el
+  entorno del hijo agente. Un token pedido por `getpass` se valida con las reglas
+  de formato del agente **sin escribirlo en `os.environ`**: no queda en el bloque
+  de entorno del supervisor ni lo heredaría otro subproceso. El hijo ELSA recibe una
+  copia del entorno con la variable **eliminada explícitamente**, por si venía del
+  entorno padre.
 - Nunca en argv, `.env`, `state.json` (esquema cerrado por lista blanca), logs ni
   mensajes. Los errores de configuración se muestran por nombre de variable, nunca
   por valor ni con `str(exc)`.
@@ -256,13 +273,23 @@ operador ve un mensaje fijo y la ruta del log; nunca contenido del log ni trazas
   lanzador lo termina si él muere. Los tests de Windows comprueban la muerte del
   **PID real del intérprete**, no la del lanzador, tras el cierre forzado, el
   cierre del Job Object y la muerte del supervisor.
-- Entre `Popen` y la asignación al Job Object hay una ventana mínima. Fuera del
-  lanzador del venv, uvicorn (sin `--reload` ni `--workers`) y el agente no crean
-  procesos nietos.
-- Entre la comprobación del puerto y el bind de uvicorn hay una carrera. Si uvicorn
-  no puede enlazar, termina, y readiness exige el hijo vivo antes y después del 200.
+- Entre `Popen` y la asignación al Job Object hay una ventana mínima. Medido en
+  Windows (`IsProcessInJob`, cubierto por un test): el intérprete real que crea el
+  lanzador queda dentro del Job Object; si alguna vez naciera antes de la
+  asignación, lo seguiría terminando el lanzador al morir. Fuera del lanzador,
+  uvicorn (sin `--reload` ni `--workers`) y el agente no crean procesos nietos.
+- Entre la comprobación del puerto y el bind de uvicorn hay una carrera. Si un
+  proceso local ajeno toma el puerto en ese instante y responde a `/health/ready`
+  con el mismo ambiente mientras uvicorn aún importa la aplicación, ELSA podría
+  darse por lista; uvicorn no podría enlazar y terminaría, y el supervisor lo
+  detecta en la gracia del agente o en la vigilancia y detiene todo. Exige un
+  proceso malicioso en el mismo equipo; el relay real aún no está conectado.
+- Si `stop` escribe `stop.request` justo entre el bloqueo y la limpieza de residuos
+  de un `start`, la petición se descarta como residual: `stop` espera 60 s y pide
+  cerrar la ventana. Ventana muy estrecha; el resultado es seguro.
 - El token en el entorno del agente es legible por procesos del mismo usuario,
-  igual que al lanzar el agente a mano.
+  igual que al lanzar el agente a mano. El hijo agente hereda además el resto del
+  entorno de la sesión (no hay lista blanca de variables en Pilot 0.1).
 - El log de ELSA puede contener trazas de excepciones. Está en el perfil local del
   usuario y el runbook prohíbe compartirlo sin revisarlo.
 
