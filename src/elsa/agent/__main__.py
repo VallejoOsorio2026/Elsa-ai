@@ -6,9 +6,14 @@ Los parámetros no sensibles se leen del entorno y del archivo indicado
 (``.env`` por defecto). El token del nodo **solo** se acepta desde la variable
 de entorno del proceso ``ELSA_AGENT_NODE_TOKEN``.
 
-Códigos de salida: ``0`` al detenerse con Ctrl+C; ``2`` si la configuración no
-es válida o el relay rechaza la credencial o el protocolo (no se reintenta en
-bucle); cualquier otro valor es un fallo inesperado.
+Códigos de salida: ``0`` al detenerse con Ctrl+C (o Ctrl+Break en Windows); ``2``
+si la configuración no es válida o el relay rechaza la credencial o el protocolo
+(no se reintenta en bucle); cualquier otro valor es un fallo inesperado.
+
+En Windows, ``SIGBREAK`` sigue el mismo camino que Ctrl+C. Es la única señal que
+el supervisor del Modo ELSA puede enviar a este proceso en concreto (ADR 0034
+§7); sin este manejador, la acción por defecto lo terminaría sin ejecutar los
+``finally`` del agente.
 """
 
 from __future__ import annotations
@@ -16,8 +21,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import signal
 import sys
 from collections.abc import Sequence
+from types import FrameType
 
 import httpx
 
@@ -75,8 +82,33 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _break_as_interrupt(signum: int, frame: FrameType | None) -> None:
+    """Trata ``SIGBREAK`` como Ctrl+C.
+
+    Dentro de ``asyncio.run`` el manejador de SIGINT es el del runner, que cancela
+    la tarea principal: los ``finally`` del agente y de ``run_agent`` se ejecutan
+    y ``asyncio.run`` termina con ``KeyboardInterrupt``. Fuera de él, el
+    manejador por defecto lanza ``KeyboardInterrupt`` directamente.
+    """
+    handler = signal.getsignal(signal.SIGINT)
+    if callable(handler):
+        handler(signal.SIGINT, frame)
+    else:
+        raise KeyboardInterrupt
+
+
+def install_break_handler() -> bool:
+    """Instala el manejador de ``SIGBREAK`` si existe (solo Windows)."""
+    sigbreak = getattr(signal, "SIGBREAK", None)
+    if sigbreak is None:
+        return False
+    signal.signal(sigbreak, _break_as_interrupt)
+    return True
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    install_break_handler()
     try:
         config = load_agent_config(args.env_file)
     except AgentConfigurationError as exc:
