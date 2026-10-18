@@ -7,12 +7,14 @@ import httpx
 import pytest
 
 from elsa.agent.local_client import (
+    RELAY_HOP_HEADER,
     ElsaLocalClient,
     LocalFailure,
     LocalSuccess,
     UnsafePathSegmentError,
     build_ask_path,
 )
+from elsa.api.v1 import assistant_relay
 from elsa.relay.protocol import AttachmentMeta, ErrorCode
 from elsa.relay.service import MAX_RESPONSE_WIRE_BYTES
 from tests.agent_fakes import (
@@ -122,6 +124,7 @@ async def test_the_request_is_exactly_assistant_ask(
     assert sent.raw_path == "/api/v1/assistant/mantenimiento/Prensa%202/ask"
     assert sent.headers["authorization"] == f"Bearer {USER_TOKEN}"
     assert sent.headers["x-request-id"] == str(request.request_id)
+    assert sent.headers["x-elsa-relay-hop"] == "1"
     assert sent.json == {
         "question": QUESTION,
         "attachments": [{"filename": ATTACHMENT_NAME, "byte_size": 10, "content_type": None}],
@@ -129,6 +132,11 @@ async def test_the_request_is_exactly_assistant_ask(
     # Nada del nodo llega a ELSA.
     assert "x-elsa-node-token" not in sent.headers
     assert NODE_TOKEN not in str(sent.headers) and NODE_TOKEN.encode() not in sent.body
+
+
+def test_the_hop_header_is_the_one_the_relay_route_rejects() -> None:
+    """El agente no importa la API (ADR 0032 §2.1): el nombre se repite y se comprueba."""
+    assert RELAY_HOP_HEADER == assistant_relay.RELAY_HOP_HEADER == "X-Elsa-Relay-Hop"
 
 
 # ---------------------------------------------------------------------------
