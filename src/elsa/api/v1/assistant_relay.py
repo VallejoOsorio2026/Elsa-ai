@@ -196,7 +196,14 @@ def _validation_error() -> ApiError:
 
 
 def validate_node_result(result: dict[str, Any], *, domain: str, asset: str) -> AskResponse:
-    """El resultado opaco del nodo, solo si cumple :class:`AskResponse` y es del activo pedido."""
+    """El resultado opaco del nodo, solo si cumple :class:`AskResponse` y es del activo pedido.
+
+    ``strict`` impide coerciones (``"true"`` → ``True``, ``"9"`` → ``9``). Funciona
+    porque hoy todos los campos de ``AskResponse`` son tipos JSON nativos: si se
+    añadiera un ``datetime``, ``UUID`` o ``Enum``, habría que revisar esta llamada
+    (el extremo a extremo con una respuesta real lo detectaría). Los campos extra
+    se descartan al validar y ``response_model`` solo serializa los declarados.
+    """
     try:
         answer = AskResponse.model_validate(result, strict=True)
     except ValidationError:
@@ -255,8 +262,24 @@ async def _submit_until_disconnect(
     watcher = asyncio.create_task(_wait_for_disconnect(request))
     try:
         await asyncio.wait({submit_task, watcher}, return_when=asyncio.FIRST_COMPLETED)
-        return submit_task.result() if submit_task.done() else None
+        if submit_task.done():
+            return submit_task.result()
+        if not watcher.cancelled() and watcher.exception() is not None:
+            # Fail-safe: sin vigilancia fiable no se sigue esperando, pero no se
+            # disfraza de desconexión. Solo el tipo: nunca el texto.
+            _logger.warning(
+                "disconnect watcher failed",
+                extra={
+                    "event": "disconnect_watcher_failed",
+                    "error": type(watcher.exception()).__name__,
+                },
+            )
+        return None
     finally:
+        # La limpieza no depende del escudo: ambas tareas ya quedan canceladas
+        # aquí, y eso basta para que el relay libere la solicitud. El escudo solo
+        # evita que la cancelación de anyio (task group de BaseHTTPMiddleware)
+        # interrumpa la recogida, para no dejar tareas sin esperar.
         submit_task.cancel()
         watcher.cancel()
         with anyio.CancelScope(shield=True):
@@ -278,7 +301,7 @@ async def ask_via_relay(
     params = _ask_params(domain, asset, payload)
     relay_request_id = uuid4()
     started = time.perf_counter()
-    outcome = "cancelled"
+    outcome = "internal_error"
     error: ApiError | None = None
     try:
         result = await _submit_until_disconnect(
@@ -302,6 +325,9 @@ async def ask_via_relay(
                 outcome = "ok"
                 return answer
         raise error
+    except asyncio.CancelledError:
+        outcome = "cancelled"
+        raise
     finally:
         _log_relayed(relay_request_id, outcome, error, started)
 

@@ -29,7 +29,7 @@ from fastapi import FastAPI
 from pydantic import SecretStr
 
 from elsa.adapters.fake_auth import FakeAuthAdapter
-from elsa.api.v1 import assistant
+from elsa.api.v1 import assistant, assistant_relay
 from elsa.api.v1.assistant import AskResponse
 from elsa.api.v1.assistant_relay import RELAY_HOP_HEADER, public_error_for
 from elsa.container import Container
@@ -631,6 +631,68 @@ async def test_an_invalid_node_result_never_reaches_the_user(
     assert RESULT_MARKER not in response.text
     assert RESULT_MARKER not in logs.text()
     assert public.relay.store.pending_count == 0
+
+
+async def test_extra_fields_from_the_node_are_dropped_not_forwarded(
+    user: httpx.AsyncClient, node: ScriptedNode
+) -> None:
+    """``AskResponse`` ignora campos extra: se descartan al validar y no cruzan.
+
+    Se acepta así a propósito (no se cambia ``AskResponse``): tolera un desfase de
+    versión entre PC1 y Render sin dejar pasar nada que el contrato no declare.
+    """
+    extra_marker = "synthetic-extra-field-0b7c"
+    expected = answer()
+
+    response, _ = await ask_through(
+        user,
+        node,
+        lambda req: node.respond(req, expected | {"debug_trace": extra_marker, "x": [1]}),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == expected
+    assert extra_marker not in response.text
+
+
+async def test_an_unexpected_failure_is_a_generic_500_logged_as_internal_error(
+    public: PublicApp, node: ScriptedNode, logs: LogLines, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def broken(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("synthetic-internal-failure-text")
+
+    monkeypatch.setattr(public.relay, "submit", broken)
+    transport = httpx.ASGITransport(app=public.app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="https://render.test") as client:
+        response = await client.post(ASK_PATH, json=ask_body(), headers=auth_header(ENGINEER_TOKEN))
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "internal_error"
+    assert "synthetic-internal-failure-text" not in response.text
+    assert [entry["outcome"] for entry in logs.events("assistant_relayed")] == ["internal_error"]
+
+
+async def test_a_failing_watcher_stops_the_wait_and_is_logged_without_its_text(
+    public: PublicApp,
+    user: httpx.AsyncClient,
+    node: ScriptedNode,
+    logs: LogLines,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def broken_watcher(_request: object) -> None:
+        raise RuntimeError("synthetic-watcher-failure-text")
+
+    monkeypatch.setattr(assistant_relay, "_wait_for_disconnect", broken_watcher)
+
+    response = await user.post(ASK_PATH, json=ask_body(), headers=auth_header(ENGINEER_TOKEN))
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "request_cancelled"
+    assert public.relay.store.pending_count == 0
+    [failed] = logs.events("disconnect_watcher_failed")
+    assert failed["error"] == "RuntimeError"
+    assert "synthetic-watcher-failure-text" not in logs.text()
+    assert_no_route_tasks_left()
 
 
 # ---------------------------------------------------------------------
