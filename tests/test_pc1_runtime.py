@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -135,8 +136,14 @@ def test_the_lock_is_released_when_its_owner_process_dies(paths: RuntimePaths) -
             holder.kill()
         if holder.stdout is not None:
             holder.stdout.close()
+    # En un venv de Windows, `holder` es el lanzador: el intérprete que retiene el
+    # bloqueo muere justo después, cuando lo termina el lanzador. El sistema libera
+    # el bloqueo al morir ese proceso; se espera a que ocurra, con un plazo.
     lock = InstanceLock(paths.lock)
-    assert lock.acquire()
+    deadline = time.monotonic() + 10
+    while not lock.acquire():
+        assert time.monotonic() < deadline, "the lock was not released by the OS"
+        time.sleep(0.05)
     lock.release()
 
 
