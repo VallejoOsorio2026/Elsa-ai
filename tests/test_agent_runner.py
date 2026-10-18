@@ -11,6 +11,10 @@ import asyncio
 import gc
 import json
 import logging
+import signal
+import subprocess
+import sys
+import textwrap
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime, timedelta
@@ -23,7 +27,7 @@ import pytest
 from pydantic import JsonValue, SecretStr
 
 import elsa.agent as agent_package
-from elsa.agent.__main__ import main, run_agent
+from elsa.agent.__main__ import _break_as_interrupt, install_break_handler, main, run_agent
 from elsa.agent.config import AgentConfig, AgentSettings
 from elsa.agent.local_client import ElsaLocalClient, LocalSuccess
 from elsa.agent.relay_client import RelayClient, encode_message
@@ -31,6 +35,7 @@ from elsa.agent.runner import (
     BACKOFF_MAX_SECONDS,
     EXIT_CRASH,
     EXIT_FATAL,
+    EXIT_OK,
     MIN_EMPTY_POLL_SECONDS,
     REPLY_QUEUE_MAX,
     NodeAgent,
@@ -1121,3 +1126,84 @@ async def test_compressed_fatal_reply_is_logged_with_status_and_code_only(
     text = " ".join(f"{sorted(r.__dict__.items(), key=str)}" for r in agent_logs.records)
     assert NODE_TOKEN not in text and 'stale_session"' not in text
     assert len(relay.registers) == 1 and sleeps.delays == []
+
+
+# ---------------------------------------------------------------------------
+# Parada ordenada por SIGBREAK (ADR 0034 §7)
+# ---------------------------------------------------------------------------
+
+_ENTRYPOINT_UNDER_STOP = textwrap.dedent(
+    """
+    import asyncio, sys
+    from types import SimpleNamespace
+    import elsa.agent.__main__ as entry
+
+    async def fake_run_agent(config, **kwargs):
+        try:
+            print("ready", flush=True)
+            await asyncio.Event().wait()
+        finally:
+            print("cleanup", flush=True)
+
+    entry.run_agent = fake_run_agent
+    entry.load_agent_config = lambda env_file: SimpleNamespace(
+        settings=SimpleNamespace(log_level="INFO")
+    )
+    sys.exit(entry.main(["--env-file", "unused.env"]))
+    """
+)
+
+
+def test_install_break_handler_is_a_no_op_where_sigbreak_does_not_exist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delattr(signal, "SIGBREAK", raising=False)
+    before = signal.getsignal(signal.SIGINT)
+    assert install_break_handler() is False
+    assert signal.getsignal(signal.SIGINT) is before
+
+
+def test_break_outside_the_event_loop_behaves_like_ctrl_c() -> None:
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+    with pytest.raises(KeyboardInterrupt):
+        _break_as_interrupt(signal.SIGINT, None)
+
+
+def test_break_inside_asyncio_run_cancels_the_main_task_and_runs_its_cleanup() -> None:
+    """El mismo camino que Ctrl+C: tarea cancelada, `finally` ejecutado, KeyboardInterrupt."""
+    cleanup: list[str] = []
+
+    async def agent_like() -> None:
+        asyncio.get_running_loop().call_soon(_break_as_interrupt, signal.SIGINT, None)
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleanup.append("done")
+
+    with pytest.raises(KeyboardInterrupt):
+        asyncio.run(agent_like())
+    assert cleanup == ["done"]
+
+
+def test_the_entrypoint_stops_in_order_on_the_platform_stop_signal(tmp_path: Path) -> None:
+    """Windows: CTRL_BREAK_EVENT a su grupo. POSIX: SIGINT (sin regresión de Ctrl+C)."""
+    creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    child = subprocess.Popen(
+        [sys.executable, "-c", _ENTRYPOINT_UNDER_STOP],
+        cwd=tmp_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        creationflags=creationflags,
+    )
+    try:
+        assert child.stdout is not None
+        assert child.stdout.readline().strip() == "ready"
+        child.send_signal(getattr(signal, "CTRL_BREAK_EVENT", signal.SIGINT))
+        assert child.wait(timeout=20) == EXIT_OK
+        assert "cleanup" in child.stdout.read()
+    finally:
+        if child.poll() is None:
+            child.kill()
+        if child.stdout is not None:
+            child.stdout.close()
