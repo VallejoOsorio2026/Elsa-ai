@@ -2,8 +2,9 @@
 
 - **Fecha:** 2026-10-18 (UTC). Primera conexión real a las 20:19 UTC; restart de Render a las
   21:41 UTC.
-- **Estado:** cierre formal de D2.6, **efectivo cuando este documento quede integrado en
-  `main` con el CI obligatorio en verde** (ver «Regla de continuidad»).
+- **Estado:** la **ejecución técnica de D2.6 está completada y aceptada**. Este documento es
+  su **cierre documental**; el **cierre formal** queda efectivo cuando el PR que lo contiene
+  esté mergeado en `main` y el CI de `main` resulte verde (ver «Regla de continuidad»).
 - **Qué cierra:** el subbloque **D2.6** del bloque D2 (acceso remoto seguro a ELSA). D2.6 lleva
   por primera vez la arquitectura a red real: un servicio Render **dedicado** con el relay de
   D2.2, un **único worker**, y el agente de PC1 (D2.3) arrancado por el Modo ELSA (D2.5)
@@ -87,13 +88,23 @@ En orden (**HECHO MEDIDO por el operador**, salvo indicación):
 
 ### 4.1 Gate de Render previo a PC1
 
-Servicio piloto dedicado creado y desplegado según el runbook §2–§3; gate declarado **PASS**
-por el operador antes de conectar PC1.
+Servicio piloto dedicado creado y desplegado según el runbook §2–§3, y gate superado **antes**
+de conectar PC1. Evidencia saneada conservada por el operador:
 
-**PENDIENTE de incorporación documental:** este documento no conserva los detalles del gate
-(SHA desplegado, nombre del servicio, extracto de la línea única `Started server process`, la
-respuesta `401` de `register` sin credencial durante el gate). No se reconstruyen aquí: si el
-operador los conserva, se añaden en un cambio posterior (§20).
+| Comprobación | Resultado observado |
+|---|---|
+| Servicio piloto | `elsa-relay-pilot`, distinto de `elsa-demo` |
+| Commit desplegado | `2054d26` (merge del PR #54) |
+| Deploy | `Live` / `SUCCESS` |
+| Un solo worker (logs de arranque) | `Started server process`: **1** · `Started parent process`: **0** · `Waiting for child process`: **0** |
+| Ejemplo de la línea observada | `INFO: Started server process [58]` |
+| Relay OFF: `POST /api/v1/relay/node/register` | `HTTP 404 Not Found` (las rutas de nodo no existen) |
+| Relay ON: `register` **sin credencial** | `HTTP 401 Unauthorized` (ruta montada, autenticación fail-closed) |
+| Auditoría en Render | Evento `auth_failed`, con el **mismo `request_id`** que la respuesta 401 |
+| Tras el gate: relay de nuevo OFF, `register` | `HTTP 404 Not Found` |
+
+El gate se superó con el relay apagado (línea base) y con el relay encendido. La coincidencia
+del `request_id` correlaciona la petición de prueba con su evento de auditoría.
 
 ### 4.2 Conectividad HTTPS directa PC1 → Render (antes del agente)
 
@@ -154,9 +165,11 @@ polls sostenidos hasta al menos: 20:41:24 UTC
 - La duración de ≈ 25 s por poll coincide con `ELSA_RELAY_LONG_POLL_SECONDS` por defecto (25 s):
   polls vacíos que se mantienen abiertos el tiempo de long poll y se renuevan.
 - **No** se afirma disponibilidad productiva ni SLA: es una ventana de estabilidad.
-- **No registrado en este documento:** una búsqueda explícita de `register_failed`,
-  `session_stale`, `401`, `409` o `5xx` dentro de la ventana. La evidencia aportada es la
-  continuidad de polls 200 (§20).
+- Se observaron polls HTTP 200 continuos durante más de 20 minutos, superando la ventana
+  objetivo. No se observaron anomalías relevantes en la evidencia revisada durante esa ventana.
+  No se realizó una búsqueda negativa exhaustiva sobre la totalidad de los logs, por lo que
+  **no** se afirma la ausencia absoluta de cualquier evento no mostrado en los extractos
+  conservados.
 
 ### 4.5 STOP, expiración por TTL y reconexión (sesión 1)
 
@@ -319,7 +332,7 @@ Durante la ejecución no se tomó ninguna decisión arquitectónica nueva.
 
 | Prueba | Resultado |
 |---|---|
-| Gate Render previo | PASS (declarado; detalle en §4.1) |
+| Gate Render previo | PASS (§4.1: un solo worker; relay OFF → 404; relay ON sin credencial → 401 con `auth_failed` correlacionado; vuelta a OFF → 404) |
 | Conectividad HTTPS directa PC1 → Render (`trust_env=False`) | PASS (`live` 200, `ready` 200 `degraded` DEV) |
 | REGISTER autenticado | PASS (`node_registered` en Render y PC1, mismo `node_session_id`) |
 | Polling continuo 200 | PASS |
@@ -419,14 +432,15 @@ Todas las hizo el operador:
 | 1 | Durante el restart: `502` en un poll y `409 stale_session` en el siguiente | Ninguna acción: es la ruta diseñada; el agente se recuperó solo | Esperado, no bloqueante |
 | 2 | Al volver al estado seguro en la sesión 2, una comprobación intermedia de `register` devolvió **`401`**: el relay seguía activo | Se revisó y corrigió el estado de Render y se repitió la prueba: **`404`** | Resuelto; estado seguro verificado |
 | 3 | `Set-Clipboard -Value ""` falló con `ArgumentNullException` («El valor no puede ser nulo») en esa versión de PowerShell | El portapapeles se sobrescribió con un valor inocuo (`LIMPIO`). No afectó al agente ni a ELSA | Observación operativa no bloqueante |
-| 4 | Esta sesión documental no recibió los extractos del gate previo ni una búsqueda de errores en la ventana de 20 min | Registrados como pendientes de incorporación, sin reconstruirlos | PENDIENTE (§20) |
-| 5 | `docs/architecture.md` sigue diciendo que D2.6 está «preparado, no ejecutado» | No se modifica en este cierre (fuera de lo autorizado) | PENDIENTE (§20) |
+| 4 | La primera versión de este documento no incluía la evidencia del gate previo | Incorporada en §4.1 con los datos saneados conservados por el operador | Resuelto |
+| 5 | `docs/architecture.md` decía que D2.6 estaba «preparado, no ejecutado» | Fila D2.6 actualizada en este mismo PR, con autorización expresa del responsable | Resuelto |
 
 ## 14. Git
 
-- Este cierre: solo **crea** `docs/d2-6-conexion-real-render-pc1-cierre.md` en la rama
+- Este cierre **crea** `docs/d2-6-conexion-real-render-pc1-cierre.md` y, con autorización
+  expresa del responsable, **modifica** solo la fila D2.6 de `docs/architecture.md`, en la rama
   `claude/d2-6-cierre-documental`, creada desde `main` (`2054d26`).
-- Ningún archivo de código, test, `render.yaml` ni documento existente cambia.
+- Ningún archivo de código, test, `render.yaml` ni otro documento cambia.
 - La ejecución de D2.6 no cambió el repositorio: al final de la sesión 1, `## main...origin/main`
   sin cambios (**HECHO MEDIDO por el operador**).
 
@@ -512,10 +526,8 @@ Ninguno se cierra por asociación con D2.6.
 | 2 | Qué sirve Render con el resto de la API en modo RELAY (pendiente heredado de D2.4) | Bloque posterior, con ADR |
 | 3 | Prueba externa desde PAPELSA y red corporativa (proxy, `trust_env`) | Bloque posterior |
 | 4 | Endurecimiento: exponer el estado del nodo en Render, rechazar varios workers al arrancar, lista blanca del entorno del agente, rotación con hash anterior | Bloque posterior |
-| 5 | Incorporar, si se conservan, los extractos saneados del gate previo (SHA desplegado, línea única `Started server process`, `401` del gate) y la búsqueda de errores en la ventana de 20 min | Operador |
-| 6 | Actualizar la fila D2.6 de `docs/architecture.md` («preparado, no ejecutado» → estado medido) | Cambio documental con autorización |
-| 7 | Eliminar las ramas `claude/d2-6-render-pc1-live-readiness` y `claude/d2-6-cierre-documental` tras el merge de este documento y el CI final de `main` | Responsable |
-| 8 | Phi en `assistant.ask`, si algún día se decide | Decisión futura con ADR |
+| 5 | Eliminar las ramas `claude/d2-6-render-pc1-live-readiness` y `claude/d2-6-cierre-documental` tras el merge de este documento y el CI final de `main` | Responsable |
+| 6 | Phi en `assistant.ask`, si algún día se decide | Decisión futura con ADR |
 
 ## 21. Siguiente bloque
 
@@ -530,7 +542,7 @@ consulta remota habilitada.
 
 | Criterio | Estado |
 |---|---|
-| Gate Render previo | PASS (declarado por el operador; detalle pendiente, §20 #5) |
+| Gate Render previo | PASS (§4.1) |
 | Conectividad HTTPS directa PC1 → Render sin proxy | PASS |
 | REGISTER autenticado con registro cruzado (mismo `node_session_id`) | PASS |
 | NODE ONLINE | PASS |
@@ -547,18 +559,24 @@ consulta remota habilitada.
 | `assistant.ask` | NO ejecutado |
 | PC1 expuesto públicamente | NO |
 | Código, tests o `render.yaml` modificados | NO |
+| `docs/architecture.md` coherente con D2.6 | Cumplido (fila D2.6 actualizada en este PR) |
 
 ## Regla de continuidad
 
-Este documento **completa el cierre formal de D2.6 al quedar integrado en `main` con el CI
-obligatorio en verde**. Su propio PR y su merge documental los registran Git y GitHub. Este
-documento **no se auto-referencia** con un SHA propio: hacerlo obligaría a otro cambio solo
-para anotarlo. Mientras no esté integrado, D2.6 se considera abierto.
+Este documento es el **cierre documental** de D2.6. El **cierre formal** queda efectivo
+**cuando el PR que lo contiene esté mergeado en `main` y el CI de `main` resulte verde**. Su
+propio PR y su merge los registran Git y GitHub. Este documento **no se auto-referencia** con
+un SHA propio: hacerlo obligaría a otro cambio solo para anotarlo. Mientras no esté integrado
+en `main`, D2.6 **no** está cerrado formalmente en el repositorio principal.
 
 ## Veredicto
 
-**D2.6 — CONEXIÓN REAL RENDER ↔ PC1 (NODE ONLINE) CERRADO FORMALMENTE: SÍ**, como estado
-efectivo al quedar este documento integrado en `main` con CI verde.
+- **Ejecución técnica de D2.6: COMPLETADA Y ACEPTADA**, con la evidencia de §4 y los
+  criterios de cierre en PASS.
+- **Este documento es el cierre documental de D2.6.**
+- **D2.6 — CONEXIÓN REAL RENDER ↔ PC1 (NODE ONLINE): cierre formal efectivo cuando este PR
+  esté mergeado en `main` y el CI de `main` resulte verde.** Hasta entonces, D2.6 no está
+  cerrado formalmente en el repositorio principal.
 
 ```text
 PRIMERA CONEXIÓN REAL PC1 → RENDER:  SÍ
