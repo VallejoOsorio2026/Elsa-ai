@@ -1207,3 +1207,29 @@ def test_the_entrypoint_stops_in_order_on_the_platform_stop_signal(tmp_path: Pat
             child.kill()
         if child.stdout is not None:
             child.stdout.close()
+
+
+@pytest.mark.parametrize("current", [signal.SIG_IGN, signal.SIG_DFL], ids=["SIG_IGN", "SIG_DFL"])
+def test_break_with_a_non_callable_sigint_handler_still_stops_in_order(
+    current: signal.Handlers,
+) -> None:
+    """Sin un manejador de SIGINT invocable, SIGBREAK lanza KeyboardInterrupt y los
+    `finally` del agente se ejecutan igual (asyncio.run cancela las tareas al cerrar)."""
+    previous = signal.signal(signal.SIGINT, current)
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _break_as_interrupt(signal.SIGINT, None)
+        cleanup: list[str] = []
+
+        async def agent_like() -> None:
+            asyncio.get_running_loop().call_soon(_break_as_interrupt, signal.SIGINT, None)
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleanup.append("done")
+
+        with pytest.raises(KeyboardInterrupt):
+            asyncio.run(agent_like())
+        assert cleanup == ["done"]
+    finally:
+        signal.signal(signal.SIGINT, previous)
