@@ -225,11 +225,19 @@ def write_state(path: Path, state: RuntimeState) -> None:
     os.replace(tmp, path)
 
 
-def _optional_int(value: object) -> int | None:
+_MAX_PID = 2**32 - 1
+
+
+def _optional_int(value: object, low: int = 1, high: int = _MAX_PID) -> int | None:
+    """Entero en ``[low, high]`` o ``None``. Fuera de rango → ``ValueError``.
+
+    Un puerto o un PID imposibles en un archivo manipulado no deben llegar a
+    ``status`` (un puerto fuera de rango haría fallar la sonda con una traza).
+    """
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, int):
-        raise ValueError("not an integer")
+    if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high:
+        raise ValueError("not an integer in range")
     return value
 
 
@@ -249,7 +257,7 @@ def read_state(path: Path) -> RuntimeState | None:
         if not isinstance(names, list):
             return None
         supervisor_pid = _optional_int(data["supervisor_pid"])
-        elsa_port = _optional_int(data["elsa_port"])
+        elsa_port = _optional_int(data["elsa_port"], high=65535)
         if supervisor_pid is None or elsa_port is None:
             return None
         readiness = data.get("elsa_readiness")

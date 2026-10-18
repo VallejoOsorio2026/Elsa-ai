@@ -198,6 +198,28 @@ def test_an_unreadable_state_file_reads_as_no_state(paths: RuntimePaths, content
     assert read_state(paths.state) is None
 
 
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("elsa_port", 0),
+        ("elsa_port", 65536),
+        ("elsa_port", 2**40),
+        ("elsa_port", True),
+        ("supervisor_pid", 0),
+        ("supervisor_pid", -1),
+        ("elsa_pid", -5),
+        ("agent_pid", "4444"),
+    ],
+)
+def test_out_of_range_ports_and_pids_read_as_no_state(
+    paths: RuntimePaths, field_name: str, value: object
+) -> None:
+    data = _state().to_json()
+    data[field_name] = value
+    paths.state.write_text(json.dumps(data), encoding="utf-8")
+    assert read_state(paths.state) is None
+
+
 def test_missing_state_reads_as_no_state(paths: RuntimePaths) -> None:
     assert read_state(paths.state) is None
 
