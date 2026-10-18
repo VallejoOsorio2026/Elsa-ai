@@ -85,6 +85,16 @@ class LLMBackend(StrEnum):
     """``llama-server`` de llama.cpp, ya arrancado, escuchando en loopback."""
 
 
+class AssistantExecutionMode(StrEnum):
+    """Dónde se ejecuta ``assistant.ask`` (ADR 0033)."""
+
+    LOCAL = "local"
+    """En este mismo proceso: el comportamiento histórico. Es el default."""
+
+    RELAY = "relay"
+    """En PC1, a través del relay de este proceso. Exige el relay habilitado."""
+
+
 class ConfigurationError(RuntimeError):
     """Configuración ausente o inválida detectada al arranque."""
 
@@ -429,6 +439,11 @@ class Settings(BaseSettings):
     relay_max_pending: int = 16
     """Máximo de solicitudes vivas (en cola + en vuelo)."""
 
+    assistant_execution_mode: AssistantExecutionMode = AssistantExecutionMode.LOCAL
+    """``local`` ejecuta ``assistant.ask`` aquí; ``relay`` lo envía a PC1 y nunca
+    lo ejecuta aquí, ni como respaldo (ADR 0033). ``relay`` exige
+    ``ELSA_RELAY_ENABLED=true``."""
+
     # ---------------------------------------------------------------
     # Validadores
     # ---------------------------------------------------------------
@@ -700,10 +715,16 @@ class Settings(BaseSettings):
     def _validate_relay(self) -> None:
         """Fail-closed: un relay habilitado nunca arranca sin autenticación.
 
-        Con el relay apagado no se exige nada. Los mensajes nombran la variable
+        Con el relay apagado no se exige nada, salvo que el asistente no puede
+        estar en modo ``relay``: no habría por dónde enviar la pregunta y no hay
+        respaldo local (ADR 0033). Los mensajes nombran la variable
         pero jamás el valor recibido (es un hash de credencial).
         """
         if not self.relay_enabled:
+            if self.assistant_execution_mode is AssistantExecutionMode.RELAY:
+                raise ValueError(
+                    "ELSA_ASSISTANT_EXECUTION_MODE=relay requires ELSA_RELAY_ENABLED=true"
+                )
             return
         if self.relay_node_id is None:
             raise ValueError("ELSA_RELAY_NODE_ID is required when the relay is enabled")

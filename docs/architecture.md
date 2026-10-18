@@ -431,11 +431,12 @@ PC PAPELSA ── navegador / HTTPS ──► Render: relay/gateway (D2.2)
 | D2.1 | Protocolo lógico V1 (`src/elsa/relay/protocol.py`, [ADR 0030](adr/0030-protocolo-relay-render-pc1-v1.md)) | **SÍ** | — (es contrato) |
 | D2.2 | Relay/gateway en memoria en la app FastAPI (`src/elsa/relay/`, `src/elsa/api/v1/relay.py`, [ADR 0031](adr/0031-transporte-https-long-polling-relay-render-pc1-pilot-0-1.md)); apagado por defecto | **SÍ** | **NO**: no está desplegado en Render |
 | D2.3 | Agente de PC1, proceso aparte `python -m elsa.agent` (`src/elsa/agent/`, [ADR 0032](adr/0032-agente-pc1-outbound-pilot-0-1.md)) | **SÍ** | **NO**: no está conectado a ningún Render |
-| D2.4 | Integración usuario ↔ relay (ruta pública, interfaz) | **NO** | **NO** |
+| D2.4 | Integración usuario ↔ relay: la ruta pública `assistant.ask` en modo `relay` (`src/elsa/api/v1/assistant_relay.py`, [ADR 0033](adr/0033-modo-de-ejecucion-de-assistant-ask-local-o-relay.md)); `local` sigue siendo el default | **SÍ** | **NO**: Render real y PC1 real no están conectados |
 
-**Hoy no hay acceso remoto funcionando.** Relay y agente están probados entre
-sí y contra ELSA en memoria (`httpx.ASGITransport`, sin red); no existe
-despliegue real, secreto real del nodo ni conexión Render ↔ PC1.
+**Hoy no hay acceso remoto funcionando.** La cadena completa —app pública en
+`relay`, relay, agente y ELSA local en `local`— está probada de extremo a
+extremo en memoria (`httpx.ASGITransport`, sin red); no existe despliegue real,
+secreto real del nodo ni conexión Render ↔ PC1.
 
 Reglas que la implementación hace cumplir:
 
@@ -455,6 +456,15 @@ Reglas que la implementación hace cumplir:
   registra un `node_session_id` nuevo tras una espera con backoff. Un resultado
   se calcula una vez y se transmite como mucho 4 veces; `assistant.ask` nunca
   se reejecuta por un ACK perdido.
+- **Un modo por proceso, sin respaldo** (ADR 0033). `ELSA_ASSISTANT_EXECUTION_MODE`
+  monta una sola de las dos rutas de `assistant.ask`. En `relay` esa ruta
+  autentica (JWT y control de abuso) y **no** toca conocimiento, permisos ni
+  Materiales: todo 403 de una pregunta viene de PC1. El resto de la API sigue
+  sirviéndose en el proceso como antes; qué debe servir Render en `relay` queda
+  para D2.5. La respuesta del nodo se valida como
+  `AskResponse` antes de llegar al navegador y el `detail` del nodo nunca se
+  expone. `relay` sin relay habilitado no arranca; la cabecera
+  `X-Elsa-Relay-Hop` del agente impide la reentrada.
 - **Señal de vida continua.** El agente mantiene un poll en vuelo mientras
   ELSA ejecuta; la ejecución local está acotada (por defecto 1 a la vez y 4 en
   espera) y `CANCEL` es *best effort*.

@@ -15,6 +15,10 @@ Autenticación: el token temporal del usuario viaja en ``Authorization:
 Bearer``, que es lo que lee ELSA (``deps.bearer_token``). La autoridad sigue
 siendo ELSA: aquí no se interpreta el JWT.
 
+Reentrada (ADR 0033 §7): toda llamada lleva ``X-Elsa-Relay-Hop: 1``. Una ELSA
+en modo LOCAL la ignora; una en modo RELAY la rechaza, de modo que una ELSA de
+PC1 configurada por error en RELAY no puede devolver la pregunta al relay.
+
 Los errores se traducen a ``ErrorCode`` con un ``detail`` fijo de este
 módulo. De la respuesta de ELSA solo se copia su ``error.code`` si está en una
 lista blanca; nunca el cuerpo, una traza ni el texto de una excepción.
@@ -35,6 +39,7 @@ from elsa.relay.service import MAX_RESPONSE_WIRE_BYTES
 
 __all__ = [
     "ASK_PATH_PREFIX",
+    "RELAY_HOP_HEADER",
     "ElsaLocalClient",
     "LocalFailure",
     "LocalOutcome",
@@ -44,6 +49,8 @@ __all__ = [
 ]
 
 ASK_PATH_PREFIX = "/api/v1/assistant"
+RELAY_HOP_HEADER = "X-Elsa-Relay-Hop"
+"""Marca de salto. Debe coincidir con ``elsa.api.v1.assistant_relay.RELAY_HOP_HEADER``."""
 _ERROR_BODY_MAX_BYTES = 8 * 1024
 _CONNECT_TIMEOUT_SECONDS = 2.0
 
@@ -221,6 +228,7 @@ class ElsaLocalClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
             "X-Request-ID": str(request.request_id),
+            RELAY_HOP_HEADER: "1",
         }
         try:
             async with asyncio.timeout_at(deadline):

@@ -213,6 +213,29 @@ soportados.
 Los límites de tamaño (token de usuario 4096 caracteres, solicitud 16 KiB,
 respuesta 256 KiB) son constantes del código, justificadas en el ADR 0031.
 
+## Modo de ejecución de `assistant.ask` (D2.4)
+
+Decide dónde se responde `POST /api/v1/assistant/{domain}/{asset}/ask`
+([ADR 0033](adr/0033-modo-de-ejecucion-de-assistant-ask-local-o-relay.md)). La
+ruta y el contrato son los mismos en los dos modos: el navegador no cambia.
+
+| Variable | Obligatoria | Default | Descripción |
+|---|---|---|---|
+| `ELSA_ASSISTANT_EXECUTION_MODE` | No | `local` | `local`: se responde en este proceso (comportamiento histórico; es el modo de PC1). `relay`: se envía a PC1 por el relay de este proceso y **nunca** se ejecuta aquí, ni como respaldo. Solo `local` o `relay`, exactos y en minúscula. |
+
+Combinaciones con `ELSA_RELAY_ENABLED`:
+
+| `ELSA_ASSISTANT_EXECUTION_MODE` | `ELSA_RELAY_ENABLED` | Resultado |
+|---|---|---|
+| `local` | `false` | Válido. Comportamiento histórico. |
+| `local` | `true` | Válido: rutas de nodo montadas, pero la pregunta se responde aquí. Sin cambio automático de modo. |
+| `relay` | `true` | Válido. Render autentica (JWT y control de abuso); PC1 autoriza y responde. |
+| `relay` | `false` | **No arranca** (`ConfigurationError`): no habría por dónde enviar la pregunta. |
+
+En `relay`, PC1 fuera de línea es un `503 local_node_unavailable` inmediato; una
+petición con la cabecera `X-Elsa-Relay-Hop` (la que pone el agente) se rechaza
+para impedir la reentrada. La tabla completa de errores está en el ADR 0033 §5.
+
 ## Agente PC1 (D2.3)
 
 Proceso aparte que corre **en PC1** (`uv run python -m elsa.agent`) y conecta
