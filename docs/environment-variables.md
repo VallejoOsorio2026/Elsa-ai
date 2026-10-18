@@ -317,6 +317,62 @@ El bind de ELSA local (`127.0.0.1`) es una constante del Modo ELSA, no una
 variable. El estado y los logs van a `%LOCALAPPDATA%\ELSA\mode\`, fuera del
 repositorio; sin `LOCALAPPDATA`, el Modo ELSA no arranca.
 
+## Render Relay Pilot (D2.6)
+
+Configuración del **servicio Render dedicado** al relay piloto
+([ADR 0035](adr/0035-despliegue-piloto-relay-render-y-credencial-del-nodo.md),
+[runbook](render-pc1-conexion-real-runbook.md)). Es un servicio distinto de la demostración
+`elsa-demo`, que **no** cambia, y se configura en el panel de Render: no está en `render.yaml`.
+No introduce variables nuevas.
+
+**Instancia única.** El relay vive en la memoria del proceso: el servicio corre con **un solo
+worker y una sola instancia**. El start command lleva `--workers 1`, que tiene prioridad sobre
+`WEB_CONCURRENCY`; se verifica en los logs de arranque (una sola línea `Started server process`,
+ninguna `Started parent process`). Sin esa evidencia, PC1 no se conecta.
+
+| Variable | Valor en D2.6 | Requerida | Secreto | Default | Notas |
+|---|---|---|---|---|---|
+| `ELSA_ENV` | `DEV` | Sí | No | — | `TEST` exigiría Supabase y PostgreSQL reales (otro frente) |
+| `ELSA_CORS_ORIGINS` | `https://<servicio-piloto>.onrender.com` | Sí | No | — | Sin comodines |
+| `ELSA_RELAY_ENABLED` | `true` | Sí (para el relay) | No | `false` | `false` es el rollback: desaparecen las rutas de nodo |
+| `ELSA_RELAY_NODE_ID` | `<id-del-nodo>` | Con el relay | No | — | Igual que `ELSA_AGENT_NODE_ID` en PC1 |
+| `ELSA_RELAY_NODE_TOKEN_SHA256` | Hash de la sesión | Con el relay | **Sí** (hash) | — | Solo en el campo secreto del panel; uno nuevo por sesión de prueba |
+| `ELSA_RELAY_NODE_TOKEN_SHA256_PREVIOUS` | Sin declarar | No | **Sí** (hash) | — | No se usa en D2.6: el token anterior ya no existe |
+| `ELSA_RELAY_NODE_TTL_SECONDS` | Sin declarar | No | No | `45` | La expiración es perezosa: se observa en la siguiente operación del relay |
+| `ELSA_RELAY_LONG_POLL_SECONDS` | Sin declarar | No | No | `25` | Debe ser menor que el TTL |
+| `ELSA_RELAY_REQUEST_TTL_SECONDS` | Sin declarar | No | No | `120` | Sin uso en D2.6 (no hay solicitudes) |
+| `ELSA_RELAY_MAX_PENDING` | Sin declarar | No | No | `16` | Sin uso en D2.6 |
+| `ELSA_ASSISTANT_EXECUTION_MODE` | `local` | No | No | `local` | **Nunca `relay` en D2.6** |
+| `ELSA_AUTH_PROVIDER` | Sin declarar (`fake`) | No | No | `fake` | Solo aceptable porque el asistente está en `local` |
+| `ELSA_WEB_UI_ENABLED` | `false` | No | No | `true` | El servicio piloto no sirve la interfaz |
+| `ELSA_DEMO_SEED` | Sin declarar | No | No | `false` | Sin datos de demostración |
+
+Combinaciones en este servicio:
+
+| Combinación | Estado |
+|---|---|
+| `RELAY_ENABLED=true` + `ASSISTANT_EXECUTION_MODE=local` + `AUTH_PROVIDER=fake` | **Permitida en D2.6**: el nodo se conecta y ninguna pregunta se reenvía a PC1 |
+| `ASSISTANT_EXECUTION_MODE=relay` + `AUTH_PROVIDER=fake` | **PROHIBIDA.** En DEV los tokens fake son públicos (`/api/v1/session/context`): cualquiera enviaría preguntas a PC1. RELAY con identidad fake **no está autorizado** para enviar `assistant.ask` a PC1 |
+| `ASSISTANT_EXECUTION_MODE=relay` + `AUTH_PROVIDER=supabase` | Bloque posterior, con su propio ADR: exige login real y validación de identidad también en PC1 |
+| `RELAY_ENABLED=true` sin hash válido | La aplicación **no arranca** (fail-closed) |
+
+**Identidad real para un bloque posterior** (no se declara en D2.6): `ELSA_AUTH_PROVIDER=supabase`
+con `ELSA_MATERIALS_SUPABASE_URL` y `ELSA_MATERIALS_API_KEY` (no secretos: URL y clave publicable),
+y opcionalmente `ELSA_AUTH_JWT_ISSUER`, `ELSA_AUTH_JWKS_URL`, `ELSA_AUTH_JWT_AUDIENCE` y
+`ELSA_AUTH_JWT_ALGORITHMS` (no secretos, con default o derivados). `ELSA_AUTH_JWT_SECRET` solo
+si Materiales firmara con un algoritmo simétrico, y sería **secreto**. Ver
+[Identidad](#identidad-asistente-de-materiales).
+
+**PC1 en D2.6** (detalle en [Agente PC1](#agente-pc1-d23) y [Modo ELSA](#modo-elsa-en-pc1-d25)):
+
+| Variable | Dónde | Notas |
+|---|---|---|
+| `ELSA_AGENT_RELAY_URL` | `.env` | `https://<servicio-piloto>.onrender.com` |
+| `ELSA_AGENT_NODE_ID` | `.env` | `<id-del-nodo>`, igual que en Render |
+| `ELSA_AGENT_LOCAL_BASE_URL` | `.env` | `http://127.0.0.1:<puerto>`; fuente del puerto de ELSA local |
+| `ELSA_AGENT_NODE_TOKEN` | **Solo entorno** de la ventana que arranca el Modo ELSA | Token efímero generado en PC1; nunca en `.env`, argumentos, archivos ni logs |
+| `ELSA_ASSISTANT_EXECUTION_MODE`, `ELSA_RELAY_ENABLED`, `ELSA_DEBUG` | Las fija el Modo ELSA | `local`, `false`, `false` para ELSA local |
+
 ## Solo para tests
 
 | Variable | Descripción |
