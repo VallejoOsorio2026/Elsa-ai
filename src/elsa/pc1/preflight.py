@@ -9,7 +9,9 @@ agente al arrancar (sin duplicar sus reglas):
    ``127.0.0.1`` y un puerto explícito;
 3. el token del nodo: del entorno del proceso o, si falta y hay consola, de un
    prompt oculto. Antes de pedirlo, ``load_agent_config`` ya comprobó que el
-   token **no** está en el archivo (fail-closed de D2.3);
+   token **no** está en el archivo (fail-closed de D2.3). Un token pedido por el
+   prompt **no** se escribe en ``os.environ``: queda en el perfil (``SecretStr``)
+   y el supervisor lo pone solo en el entorno del hijo agente;
 4. que el puerto local esté libre.
 
 Los errores son :class:`PreflightError` con un mensaje fijo y, como mucho, los
@@ -18,7 +20,6 @@ Los errores son :class:`PreflightError` con un mensaje fijo y, como mucho, los
 
 from __future__ import annotations
 
-import os
 import re
 import socket
 import sys
@@ -32,6 +33,7 @@ from elsa.agent.config import (
     AgentConfig,
     AgentConfigurationError,
     AgentSettings,
+    _node_token_from_environment,
     load_agent_config,
 )
 from elsa.config import AssistantExecutionMode, ConfigurationError, Settings, load_settings
@@ -88,6 +90,11 @@ def _unique(names: list[str]) -> tuple[str, ...]:
 def _elsa_settings(env_file: Path | None) -> Settings:
     try:
         return load_settings(env_file)
+    except UnicodeDecodeError:
+        # p. ej. un .env guardado como UTF-16 por Windows PowerShell 5.1.
+        raise PreflightError(
+            "El archivo de configuración no se puede leer como texto UTF-8."
+        ) from None
     except ConfigurationError as exc:
         names: list[str] = []
         for line in str(exc).splitlines():
@@ -140,10 +147,10 @@ def _agent_error(exc: AgentConfigurationError) -> PreflightError:
 
 def _local_port(local_base_url: str) -> int:
     parts = urlsplit(local_base_url)
-    if parts.hostname != LOOPBACK_BIND or parts.port is None:
+    if parts.hostname != LOOPBACK_BIND or parts.port is None or not 1 <= parts.port <= 65535:
         raise PreflightError(
             f"La URL local del agente debe ser http://{LOOPBACK_BIND}:<puerto>, "
-            "con esa dirección exacta y el puerto explícito.",
+            "con esa dirección exacta y un puerto explícito entre 1 y 65535.",
             (LOCAL_URL_ENV,),
         )
     return parts.port
@@ -159,22 +166,24 @@ def _agent_config(env_file: Path | None, read_secret: ReadSecret | None) -> Agen
         _local_port(config.settings.local_base_url)
         return config
 
-    # Solo falta el token en el entorno: el archivo ya se comprobó (no lo contiene)
-    # y los parámetros no sensibles son válidos. Se validan antes de pedirlo.
-    _local_port(AgentSettings(_env_file=env_file).local_base_url)  # type: ignore[call-arg]
+    # Solo falta el token en el entorno: `load_agent_config` ya rechazó un archivo
+    # con NUL o con el token, y validó los parámetros no sensibles. La URL local se
+    # comprueba antes de pedir nada.
+    settings = AgentSettings(_env_file=env_file)  # type: ignore[call-arg]
+    _local_port(settings.local_base_url)
     if read_secret is None:
         raise PreflightError(
             "Falta el token del nodo y no hay consola para pedirlo.", (NODE_TOKEN_ENV,)
         )
-    # Solo en el entorno de este proceso: de aquí lo hereda el hijo agente.
-    os.environ[NODE_TOKEN_ENV] = read_secret()
+    # Mismas reglas de formato que el agente, sin pasar por `os.environ`: el token
+    # pedido no queda en el entorno del supervisor ni lo hereda ningún otro hijo.
     try:
-        return load_agent_config(env_file)
+        token = _node_token_from_environment({NODE_TOKEN_ENV: read_secret()})
     except AgentConfigurationError:
-        os.environ.pop(NODE_TOKEN_ENV, None)
         raise PreflightError(
             "El token del nodo introducido no tiene un formato válido.", (NODE_TOKEN_ENV,)
         ) from None
+    return AgentConfig(settings=settings, node_token=token)
 
 
 def check_profile(env_file: Path | None, read_secret: ReadSecret | None = None) -> Pc1Profile:

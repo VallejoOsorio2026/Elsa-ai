@@ -140,6 +140,7 @@ def test_debug_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 @pytest.mark.parametrize(
     "url",
     [
+        "http://127.0.0.1:0",
         "http://localhost:8000",
         "http://127.0.0.2:8000",
         "http://[::1]:8000",
@@ -184,8 +185,11 @@ def test_a_missing_token_is_requested_once_through_the_hidden_prompt(tmp_path: P
     profile = check_profile(_env_file(tmp_path), prompt)
     assert calls == [1]
     assert profile.agent.node_token.get_secret_value() == FAKE_TOKEN
-    # Solo en el entorno de este proceso, del que lo hereda el hijo agente.
-    assert os.environ[NODE_TOKEN_ENV] == FAKE_TOKEN
+    assert profile.agent.settings.relay_url == RELAY_URL
+    # El token pedido no se escribe en el entorno global del supervisor: solo lo
+    # recibirá el entorno construido para el hijo agente.
+    assert NODE_TOKEN_ENV not in os.environ
+    assert FAKE_TOKEN not in os.environ.values()
 
 
 def test_an_invalid_prompted_token_is_rejected_and_not_kept(tmp_path: Path) -> None:
@@ -213,6 +217,14 @@ def test_a_token_in_the_file_fails_closed_even_with_one_in_the_environment(
 def test_an_invalid_agent_configuration_is_reported_before_the_prompt(tmp_path: Path) -> None:
     env_file = _env_file(tmp_path, ELSA_AGENT_LOCAL_BASE_URL="http://localhost:8000")
     assert _fail(env_file, _never_prompt).variables == ("ELSA_AGENT_LOCAL_BASE_URL",)
+
+
+def test_a_utf16_configuration_file_fails_closed_with_a_fixed_message(tmp_path: Path) -> None:
+    env_file = tmp_path / "utf16.env"
+    env_file.write_bytes("ELSA_ENV=DEV\n".encode("utf-16"))  # con BOM, como PowerShell 5.1
+    error = _fail(env_file, _never_prompt)
+    assert "UTF-8" in error.message
+    assert error.variables == ()
 
 
 def test_an_invalid_elsa_configuration_is_reported_before_the_prompt(tmp_path: Path) -> None:
