@@ -5,7 +5,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from elsa.config import ConfigurationError, Environment, load_settings
+from elsa.config import AssistantExecutionMode, ConfigurationError, Environment, load_settings
+from elsa.relay.auth import hash_node_token
 from tests.conftest import make_test_settings
 
 
@@ -434,3 +435,62 @@ def test_chunking_limits_must_be_positive() -> None:
         make_test_settings(document_chunk_chars_per_token=0)
     with pytest.raises(ValidationError):
         make_test_settings(document_chunk_overlap_tokens=-1)
+
+
+# ---------------------------------------------------------------------
+# Modo de ejecución de assistant.ask (D2.4, ADR 0033)
+# ---------------------------------------------------------------------
+
+_RELAY_ON: dict[str, object] = {
+    "relay_enabled": True,
+    "relay_node_id": "pc1-test",
+    "relay_node_token_sha256": hash_node_token("synthetic-node-token-for-config-tests"),
+}
+
+
+def test_the_assistant_runs_locally_by_default() -> None:
+    assert make_test_settings().assistant_execution_mode is AssistantExecutionMode.LOCAL
+
+
+def test_relay_mode_without_the_relay_stops_the_application(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ELSA_ENV", "DEV")
+    monkeypatch.setenv("ELSA_CORS_ORIGINS", "http://localhost:5173")
+    monkeypatch.setenv("ELSA_ASSISTANT_EXECUTION_MODE", "relay")
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        load_settings(env_file=None)
+
+    assert "ELSA_ASSISTANT_EXECUTION_MODE=relay requires ELSA_RELAY_ENABLED=true" in str(
+        excinfo.value
+    )
+
+
+def test_relay_mode_with_the_relay_enabled_is_accepted() -> None:
+    settings = make_test_settings(assistant_execution_mode="relay", **_RELAY_ON)
+
+    assert settings.assistant_execution_mode is AssistantExecutionMode.RELAY
+
+
+def test_local_mode_with_the_relay_enabled_is_accepted_without_switching_mode() -> None:
+    settings = make_test_settings(**_RELAY_ON)
+
+    assert settings.relay_enabled is True
+    assert settings.assistant_execution_mode is AssistantExecutionMode.LOCAL
+
+
+@pytest.mark.parametrize("value", ["RELAY", "Relay", " relay", "relay ", "remote", "", "LOCAL"])
+def test_ambiguous_execution_modes_are_rejected(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    monkeypatch.setenv("ELSA_ENV", "DEV")
+    monkeypatch.setenv("ELSA_CORS_ORIGINS", "http://localhost:5173")
+    monkeypatch.setenv("ELSA_ASSISTANT_EXECUTION_MODE", value)
+    for key, raw in _RELAY_ON.items():
+        monkeypatch.setenv(f"ELSA_{key.upper()}", str(raw).lower() if raw is True else str(raw))
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        load_settings(env_file=None)
+
+    assert "ELSA_ASSISTANT_EXECUTION_MODE" in str(excinfo.value)
