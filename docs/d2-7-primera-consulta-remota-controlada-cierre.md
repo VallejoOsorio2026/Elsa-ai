@@ -1090,11 +1090,11 @@ persistencia del JWT
 cambio de código funcional
 ```
 
-# 18. Condición de cierre formal
+# 18. Cierre formal
 
 La validación técnica y física de D2.7 está completa.
 
-El bloque solo debe declararse **CERRADO FORMALMENTE** después de:
+Las condiciones de cierre formal verificadas fueron:
 
 1. versionar este documento;
 2. ejecutar revisión/CI de la rama;
@@ -1103,9 +1103,9 @@ El bloque solo debe declararse **CERRADO FORMALMENTE** después de:
 5. comprobar CI de `main`;
 6. comprobar repositorio final limpio y alineado con `origin/main`.
 
-Hasta completar esos pasos, el estado correcto es:
+Evidencia final: PR #56 fusionado; CI del cierre = PASS (4 checks); merge commit = 4c5ed3198d05f97024f360f56927af3f52844f11; main local sincronizado con origin/main y working tree limpio. Estado final:
 
 ```text
-D2.7 — VALIDACIÓN TÉCNICA COMPLETA
-CIERRE FORMAL — PENDIENTE DE VERSIONAMIENTO/PR/CI
+D2.7 — CERRADO FORMALMENTE
+PR #56 — MERGED — CI PASS
 ```
