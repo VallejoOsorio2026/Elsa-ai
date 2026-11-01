@@ -94,8 +94,8 @@ extend-immutable-calls = [
 ]
 
 [tool.mypy]
-mypy_path = "src"
-files = ["src/elsa", "tests"]
+mypy_path = "src,scripts"
+files = ["src/elsa", "tests", "scripts"]
 python_version = "3.12"
 check_untyped_defs = true
 no_implicit_optional = true
@@ -119,4 +119,5 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["scripts"]
 addopts = "-ra"
