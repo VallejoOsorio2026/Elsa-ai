@@ -173,6 +173,9 @@ beneficio y contradice la regla 23 del contrato.
 - **Copiar repositorios externos completos** dentro de este. Se evalúa, se
   documenta y se enlaza; no se vendorea.
 
+Cómo se le entrega un bloque de trabajo a Claude Code, y dónde debe detenerse:
+[`docs/orchestration/README.md`](../orchestration/README.md).
+
 ---
 
 ## 6. Referencias
