@@ -100,7 +100,8 @@ claude --permission-mode plan
 
 ## 8. Resultados
 
-**HECHO MEDIDO**, prueba de bloqueo (salida real; gitleaks ya la redacta):
+**HECHO MEDIDO**, prueba de bloqueo (salida real recortada, sin colores ni pasos ajenos a gitleaks;
+gitleaks ya la redacta):
 
 ```text
 Detect hardcoded secrets.................................................Failed
