@@ -181,6 +181,7 @@ uv run pre-commit install
 | [`docs/brand/`](docs/brand/) | Identidad visual PAPELSA: guía de marca, design tokens y reglas de interfaz |
 | [`docs/brand/UI_BACKLOG_CLAUDE_DESIGN.md`](docs/brand/UI_BACKLOG_CLAUDE_DESIGN.md) | Pendientes visuales reservados para el futuro ELSA Design System |
 | [`docs/agentic-tooling/`](docs/agentic-tooling/) | Cómo se le da contexto a Claude Code: contrato, Skills, subagentes y política MCP |
+| [`docs/orchestration/`](docs/orchestration/README.md) | Cómo se especifica y controla un bloque de trabajo: plantilla, estados y gates humanos |
 | [`docs/adr/`](docs/adr/) | Decisiones arquitectónicas registradas (ADR) |
 
 ## Estructura del repositorio
