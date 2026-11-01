@@ -1,6 +1,7 @@
 # ADR 0036 — Orquestación semiautomática de bloques de trabajo
 
-- Estado: **propuesto**
+- Estado: **aceptado** (2026-11-01, tras el merge del PR #58 por Juan). Se acepta el contrato; el
+  ejecutor de §9 sigue condicionado a O1.3
 - Fecha de la decisión: **2026-11-01**
 - Bloque: **O1**, incremento **O1.1** (contrato y preparación)
 - **Decide**: cómo se especifica un bloque en un archivo versionado, qué estados
@@ -136,7 +137,7 @@ detiene y se conserva solo lo construido hasta entonces.
 | Riesgo | Situación |
 |---|---|
 | Sin aislamiento real: los tests corren con el usuario de Windows y podrían alcanzar otros archivos o credenciales | **Pendiente de aceptación explícita en O1.3.** No aplica a O1.1, que no ejecuta nada sin supervisión |
-| La protección de `main` podría admitir excepciones | Debe revisarla la persona responsable en GitHub. Si las admite, bloquea O1.3 |
+| La protección de `main` podría admitir excepciones | Revisado el 2026-11-01: exige PR y checks, bloquea force push, y Juan confirmó que la lista de excepciones está vacía. Si eso cambia, bloquea O1.3 |
 | La lectura anónima de CI depende de que el repositorio sea público | Si pasa a privado, el resultado de CI se consulta en el PR. La visibilidad se decide aparte |
 
 ## 12. Fuera de esta decisión
