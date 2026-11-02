@@ -50,6 +50,7 @@ EXIT_USAGE = 3
 EXIT_LOCK_BUSY = 4
 
 MAX_SPEC_BYTES = 64 * 1024
+MAX_AUTHORIZATION_BYTES = 4 * 1024
 MAX_CHANGED_FILES = 500
 MAX_FILE_BYTES = 500 * 1024
 MAX_EXECUTOR_OUTPUT_BYTES = 20 * 1024 * 1024
@@ -533,6 +534,9 @@ class Reason(StrEnum):
     CODE_PROFILE_FORBIDDEN = "code_profile_forbidden"
     REAL_REPO_NOT_AUTHORIZED = "real_repo_not_authorized"
     CLAUDE_USER_SETTINGS_UNEXPECTED = "claude_user_settings_unexpected"
+    REAL_RUN_AUTHORIZATION_INVALID = "real_run_authorization_invalid"
+    REAL_RUN_AUTHORIZATION_MISMATCH = "real_run_authorization_mismatch"
+    REAL_RUN_AUTHORIZATION_USED = "real_run_authorization_used"
     CLAUDE_PROJECT_SETTINGS_PRESENT = "claude_project_settings_present"
     CLAUDE_PROJECT_MCP_PRESENT = "claude_project_mcp_present"
     CLAUDE_MANAGED_SETTINGS_PRESENT = "claude_managed_settings_present"
@@ -608,6 +612,9 @@ MESSAGES: Mapping[Reason, str] = {
     Reason.CODE_PROFILE_FORBIDDEN: "El ejecutor real solo puede cambiar documentación.",
     Reason.REAL_REPO_NOT_AUTHORIZED: "El ejecutor real no está autorizado en el repositorio real.",
     Reason.CLAUDE_USER_SETTINGS_UNEXPECTED: "La configuración de usuario no es la validada.",
+    Reason.REAL_RUN_AUTHORIZATION_INVALID: "La autorización del run real no cumple el contrato.",
+    Reason.REAL_RUN_AUTHORIZATION_MISMATCH: "La autorización del run real no coincide con el run.",
+    Reason.REAL_RUN_AUTHORIZATION_USED: "La autorización del run real ya se usó. No se reutiliza.",
     Reason.CLAUDE_PROJECT_SETTINGS_PRESENT: "Hay configuración de Claude en el proyecto.",
     Reason.CLAUDE_PROJECT_MCP_PRESENT: "Hay configuración MCP en el proyecto.",
     Reason.CLAUDE_MANAGED_SETTINGS_PRESENT: "Hay configuración administrada de Claude Code.",
@@ -679,6 +686,15 @@ class RunnerConfig:
     @property
     def state(self) -> Path:
         return self.external_root / "state"
+
+    @property
+    def authorizations(self) -> Path:
+        """Autorizaciones de run real: las escribe una persona, nunca Claude (ADR 0037, §9)."""
+        return self.external_root / "authorizations"
+
+    @property
+    def used_authorizations(self) -> Path:
+        return self.state / "authorizations-used"
 
     def scanner_command(self) -> tuple[str, ...]:
         return self.precommit_command or (str(self.tool_python), "-m", "pre_commit")
@@ -1738,8 +1754,22 @@ def normalized_origin(url: str) -> str:
     return re.sub(r"/+", "/", path).strip("/").removesuffix(".git").rstrip("/")
 
 
+def _origin_urls(config: RunnerConfig, cwd: Path | None) -> list[str]:
+    """Todas las URL de lectura y de envío de `origin`, preguntándole a Git."""
+    git = Git(config, cwd or config.repo_root)
+    urls: list[str] = []
+    for extra in ((), ("--push",)):
+        found = git.run("remote", "get-url", *extra, "--all", "origin", check=False)
+        lines = found.text.splitlines()
+        # Sin URL configurada, Git responde con éxito y repite el nombre del remoto.
+        if found.returncode != 0 or not lines or "origin" in lines:
+            raise BlockedError(Reason.REAL_REPO_NOT_AUTHORIZED, "origin_unreadable")
+        urls.extend(lines)
+    return urls
+
+
 def ensure_not_real_repository(config: RunnerConfig, cwd: Path | None = None) -> None:
-    """El primer run real exige otro gate humano y un cambio deliberado de esta función.
+    """Sin autorización de run real, el repositorio real sigue cerrado (ADR 0037, §9).
 
     La configuración sola no dice dónde se está: también se le pregunta a Git, por las URL
     de lectura y de envío. Protege de un error, no de quien cambie el remoto a propósito.
@@ -1747,15 +1777,242 @@ def ensure_not_real_repository(config: RunnerConfig, cwd: Path | None = None) ->
     real = normalized_origin(EXPECTED_ORIGIN)
     if normalized_origin(config.expected_origin) == real:
         raise BlockedError(Reason.REAL_REPO_NOT_AUTHORIZED)
-    git = Git(config, cwd or config.repo_root)
-    for extra in ((), ("--push",)):
-        found = git.run("remote", "get-url", *extra, "--all", "origin", check=False)
-        urls = found.text.splitlines()
-        # Sin URL configurada, Git responde con éxito y repite el nombre del remoto.
-        if found.returncode != 0 or not urls or "origin" in urls:
-            raise BlockedError(Reason.REAL_REPO_NOT_AUTHORIZED, "origin_unreadable")
-        if any(normalized_origin(url) == real for url in urls):
-            raise BlockedError(Reason.REAL_REPO_NOT_AUTHORIZED)
+    if any(normalized_origin(url) == real for url in _origin_urls(config, cwd)):
+        raise BlockedError(Reason.REAL_REPO_NOT_AUTHORIZED)
+
+
+# ---------------------------------------------------------------------------
+# Autorización de run real: una orden humana para un único run (ADR 0037, §9)
+# ---------------------------------------------------------------------------
+
+REAL_RUN_AUTHORIZATION_SCHEMA = "elsa-o1-real-run-authorization/1"
+# El repositorio que nombra una autorización. Ligado a `EXPECTED_ORIGIN` al importar.
+REAL_REPOSITORY = "VallejoOsorio2026/Elsa-ai"
+if normalized_origin(EXPECTED_ORIGIN) != REAL_REPOSITORY.lower():
+    raise RuntimeError("REAL_REPOSITORY must name the EXPECTED_ORIGIN repository")
+# Estos campos solo admiten un valor: están para que la persona que autoriza lo lea y lo
+# firme con su decisión, no para ampliar nada.
+_AUTHORIZATION_FIXED: Mapping[str, object] = {
+    "schema": REAL_RUN_AUTHORIZATION_SCHEMA,
+    "change": "add",
+    "profile": "docs",
+    "executor": "claude",
+    "console": False,
+}
+_AUTHORIZATION_FIELDS = frozenset(
+    {*_AUTHORIZATION_FIXED, "block_id", "repository", "base_sha", "spec_sha256", "branch"}
+    | {"allowed_paths"}
+)
+_REPOSITORY_RE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
+_SPEC_SHA256_RE = re.compile(r"[0-9a-f]{64}")
+
+
+@dataclass(frozen=True)
+class RealRunAuthorization:
+    """Una autorización ya validada en forma. Solo la crea `load_real_run_authorization`."""
+
+    block_id: str
+    repository: str
+    base_sha: str
+    spec_sha256: str
+    branch: str
+    allowed_paths: tuple[str, ...]
+    path: Path
+    raw_sha256: str
+
+
+def _authorization_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Una clave repetida no se resuelve en silencio: JSON se quedaría con la última."""
+    data: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in data:
+            raise ValueError("repeated key")
+        data[key] = value
+    return data
+
+
+def load_real_run_authorization(config: RunnerConfig, block_id: str) -> RealRunAuthorization | None:
+    """Lee la autorización del bloque, fuera del repositorio. Sin archivo, no hay autorización.
+
+    Lista cerrada de campos, cada uno con su tipo exacto. Una autorización ya usada no vuelve.
+    """
+    path = config.authorizations / f"{block_id}.json"
+    if os.path.lexists(config.used_authorizations / f"{block_id}.json"):
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_USED)
+    if not os.path.lexists(path):
+        return None
+    if path.is_symlink() or not path.is_file():
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_INVALID, "not_a_file")
+    try:
+        if path.stat().st_size > MAX_AUTHORIZATION_BYTES:
+            raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_INVALID, "size")
+        raw = path.read_bytes()
+        data = json.loads(raw.decode("utf-8"), object_pairs_hook=_authorization_pairs)
+    except (OSError, ValueError) as error:
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_INVALID, "unreadable") from error
+    if not isinstance(data, dict) or set(data) != _AUTHORIZATION_FIELDS:
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_INVALID, "fields")
+    for name, expected in _AUTHORIZATION_FIXED.items():
+        # `type` también: `0` no vale por `false`.
+        if type(data[name]) is not type(expected) or data[name] != expected:
+            raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_INVALID, name)
+    for name, pattern in (
+        ("block_id", _ID_RE),
+        ("repository", _REPOSITORY_RE),
+        ("base_sha", _SHA_RE),
+        ("spec_sha256", _SPEC_SHA256_RE),
+        ("branch", re.compile(r"claude/[a-z0-9]+(?:-[a-z0-9]+)*")),
+    ):
+        if not isinstance(data[name], str) or not pattern.fullmatch(data[name]):
+            raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_INVALID, name)
+    paths = data["allowed_paths"]
+    if not isinstance(paths, list) or not paths or not all(isinstance(p, str) for p in paths):
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_INVALID, "allowed_paths")
+    if data["block_id"] != block_id:
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "block_id")
+    return RealRunAuthorization(
+        block_id=data["block_id"],
+        repository=data["repository"],
+        base_sha=data["base_sha"],
+        spec_sha256=data["spec_sha256"],
+        branch=data["branch"],
+        allowed_paths=tuple(paths),
+        path=path,
+        raw_sha256=hashlib.sha256(raw).hexdigest(),
+    )
+
+
+def _is_real_executor_binary(executor: Executor) -> bool:
+    """El Claude real: sin prefijo. Un Claude falso nunca trabaja sobre el repositorio real."""
+    return isinstance(executor, ClaudeExecutor) and not executor.argv_prefix
+
+
+def check_real_repository_access(
+    config: RunnerConfig, cwd: Path | None, authorization: RealRunAuthorization | None
+) -> None:
+    """Sin autorización, lo de siempre: el repositorio real está cerrado.
+
+    Con autorización, todo debe ser el repositorio autorizado, y sin variantes: la configuración
+    y cada URL de lectura y de envío, exactamente `EXPECTED_ORIGIN`. Normalizar sirve para
+    rechazar; para permitir, ni otro anfitrión ni otra forma de escribirlo.
+    """
+    if authorization is None:
+        ensure_not_real_repository(config, cwd)
+        return
+    if authorization.repository.lower() != REAL_REPOSITORY.lower():
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "repository")
+    seen = [config.expected_origin, *_origin_urls(config, cwd)]
+    if any(url != EXPECTED_ORIGIN for url in seen):
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "repository")
+
+
+def _match_authorization(authorization: RealRunAuthorization, spec: Spec) -> None:
+    for name, seen, expected in (
+        ("block_id", authorization.block_id, spec.id),
+        ("spec_sha256", authorization.spec_sha256, spec.sha256),
+        ("branch", authorization.branch, spec.branch),
+        ("allowed_paths", authorization.allowed_paths, spec.allowed_paths),
+    ):
+        if seen != expected:
+            raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, name)
+    if authorization.branch == BASE_BRANCH:
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "branch")
+
+
+def authorize_real_run(
+    authorization: RealRunAuthorization,
+    spec: Spec,
+    base_sha: str,
+    executor: Executor,
+    main_git: Git,
+) -> None:
+    """Comparación exacta con lo que el runner ya validó. La especificación sola no basta."""
+    if not _is_real_executor_binary(executor):
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "executor")
+    _match_authorization(authorization, spec)
+    if authorization.base_sha != base_sha:
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "base_sha")
+    # Solo archivos nuevos: ninguno puede existir ya en la base, ni con otras mayúsculas.
+    # El clon principal está limpio y en la base, así que su índice es la base.
+    tracked = {path.lower() for path in _split_nul(main_git.run("ls-files", "-z").stdout)}
+    if any(path.lower() in tracked for path in authorization.allowed_paths):
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "path_exists")
+
+
+def consume_real_run_authorization(
+    config: RunnerConfig, authorization: RealRunAuthorization
+) -> None:
+    """Un solo uso: se retira antes de crear la copia, y antes de que Claude exista.
+
+    Si la ejecución se detiene después, la autorización sigue gastada. Reintentar exige otra.
+    """
+    used = config.used_authorizations / f"{authorization.block_id}.json"
+    if os.path.lexists(used):
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_USED)
+    try:
+        current = hashlib.sha256(authorization.path.read_bytes()).hexdigest()
+    except OSError as error:
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_INVALID, "unreadable") from error
+    if current != authorization.raw_sha256:
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_INVALID, "changed")
+    os.replace(authorization.path, used)
+
+
+def check_authorized_target(
+    config: RunnerConfig,
+    worktree: Path,
+    spec: Spec,
+    executor: Executor,
+    authorization: RealRunAuthorization,
+    spec_commit: str,
+) -> None:
+    """Claude nunca trabaja en el clon principal ni en `main`: solo en su copia y su rama.
+
+    Esta función es pública: no confía en quien la llame. La autorización debe coincidir con
+    la especificación y estar ya gastada, también si alguien la construyó a mano.
+    """
+    if not _is_real_executor_binary(executor):
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "executor")
+    _match_authorization(authorization, spec)
+    used = config.used_authorizations / f"{authorization.block_id}.json"
+    if os.path.lexists(authorization.path) or not used.is_file():
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "not_consumed")
+    if _same_path(worktree, config.repo_root) or not _same_path(
+        worktree, worktree_path(config, spec.id)
+    ):
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "worktree")
+    git = Git(config, worktree)
+    if _same_path(git.run("rev-parse", "--absolute-git-dir").text, common_git_dir(git)):
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "worktree")
+    if git.run("symbolic-ref", "HEAD", check=False).text != f"refs/heads/{authorization.branch}":
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "branch")
+    # La copia lleva un único commit sobre la base: el de la especificación.
+    if git.run("rev-parse", "HEAD", check=False).text != spec_commit:
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "spec_commit")
+    if git.run("rev-parse", "HEAD^", check=False).text != authorization.base_sha:
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "base_sha")
+
+
+def runner_folders_snapshot(config: RunnerConfig) -> tuple[str, ...]:
+    """La bandeja y las autorizaciones: fuera de la copia, y nunca las toca el ejecutor."""
+    folders = (config.inbox, config.authorizations, config.used_authorizations)
+    return tuple(_directory_sha(folder) for folder in folders)
+
+
+def check_runner_folders(config: RunnerConfig, before: tuple[str, ...]) -> None:
+    """Detecta; no impide. Una autorización plantada para otro bloque no pasaría inadvertida."""
+    if runner_folders_snapshot(config) != before:
+        raise BlockedError(Reason.REPO_INVARIANT_BROKEN, "runner_folders")
+
+
+def check_authorized_changes(
+    authorization: RealRunAuthorization, changes: Sequence[Change]
+) -> None:
+    """Exactamente los archivos autorizados, y todos nuevos. Ni uno más, ni uno menos."""
+    if sorted(change.path for change in changes) != sorted(authorization.allowed_paths):
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "changes")
+    if any(change.status != "A" for change in changes):
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "changes")
 
 
 def check_claude_user_settings(config: RunnerConfig) -> None:
@@ -2214,6 +2471,8 @@ class RunReport:
     # Si el ejecutor real se detiene: por qué se detuvo, y qué encontró la revisión de daños.
     primary_reason: Reason | None = None
     damage_check: str = ""
+    # Si se consumió una autorización de run real para este bloque.
+    real_run_authorized: bool = False
     worktree: Path | None = None
     run_dir: Path | None = None
     # Solo para la revisión de daños. Nunca se escribe en la evidencia.
@@ -2254,6 +2513,14 @@ def render_evidence(report: RunReport) -> str:
                 f"- Sesión, sin transcripción guardada: `{report.executor_session}`",
             ]
             if report.executor_version
+            else []
+        ),
+        *(
+            [
+                "- Repositorio real: autorización de un solo uso, consumida, para la base "
+                f"`{report.base_sha}` y la especificación `{report.spec_sha256}`"
+            ]
+            if report.real_run_authorized
             else []
         ),
         "",
@@ -2311,7 +2578,14 @@ def ensure_external_dirs(config: RunnerConfig) -> None:
     repo = Path(os.path.realpath(config.repo_root))
     if root.is_relative_to(repo) or any("onedrive" in part.lower() for part in root.parts):
         raise BlockedError(Reason.UNSAFE_EXTERNAL_ROOT)
-    for folder in (config.inbox, config.worktrees, config.logs, config.state):
+    for folder in (
+        config.inbox,
+        config.worktrees,
+        config.logs,
+        config.state,
+        config.authorizations,
+        config.used_authorizations,
+    ):
         folder.mkdir(parents=True, exist_ok=True)
 
 
@@ -2596,10 +2870,11 @@ def run_executor(
     worktree: Path,
     run_dir: Path,
     report: RunReport,
+    authorization: RealRunAuthorization | None = None,
 ) -> None:
     report.executor_kind = executor.kind
     if isinstance(executor, ClaudeExecutor):
-        run_claude_executor(config, executor, spec, worktree, run_dir, report)
+        run_claude_executor(config, executor, spec, worktree, run_dir, report, authorization)
         return
     spec_path = f"{SPEC_DIR}/{spec.id}.md"
     command = executor.command(worktree, spec_path)
@@ -2683,9 +2958,12 @@ def run_claude_executor(
     worktree: Path,
     run_dir: Path,
     report: RunReport,
+    authorization: RealRunAuthorization | None = None,
 ) -> None:
-    # También aquí: esta función es pública, y estas dos barreras no dependen de quién llame.
-    ensure_not_real_repository(config, worktree)
+    # También aquí: esta función es pública, y estas barreras no dependen de quién llame.
+    check_real_repository_access(config, worktree, authorization)
+    if authorization is not None:
+        check_authorized_target(config, worktree, spec, executor, authorization, report.spec_commit)
     validate_docs_only_spec(spec)
     # Las rutas de usuario y administrada solo se cambian para el Claude falso: el real lee
     # siempre las verdaderas, y los controles deben mirar esas.
@@ -2818,6 +3096,7 @@ def _raise_if_damage_after_stop(
     snapshot: RepoSnapshot,
     git_dir: str,
     stopped: BaseException,
+    folders: tuple[str, ...],
 ) -> None:
     """Cualquier salida del ejecutor real pasa por aquí: una parada, Ctrl+C o un error.
 
@@ -2830,6 +3109,7 @@ def _raise_if_damage_after_stop(
         # El orden de siempre: un daño en el repositorio pesa más que un comando Git prohibido,
         # este más que la configuración de Claude, y todo más que el motivo de la parada.
         verify_after_executor(git, main_git, spec, worktree, report.spec_commit, snapshot, git_dir)
+        check_runner_folders(config, folders)
         check_scope(collect_changes(git), spec)
         _check_filesystem(worktree, [])
         # Tras Ctrl+C o un error, la traza aún no se había revisado.
@@ -2873,8 +3153,12 @@ def _pipeline(
     report: RunReport,
 ) -> None:
     real_executor = isinstance(executor, ClaudeExecutor)
+    authorization: RealRunAuthorization | None = None
     if real_executor:
-        ensure_not_real_repository(config)
+        authorization = load_real_run_authorization(config, block_id)
+        # Sin autorización, como siempre: el repositorio real se rechaza antes que nada.
+        if authorization is None:
+            ensure_not_real_repository(config)
     main_git = Git(config, config.repo_root, run_dir / "git.log")
     spec, base_sha = _validate_common(config, main_git, block_id)
     report.title = spec.title
@@ -2883,8 +3167,15 @@ def _pipeline(
     report.base_sha = base_sha
     if real_executor:
         validate_docs_only_spec(spec)
+    if authorization is not None:
+        # Todo lo que la autorización cita, ya validado por el runner y sin crear nada aún.
+        check_real_repository_access(config, config.repo_root, authorization)
+        authorize_real_run(authorization, spec, base_sha, executor, main_git)
     if not confirm(spec):
         raise BlockedError(Reason.NOT_APPROVED)
+    if authorization is not None:
+        consume_real_run_authorization(config, authorization)
+        report.real_run_authorized = True
 
     worktree = worktree_path(config, block_id)
     snapshot = capture_snapshot(main_git, spec.branch, worktree)
@@ -2901,21 +3192,26 @@ def _pipeline(
     _stage(git, [spec_rel])
     scan_secrets(config, worktree, run_dir, "specification", report)
     report.spec_commit = _commit(git, f"docs(orchestration): add approved spec for {spec.id}")
+    folders = runner_folders_snapshot(config)
 
     try:
-        run_executor(config, executor, spec, worktree, run_dir, report)
+        run_executor(config, executor, spec, worktree, run_dir, report, authorization)
     except BaseException as stopped:
         if real_executor:
             # Ninguna salida excusa los controles, tampoco Ctrl+C o un error al leer el log:
             # un daño previo pesa más que el motivo de la parada.
             _raise_if_damage_after_stop(
-                config, git, main_git, spec, worktree, report, snapshot, git_dir, stopped
+                config, git, main_git, spec, worktree, report, snapshot, git_dir, stopped, folders
             )
         raise
     verify_after_executor(git, main_git, spec, worktree, report.spec_commit, snapshot, git_dir)
+    if real_executor:
+        check_runner_folders(config, folders)
 
     report.changes = collect_changes(git)
     check_scope(report.changes, spec)
+    if authorization is not None:
+        check_authorized_changes(authorization, report.changes)
     _check_filesystem(worktree, report.changes)
     check_dependencies_unchanged(git, worktree, report.changes)
 
