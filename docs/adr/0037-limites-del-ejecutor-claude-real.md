@@ -1,12 +1,13 @@
 # ADR 0037 — Límites del ejecutor Claude real
 
 - Estado: **propuesto**
-- Fecha de la decisión: **2026-11-01**; actualizado el **2026-11-02** en O1.3.5
-- Bloque: **O1**, incrementos **O1.3.2** y **O1.3.5**
+- Fecha de la decisión: **2026-11-01**; actualizado el **2026-11-02** en O1.3.5 y en O1.3.R1.0
+- Bloque: **O1**, incrementos **O1.3.2**, **O1.3.5** y **O1.3.R1.0**
 - **Decide**: con qué condiciones el runner puede lanzar Claude Code real, y qué no garantiza. Desde
-  O1.3.5, también que **Claude real en O1 no recibe consola**, y qué configuración de Claude Code se niega
-- **No decide**: el primer `run` real sobre el repositorio (`O1.3.R1`) ni O1.4. Cada uno exige un gate
-  humano propio
+  O1.3.5, también que **Claude real en O1 no recibe consola**, y qué configuración de Claude Code se niega.
+  Desde O1.3.R1.0, **cómo se autoriza un run concreto sobre el repositorio real** (§9)
+- **No decide**: ejecutar el primer `run` real sobre el repositorio (`O1.3.R1`) ni O1.4. Cada uno exige un
+  gate humano propio
 - **No reabre** el [ADR 0036](0036-orquestacion-semiautomatica-de-bloques.md), cuyo §9 condicionaba el
   ejecutor a una prueba de bloqueo. Esa prueba ya se hizo:
   [`resultados-o1-3-1-y-o1-3-3.md`](../orchestration/resultados-o1-3-1-y-o1-3-3.md)
@@ -150,18 +151,59 @@ los dos. Una traza que no se llegó a leer no se da por limpia. Si la revisión 
 `damage_check_failed`: sin revisar, no se puede decir que no hubo daño. Si un segundo Ctrl+C la corta, el
 bloque termina como `interrupted` y el informe dice que la revisión quedó a medias.
 
-## 9. Decisión: el repositorio real sigue cerrado
+## 9. Decisión: el repositorio real, cerrado por defecto
 
 `ClaudeExecutor` no está en la consola, solo se inyecta por código y se niega a trabajar si `origin` es el
 repositorio autorizado. Lo comprueba en la configuración y preguntándole a Git, por las URL de lectura y de
 envío. Compara solo dueño y repositorio, en cualquier anfitrión, para reconocer HTTPS, SSH, usuario, puerto y
 alias de host. Un repositorio sin `origin` legible también se rechaza. **Protege de un error, no de un cambio
 deliberado:** quien cambie el remoto o el código la salta, y formas raras como `%2D` en la URL no se reconocen.
-Abrirlo exige un gate humano y un cambio deliberado de esa función.
+
+**Desde O1.3.R1.0, un run concreto se puede autorizar.** Es el «cambio deliberado» que pedía esta cláusula, y
+no es un interruptor: es una orden humana para un único run, y todo lo demás de este ADR sigue igual.
+
+- **Qué es.** Un archivo JSON, en UTF-8 sin BOM, en `%USERPROFILE%\elsa-o1\authorizations\<id>.json`, fuera
+  del repositorio. Lo escribe Juan, o el **operador** con los valores exactos que Juan da por escrito. El
+  operador es la sesión de Claude Code que dirige el bloque y llama al runner. **Nunca lo escribe el Claude que
+  el runner lanza**: cuando ese Claude arranca, el archivo ya se retiró. Como el operador también responde a la
+  aprobación del runner, el gate humano es el mensaje de Juan que ordena el run.
+- **Qué contiene.** Lista cerrada de campos, cada uno con su tipo exacto:
+
+  | Campo | Debe ser |
+  |---|---|
+  | `schema` | `elsa-o1-real-run-authorization/1` |
+  | `block_id` | El del bloque, igual al de la especificación |
+  | `repository` | `VallejoOsorio2026/Elsa-ai`. Además, la configuración y cada URL de lectura y de envío de `origin` deben ser exactamente `https://github.com/VallejoOsorio2026/Elsa-ai.git`: normalizar sirve para rechazar, no para permitir |
+  | `base_sha` | El SHA de `main` que valida el runner, igual a `origin/main` y al remoto. No existe «el último `main`» |
+  | `spec_sha256` | La huella exacta de la especificación |
+  | `branch` | La rama de la especificación, `claude/<id>-…`; nunca `main` |
+  | `allowed_paths` | Las rutas de la especificación, en el mismo orden |
+  | `change` | Solo `add`: cada ruta debe no existir en la base, ni con otras mayúsculas |
+  | `profile` | Solo `docs` |
+  | `executor` | Solo `claude` |
+  | `console` | Solo `false` |
+
+- **Cuándo se valida.** Tras las validaciones de solo lectura del runner y antes de crear nada. Sin archivo,
+  el repositorio real se rechaza como siempre, antes que nada.
+- **Un solo uso.** Antes de crear la copia, el archivo se mueve a `state\authorizations-used\`. Si la
+  ejecución se detiene después, la autorización sigue gastada, y ese bloque no admite otra: reintentar exige
+  un identificador nuevo. Si el archivo cambió entre la validación y ese momento, el bloque se detiene.
+- **Qué exige además.** El Claude real, sin prefijo: un Claude falso nunca trabaja sobre el repositorio real.
+  Antes de lanzarlo, sin fiarse de quien llama: que la autorización coincida con la especificación y ya esté
+  gastada, que la copia sea la del bloque y no el clon principal, y que esté en la rama autorizada, con
+  `HEAD` en el commit de la especificación y su padre en la base. Al terminar, que los cambios sean exactamente
+  las rutas autorizadas, todas nuevas, y que la bandeja y las carpetas de autorizaciones no hayan cambiado:
+  eso se comprueba en todo run del ejecutor real, también tras una parada.
+- **Qué no concede.** Ni consola, ni perfil `code`, ni push, ni merge, ni despliegue, ni cambios en `main`. El
+  runner no publica nada; el push de la rama y el merge siguen siendo decisiones humanas aparte.
+
+**Límites.** El archivo no está firmado: quien tenga el usuario de Windows puede escribirlo, igual que puede
+inyectar `ClaudeExecutor` por código. La autorización es un segundo control, no aislamiento.
 
 ## 10. Consecuencias
 
-- El runner lanza Claude Code real, pero solo en repositorios desechables hasta el gate de `O1.3.R1`.
+- El runner lanza Claude Code real en repositorios desechables y, solo con una autorización de un uso (§9), en
+  el repositorio real.
 - Una nueva versión de Claude Code exige repetir las pruebas reales antes de aceptarla. Lo mismo un cambio en
   `.claude/` o `CLAUDE.md` que altere el primer evento: las pruebas reales copian esa estructura.
 - Las pruebas reales consumen uso y corren solo a mano, con `ELSA_O1_CLAUDE_LIVE=1`. CI nunca las ejecuta.
@@ -173,7 +215,9 @@ Abrirlo exige un gate humano y un cambio deliberado de esa función.
 
 | Riesgo | Situación |
 |---|---|
-| Un fallo de Claude Code tendría acceso a todo el usuario de Windows | **No resuelto.** Aceptado solo para repositorios desechables, sin datos reales y cambios documentales |
+| Un fallo de Claude Code tendría acceso a todo el usuario de Windows | **No resuelto.** Aceptado para repositorios desechables y, con autorización de un uso, para un archivo documental nuevo en el repositorio real. Sin datos reales |
+| Autorización de run real sin firma | **Aceptado.** Quien tenga el usuario de Windows puede escribirla; es un segundo control junto a la inyección por código, no aislamiento (§9) |
+| La copia comparte el `.git` común con el clon principal | **Detectado.** Un cambio en hooks, refs o configuración se ve en la foto del repositorio y detiene el bloque, pero no se impide |
 | Red disponible para el proceso | **No resuelto.** Sin herramienta para que el modelo dirija tráfico |
 | Credential Manager accesible al usuario | **Mitigado.** Sin consola, y con `credential.helper` anulado para Git interno |
 | `.credentials.json` accesible al proceso | **Mitigado.** Claude Code lo necesita; el modelo tiene confinamiento |
@@ -193,5 +237,5 @@ Abrirlo exige un gate humano y un cambio deliberado de esa función.
 
 ## 12. Fuera de esta decisión
 
-`O1.3.R1`, O1.4, el perfil `code` y las 3 pruebas que fallan en Windows. La consola para Claude ya no está
-fuera de esta decisión: el §4 la descarta.
+Ejecutar `O1.3.R1`, O1.4, el push y el merge, el perfil `code` y las 3 pruebas que fallan en Windows. La
+consola para Claude ya no está fuera de esta decisión: el §4 la descarta.
