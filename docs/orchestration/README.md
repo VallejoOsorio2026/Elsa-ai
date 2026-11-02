@@ -14,10 +14,10 @@ Las reglas del proyecto siguen en [`CLAUDE.md`](../../CLAUDE.md); aquí no se re
 | Especificaciones de bloque | Existen en [`work/`](work/) |
 | Escaneo local de secretos | Se activa una vez por clon (§6) |
 | Runner local | Existe desde O1.2: [`scripts/orchestrator.py`](../../scripts/orchestrator.py), ver §10 |
-| Ejecutor real (Claude Code sin supervisión) | **No existe.** Es diseño, sujeto a la prueba de O1.3 |
+| Ejecutor real (Claude Code sin supervisión) | Existe en el código, **solo para repositorios desechables**. No está en la consola ni autorizado en el repositorio real. Ver §11 y [ADR 0037](../adr/0037-limites-del-ejecutor-claude-real.md) |
 | Publicar la rama, leer CI y dar el enlace del PR desde el runner | **No existe.** Corresponde a O1.4 |
 
-Mientras no exista un ejecutor real, un bloque que cambie archivos se dirige **a mano**.
+Mientras el ejecutor real no esté autorizado en el repositorio, un bloque que cambie archivos se dirige **a mano**.
 
 ## 2. Cómo se trabaja hoy
 
@@ -76,7 +76,7 @@ permitirlo:
 - cambios de alcance, de arquitectura o paso al bloque siguiente.
 
 **Rutas que un bloque orquestado nunca toca:** `supabase/**`, `render.yaml`, `.github/**`,
-`.env*`, `.claude/**`, `CLAUDE.md`, `.gitignore`, `.gitattributes`,
+`.env*`, `**/.credentials.json`, `docs/adr/**`, `.claude/**`, `CLAUDE.md`, `.gitignore`, `.gitattributes`,
 `.pre-commit-config.yaml`, `.gitleaks*`, el propio runner y sus tests, y las carpetas `work/` y
 `runs/` de este directorio. Algunas podrían esconder cambios o desactivar el escaneo. Si hay que
 cambiarlas, es un bloque dirigido directamente por una persona, no uno orquestado.
@@ -177,3 +177,34 @@ detiene el bloque. Corregirlas es un pendiente de un bloque aparte; ver
 - Un `.pyc` o una caché envenenados en las carpetas toleradas no se detectan.
 - Un bloque que solo borra archivos probablemente termine en `secret_scan_skipped`. Sin probar.
 - Si `Run` deja una rama sin fusionar, se conserva. No se borra a la fuerza, y ese `id` no se reutiliza.
+
+## 11. Ejecutor Claude real
+
+`ClaudeExecutor` lanza Claude Code real sin consola. **No está aislado:** corre con el usuario de Windows y con
+acceso a la red. Límites y motivos: [ADR 0037](../adr/0037-limites-del-ejecutor-claude-real.md). Mediciones:
+[`resultados-o1-3-1-y-o1-3-3.md`](resultados-o1-3-1-y-o1-3-3.md).
+
+**No se puede usar desde la consola,** y se niega a trabajar sobre el repositorio real. Esa barrera protege de un error, no de un cambio deliberado. Hoy solo lo invocan los
+tests.
+
+| Control | Qué hace |
+|---|---|
+| Versión | Exige exactamente 2.1.316, antes y después. Otra detiene el bloque |
+| Primer evento | Lista cerrada de sus 27 campos y sus valores, también en un `init` posterior; salvedades en el ADR 0037, §5. Una diferencia termina el proceso |
+| Configuración de usuario | Solo las claves ya medidas en `~/.claude/settings.json`; otra detiene el bloque antes de lanzar |
+| Comando | Lista cerrada de opciones con valor exacto, sin `--settings`, reglas `Edit(ruta)` y denegación de `.env` |
+| Entorno | Lista cerrada de variables, sin tokens |
+| Comandos Git internos | `GIT_TRACE`; solo los comandos de lectura ya observados. Otro detiene el bloque |
+| Especificación | Solo rutas exactas de documentación |
+| Salida | Se valida `structured_output` y se compara con Git |
+| Paradas | En un timeout, un error o un `blocked` también se revisan la traza, el repositorio y el alcance |
+| Perfil `code` | **Prohibido** |
+
+**Si Claude Code se actualiza,** el runner se detendrá. Hay que repetir las pruebas reales con la versión nueva y
+registrarla, por decisión explícita.
+
+**Pruebas reales**, que consumen uso y corren solo a mano en repositorios desechables:
+
+```bash
+$env:ELSA_O1_CLAUDE_LIVE='1'; python -m pytest tests/test_orchestrator_claude_live.py -v -s
+```

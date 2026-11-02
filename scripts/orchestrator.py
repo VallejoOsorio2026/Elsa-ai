@@ -9,14 +9,16 @@ no importa ``elsa`` aunque repita patrones de ``elsa.pc1``.
   se usa: el alcance se comprueba preguntándole a Git.
 - **Solo commits locales.** Este archivo no publica, no fusiona y no borra a la
   fuerza. Los subcomandos de Git admitidos son una lista cerrada.
-- **Sin ejecutor real.** En O1.2 ``run`` usa :class:`NoChangeExecutor`; el
-  ejecutor falso solo puede inyectarse desde el código de los tests.
+- **Ejecutor real solo por código.** La consola usa :class:`NoChangeExecutor`.
+  :class:`ClaudeExecutor` solo se inyecta desde código, se niega a trabajar sobre
+  el repositorio real y se limita a documentación (ADR 0037).
 """
 
 from __future__ import annotations
 
 import argparse
 import hashlib
+import itertools
 import json
 import os
 import re
@@ -28,6 +30,7 @@ import time
 import tomllib
 import traceback
 import unicodedata
+import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -92,6 +95,9 @@ ALWAYS_FORBIDDEN = (
     "scripts/orchestrator.py",
     "scripts/Start-ElsaBlock.ps1",
     "tests/*orchestrator*",
+    "tests/fake_claude.py",
+    "docs/adr/**",
+    "**/.credentials.json",
     f"{SPEC_DIR}/**",
     f"{EVIDENCE_DIR}/**",
 )
@@ -115,6 +121,184 @@ WINDOWS_KNOWN_TEST_FAILURES: Mapping[str, str] = {
         "intermitente: compara con < dos marcas de reloj que en Windows pueden coincidir"
     ),
 }
+
+# Claude Code real (ADR 0037). Todo lo que sigue se midió en esta versión exacta, y
+# no vale para otra: una versión distinta detiene el bloque.
+CLAUDE_VERSION = "2.1.316"
+CLAUDE_MODEL = "sonnet"
+CLAUDE_TOOLS = ("Read", "Edit", "Write", "Glob", "Grep")
+CLAUDE_FROZEN_FLAGS = (
+    "--safe-mode",
+    "--restricted",
+    "--strict-mcp-config",
+    "--disable-slash-commands",
+)
+# Lo que debe declarar el primer evento. `StructuredOutput` lo añade `--json-schema`.
+CLAUDE_EXPECTED_TOOLS = sorted(("Edit", "Glob", "Grep", "Read", "StructuredOutput", "Write"))
+CLAUDE_EXPECTED_AGENTS = sorted(("claude", "Explore", "general-purpose", "Plan"))
+CLAUDE_EXPECTED_PLUGINS = sorted(("cc-plugin-agents-md", "cc-plugin-plugin-authoring"))
+# Los 27 campos del primer evento con estas opciones: un campo nuevo o ausente detiene el
+# bloque. Sin comparar su valor, solo `uuid` y `powershell_path`, que cambian por ejecución
+# o por máquina. De `model` basta el prefijo, porque `sonnet` es un alias.
+CLAUDE_INIT_FIELDS = frozenset(
+    {
+        "type",
+        "subtype",
+        "uuid",
+        "session_id",
+        "cwd",
+        "original_cwd",
+        "powershell_path",
+        "claude_code_version",
+        "permissionMode",
+        "tools",
+        "mcp_servers",
+        "additional_directories",
+        "skills",
+        "slash_commands",
+        "agents",
+        "plugins",
+        "apiKeySource",
+        "model",
+        "analytics_disabled",
+        "capabilities",
+        "fast_mode_disabled_reason",
+        "fast_mode_state",
+        "output_style",
+        "per_turn_effort_active",
+        "product_feedback_disabled",
+        "ultrathink_available",
+        "view_mode",
+    }
+)
+CLAUDE_INIT_FIXED_VALUES: Mapping[str, object] = {
+    "analytics_disabled": True,
+    "capabilities": [
+        "interrupt_receipt_v1",
+        "interrupt_cancel_queued_v1",
+        "interrupt_send_now_v1",
+        "interrupt_requeue_taken_v1",
+        "msg_lifecycle_v1",
+        "request_marker_lists_v1",
+        "ask_user_question_unanswered_v1",
+        "lifecycle_wakeup_source_v1",
+        "sdk_mcp_tools_list_changed",
+        "sdk_mcp_manifests",
+        "mcp_read_resource_v1",
+        "mcp_tool_ui_meta_v1",
+        "ui_surface_v1",
+        "mcp_call_result_not_for_model_v1",
+    ],
+    "fast_mode_disabled_reason": "sdk_opt_in_required",
+    "fast_mode_state": "off",
+    "output_style": "default",
+    "per_turn_effort_active": True,
+    "product_feedback_disabled": True,
+    "ultrathink_available": False,
+    "view_mode": "default",
+}
+# Nada de esto puede aparecer nunca en el comando. `--settings` encabeza la lista: con
+# `-p`, un archivo inválido se ignora en silencio (medido en O1.3.1).
+FORBIDDEN_CLAUDE_OPTIONS = frozenset(
+    {
+        "--settings",
+        "--setting-sources",
+        "--dangerously-skip-permissions",
+        "--allow-dangerously-skip-permissions",
+        "--add-dir",
+        "--mcp-config",
+        "--plugin-dir",
+        "--plugin-url",
+        "--agent",
+        "--agents",
+        "--file",
+        "--chrome",
+        "--bare",
+        "--bg",
+        "--background",
+        "--resume",
+        "-r",
+        "--continue",
+        "-c",
+        "--worktree",
+        "-w",
+        "--cloud",
+        "--remote-control",
+        "--teleport",
+        "--system-prompt",
+        "--append-system-prompt",
+    }
+)
+CLAUDE_ENV_ALLOWLIST = (
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "HOME",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "PROGRAMDATA",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "USERNAME",
+    "OS",
+    "NUMBER_OF_PROCESSORS",
+    "PROCESSOR_ARCHITECTURE",
+    "LANG",
+)
+# Los comandos de Git que Claude Code lanza por su cuenta, observados en 39 ejecuciones.
+# Todos de lectura. Cualquier otro, por inocente que parezca, detiene el bloque.
+CLAUDE_READ_ONLY_GIT = frozenset(
+    {
+        "git version",
+        "git status --short --ignore-submodules=dirty",
+        "git log --oneline -n 5",
+        "git config user.name",
+        "git remote",
+        "git remote get-url origin",
+        "git remote get-url --push origin",
+        "git config --get remote.origin.url",
+        "git ls-files --error-unmatch -- ':(icase).claude/settings.local.json'",
+    }
+)
+CLAUDE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "result": {"type": "string", "enum": ["done", "blocked"]},
+        "files_changed": {"type": "array", "items": {"type": "string"}},
+        "blocked": {"type": "boolean"},
+        "reason": {"type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$"},
+    },
+    "required": ["result", "files_changed", "blocked", "reason"],
+}
+CLAUDE_MAX_ALLOWED_PATHS = 5
+CLAUDE_INIT_TIMEOUT_SECONDS = 60.0
+CLAUDE_USER_SETTINGS_ALLOWED = frozenset({"autoUpdatesChannel", "tui"})
+# Rutas que gitleaks excluye por defecto: un secreto ahí pasaría los escaneos.
+_GITLEAKS_EXCLUDED_PATH_RE = re.compile(
+    r"(?i)(^|/)(node_modules|bower_components|vendor|v?env|virtualenv|lib(64)?|python)/"
+    r"|\.dist-info/"
+)
+_CLAUDE_BARE_OPTIONS = frozenset({*CLAUDE_FROZEN_FLAGS, "--verbose", "--no-session-persistence"})
+_CLAUDE_VALUE_OPTIONS = frozenset(
+    {
+        "-p",
+        "--model",
+        "--output-format",
+        "--json-schema",
+        "--session-id",
+        "--permission-mode",
+        "--permission-prompts",
+        "--tools",
+        "--allowedTools",
+        "--disallowedTools",
+    }
+)
+_CLAUDE_READ_RULES = frozenset({"Read", "Glob", "Grep"})
+_CLAUDE_EDIT_RULE_RE = re.compile(r"Edit\([A-Za-z0-9._/\-]+\)")
 
 # Directorios ignorados que los controles de calidad pueden dejar.
 ALLOWED_CACHE_DIRS = frozenset({".pytest_cache", ".ruff_cache", ".mypy_cache", "__pycache__"})
@@ -198,6 +382,14 @@ _ENV_ALLOWLIST = frozenset(
 
 # Programas que este runner nunca lanza en O1.2.
 _FORBIDDEN_PROGRAMS = frozenset({"claude", "gh"})
+_GIT_TRACE_RE = re.compile(r"\btrace: (.*)$")
+_GIT_TRACE_COMMAND_RE = re.compile(r"(?:built-in|exec|run_command): (.*)$")
+_GIT_TRACE_HARMLESS = ("resolved executable dir: ",)
+# Ni el esquema, ni el usuario, ni el anfitrión o su alias, ni el puerto cambian de qué
+# repositorio se habla: solo cuenta la ruta.
+_ORIGIN_RE = re.compile(r"^(?:[a-z][a-z0-9+.\-]*://)?(?:[^/]*@)?[^:/@]+(?::\d+)?[:/]+(.+)$")
+# Una línea que no se pudo leer y parece un `init` no se da por inofensiva.
+_UNREADABLE_INIT_RE = re.compile(r'"subtype"\s*:\s*"init"')
 
 _ALLOWED_GIT_COMMANDS = frozenset(
     {
@@ -301,6 +493,18 @@ class Reason(StrEnum):
     GIT_TIMEOUT = "git_timeout"
     CLEANUP_REFUSED = "cleanup_refused"
     NOTHING_TO_CLEAN = "nothing_to_clean"
+    CLAUDE_NOT_FOUND = "claude_not_found"
+    CLAUDE_VERSION_MISMATCH = "claude_version_mismatch"
+    CLAUDE_INIT_MISSING = "claude_init_missing"
+    CLAUDE_CAPABILITY_MISMATCH = "claude_capability_mismatch"
+    CLAUDE_UNSAFE_COMMAND = "claude_unsafe_command"
+    CLAUDE_GIT_TRACE_MISSING = "claude_git_trace_missing"
+    CLAUDE_GIT_COMMAND_NOT_ALLOWED = "claude_git_command_not_allowed"
+    INVALID_STRUCTURED_OUTPUT = "invalid_structured_output"
+    CLAUDE_REPORT_MISMATCH = "claude_report_mismatch"
+    CODE_PROFILE_FORBIDDEN = "code_profile_forbidden"
+    REAL_REPO_NOT_AUTHORIZED = "real_repo_not_authorized"
+    CLAUDE_USER_SETTINGS_UNEXPECTED = "claude_user_settings_unexpected"
     INTERRUPTED = "interrupted"
     INTERNAL_ERROR = "internal_error"
 
@@ -360,6 +564,18 @@ MESSAGES: Mapping[Reason, str] = {
     Reason.GIT_TIMEOUT: "Un comando de Git superó su tiempo límite.",
     Reason.CLEANUP_REFUSED: "Git rechazó retirar la copia de trabajo. No se fuerza.",
     Reason.NOTHING_TO_CLEAN: "No hay copia de trabajo de este bloque.",
+    Reason.CLAUDE_NOT_FOUND: "No se encontró Claude Code.",
+    Reason.CLAUDE_VERSION_MISMATCH: "La versión de Claude Code no es la validada.",
+    Reason.CLAUDE_INIT_MISSING: "No se pudo verificar qué capacidades recibió Claude Code.",
+    Reason.CLAUDE_CAPABILITY_MISMATCH: "Claude Code recibió una capacidad inesperada.",
+    Reason.CLAUDE_UNSAFE_COMMAND: "El comando de Claude Code incumple el contrato.",
+    Reason.CLAUDE_GIT_TRACE_MISSING: "No hay registro de los comandos Git de Claude Code.",
+    Reason.CLAUDE_GIT_COMMAND_NOT_ALLOWED: "Claude Code lanzó un comando Git no observado antes.",
+    Reason.INVALID_STRUCTURED_OUTPUT: "La salida estructurada de Claude no cumple el contrato.",
+    Reason.CLAUDE_REPORT_MISMATCH: "Lo que Claude declara no coincide con lo que dice Git.",
+    Reason.CODE_PROFILE_FORBIDDEN: "El ejecutor real solo puede cambiar documentación.",
+    Reason.REAL_REPO_NOT_AUTHORIZED: "El ejecutor real no está autorizado en el repositorio real.",
+    Reason.CLAUDE_USER_SETTINGS_UNEXPECTED: "La configuración de usuario no es la validada.",
     Reason.INTERRUPTED: "Ejecución interrumpida por el operador.",
     Reason.INTERNAL_ERROR: "Error interno del runner. Detalle en los logs locales.",
 }
@@ -409,6 +625,7 @@ class RunnerConfig:
     max_executor_output: int = MAX_EXECUTOR_OUTPUT_BYTES
     kill_wait_seconds: float = KILL_WAIT_SECONDS
     extra_env: Mapping[str, str] = field(default_factory=dict)
+    claude_home: Path | None = None
 
     @property
     def inbox(self) -> Path:
@@ -512,6 +729,7 @@ class ProcessResult:
     left_processes: bool
     orphan_suspected: bool
     duration: float
+    aborted: bool = False
 
 
 if sys.platform == "win32":
@@ -738,9 +956,9 @@ else:
             pass
 
 
-def _check_program(argv: Sequence[str]) -> None:
-    name = re.split(r"[\\/]", argv[0])[-1]
-    if name.rsplit(".", 1)[0].lower() in _FORBIDDEN_PROGRAMS:
+def _check_program(argv: Sequence[str], *, allow_claude: bool = False) -> None:
+    name = re.split(r"[\\/]", argv[0])[-1].rsplit(".", 1)[0].lower()
+    if name in _FORBIDDEN_PROGRAMS and not (allow_claude and name == "claude"):
         raise BlockedError(Reason.PROCESS_CONTROL_FAILED, "forbidden_program")
 
 
@@ -765,13 +983,16 @@ def run_process(
     stderr: IO[bytes] | int = subprocess.STDOUT,
     kill_wait: float = KILL_WAIT_SECONDS,
     max_output: int | None = None,
+    on_poll: Callable[[], bool] | None = None,
+    allow_claude: bool = False,
 ) -> ProcessResult:
     """Ejecuta un comando con plazo. La salida va a un archivo, nunca a una tubería.
 
     Con una tubería, un nieto vivo que la herede dejaría al runner esperando
-    para siempre aunque el hijo ya hubiera terminado.
+    para siempre aunque el hijo ya hubiera terminado. ``on_poll`` permite cortar
+    el proceso mientras corre, si devuelve verdadero.
     """
-    _check_program(argv)
+    _check_program(argv, allow_claude=allow_claude)
     started = time.monotonic()
     deadline = started + timeout
     try:
@@ -780,6 +1001,7 @@ def run_process(
         raise BlockedError(Reason.PROCESS_CONTROL_FAILED, type(error).__name__) from error
     timed_out = False
     output_exceeded = False
+    aborted = False
     try:
         while True:
             try:
@@ -793,10 +1015,13 @@ def run_process(
             if max_output is not None and os.fstat(stdout.fileno()).st_size > max_output:
                 output_exceeded = True
                 break
+            if on_poll is not None and on_poll():
+                aborted = True
+                break
         left_processes = False
-        if not timed_out and not output_exceeded:
+        if not timed_out and not output_exceeded and not aborted:
             left_processes = not _wait_until_empty(tree, _SETTLE_SECONDS)
-        if timed_out or output_exceeded or left_processes:
+        if timed_out or output_exceeded or aborted or left_processes:
             tree.terminate()
         orphan_suspected = not _wait_until_empty(tree, kill_wait)
         try:
@@ -815,6 +1040,7 @@ def run_process(
         left_processes=left_processes,
         orphan_suspected=orphan_suspected,
         duration=time.monotonic() - started,
+        aborted=aborted,
     )
 
 
@@ -844,9 +1070,10 @@ def validate_git_args(args: Sequence[str]) -> None:
             raise BlockedError(Reason.GIT_FAILED, "git_argument_not_allowed")
 
 
-def find_git(config: RunnerConfig) -> str:
-    """Ruta absoluta de Git. En Windows, `git` a secas buscaría antes en la carpeta actual."""
-    name = "git.exe" if sys.platform == "win32" else "git"
+def _find_program(config: RunnerConfig, name: str) -> str | None:
+    """Ruta absoluta. En Windows, un nombre a secas buscaría antes en la carpeta actual."""
+    if sys.platform == "win32":
+        name = f"{name}.exe"
     repo = os.path.normcase(os.path.realpath(config.repo_root))
     for folder in os.environ.get("PATH", "").split(os.pathsep):
         if not folder or not os.path.isabs(folder):
@@ -857,7 +1084,14 @@ def find_git(config: RunnerConfig) -> str:
         candidate = os.path.join(folder, name)
         if os.path.isfile(candidate):
             return candidate
-    raise BlockedError(Reason.GIT_FAILED, "git_not_found")
+    return None
+
+
+def find_git(config: RunnerConfig) -> str:
+    found = _find_program(config, "git")
+    if found is None:
+        raise BlockedError(Reason.GIT_FAILED, "git_not_found")
+    return found
 
 
 @dataclass(frozen=True)
@@ -1424,6 +1658,360 @@ class NoChangeExecutor:
         return None
 
 
+@dataclass(frozen=True)
+class ClaudeExecutor:
+    """Claude Code real, sin consola y solo para documentación (ADR 0037).
+
+    ``argv_prefix`` solo lo usan los tests, para lanzar un Claude falso. No es
+    accesible desde la consola, y lo que se ejecuta nunca sale de la especificación.
+    """
+
+    argv_prefix: tuple[str, ...] = ()
+    kind: str = "claude"
+
+    def command(self, worktree: Path, spec_path: str) -> tuple[str, ...] | None:
+        raise BlockedError(Reason.PROCESS_CONTROL_FAILED, "claude_uses_its_own_route")
+
+
+def validate_docs_only_spec(spec: Spec) -> None:
+    """Con ejecutor real: rutas exactas de documentación, sin comodines."""
+    if len(spec.allowed_paths) > CLAUDE_MAX_ALLOWED_PATHS:
+        raise BlockedError(Reason.INVALID_SPEC, "claude_too_many_paths")
+    for path in spec.allowed_paths:
+        documentary = path == "README.md" or (path.startswith("docs/") and path.endswith(".md"))
+        if "*" in path or not documentary or is_unsafe_path(path):
+            raise BlockedError(Reason.INVALID_SPEC, "claude_docs_only")
+        if _GITLEAKS_EXCLUDED_PATH_RE.search(path):
+            raise BlockedError(Reason.INVALID_SPEC, "claude_path_not_scanned")
+
+
+def normalized_origin(url: str) -> str:
+    """Dueño y repositorio. `git@alias:x/y.git` y `https://github.com/x/y` son el mismo."""
+    text = url.strip().lower()
+    found = _ORIGIN_RE.fullmatch(text)
+    path = found.group(1) if found is not None else text
+    return re.sub(r"/+", "/", path).strip("/").removesuffix(".git").rstrip("/")
+
+
+def ensure_not_real_repository(config: RunnerConfig, cwd: Path | None = None) -> None:
+    """El primer run real exige otro gate humano y un cambio deliberado de esta función.
+
+    La configuración sola no dice dónde se está: también se le pregunta a Git, por las URL
+    de lectura y de envío. Protege de un error, no de quien cambie el remoto a propósito.
+    """
+    real = normalized_origin(EXPECTED_ORIGIN)
+    if normalized_origin(config.expected_origin) == real:
+        raise BlockedError(Reason.REAL_REPO_NOT_AUTHORIZED)
+    git = Git(config, cwd or config.repo_root)
+    for extra in ((), ("--push",)):
+        found = git.run("remote", "get-url", *extra, "--all", "origin", check=False)
+        urls = found.text.splitlines()
+        # Sin URL configurada, Git responde con éxito y repite el nombre del remoto.
+        if found.returncode != 0 or not urls or "origin" in urls:
+            raise BlockedError(Reason.REAL_REPO_NOT_AUTHORIZED, "origin_unreadable")
+        if any(normalized_origin(url) == real for url in urls):
+            raise BlockedError(Reason.REAL_REPO_NOT_AUTHORIZED)
+
+
+def check_claude_user_settings(config: RunnerConfig) -> None:
+    """`--settings` está prohibido, y el primer evento no muestra permisos ni hooks de usuario.
+
+    Por eso se exige, antes de lanzar, que la configuración de usuario sea la ya medida.
+    """
+    home = config.claude_home or Path.home() / ".claude"
+    if (home / "settings.local.json").exists():
+        raise BlockedError(Reason.CLAUDE_USER_SETTINGS_UNEXPECTED, "settings_local")
+    path = home / "settings.json"
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise BlockedError(Reason.CLAUDE_USER_SETTINGS_UNEXPECTED, "unreadable") from error
+    if not isinstance(data, dict) or set(data) - CLAUDE_USER_SETTINGS_ALLOWED:
+        raise BlockedError(Reason.CLAUDE_USER_SETTINGS_UNEXPECTED, "unexpected_keys")
+
+
+def claude_deny_rules() -> tuple[str, ...]:
+    """`.env` en sus 8 variantes de mayúsculas. La copia no debe tenerlo, pero se niega igual."""
+    names = ("." + "".join(letters) for letters in itertools.product("eE", "nN", "vV"))
+    return tuple(f"{tool}(**/{name}*)" for name in names for tool in CLAUDE_TOOLS)
+
+
+def build_claude_argv(prefix: Sequence[str], spec: Spec, session_id: str) -> list[str]:
+    """El comando completo. `Edit(ruta)` también autoriza `Write`; `Write(ruta)` solo no."""
+    allowed = ["Read", "Glob", "Grep", *(f"Edit({path})" for path in spec.allowed_paths)]
+    prompt = (
+        f"Lee {SPEC_DIR}/{spec.id}.md y haz exactamente lo que pide, y nada más. Solo puedes "
+        "crear o cambiar las rutas permitidas que indica. Si algo te lo impide, no busques "
+        "otro camino: detente y declara blocked. Todo archivo debe terminar en un salto de "
+        "línea, sin espacios al final de las líneas. Responde con el esquema; en files_changed "
+        "pon las rutas relativas que cambiaste, con barra normal, y en reason un código corto."
+    )
+    argv = [
+        *prefix,
+        "-p",
+        prompt,
+        "--model",
+        CLAUDE_MODEL,
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--json-schema",
+        json.dumps(CLAUDE_SCHEMA),
+        "--session-id",
+        session_id,
+        "--no-session-persistence",
+        "--permission-mode",
+        "dontAsk",
+        "--permission-prompts",
+        "none",
+        *CLAUDE_FROZEN_FLAGS,
+        "--tools",
+        ",".join(CLAUDE_TOOLS),
+        "--allowedTools",
+        ",".join(allowed),
+        "--disallowedTools",
+        ",".join(claude_deny_rules()),
+    ]
+    validate_claude_argv(argv, len(prefix))
+    return argv
+
+
+def validate_claude_argv(argv: Sequence[str], prefix_length: int = 1) -> None:
+    """Última barrera antes de lanzar. Lista cerrada: cada opción una vez y con su valor exacto."""
+    values: dict[str, str] = {}
+    seen: set[str] = set()
+    index = prefix_length
+    while index < len(argv):
+        token = argv[index]
+        if token in seen:
+            raise BlockedError(Reason.CLAUDE_UNSAFE_COMMAND, "repeated_option")
+        seen.add(token)
+        if token in _CLAUDE_BARE_OPTIONS:
+            index += 1
+        elif token in _CLAUDE_VALUE_OPTIONS and index + 1 < len(argv):
+            values[token] = argv[index + 1]
+            index += 2
+        elif token.split("=", 1)[0] in FORBIDDEN_CLAUDE_OPTIONS:
+            raise BlockedError(Reason.CLAUDE_UNSAFE_COMMAND, "forbidden_option")
+        else:
+            raise BlockedError(Reason.CLAUDE_UNSAFE_COMMAND, "unknown_option")
+    if seen != _CLAUDE_BARE_OPTIONS | _CLAUDE_VALUE_OPTIONS:
+        raise BlockedError(Reason.CLAUDE_UNSAFE_COMMAND, "missing_option")
+    for option, expected in (
+        ("--model", CLAUDE_MODEL),
+        ("--output-format", "stream-json"),
+        ("--json-schema", json.dumps(CLAUDE_SCHEMA)),
+        ("--permission-mode", "dontAsk"),
+        ("--permission-prompts", "none"),
+        ("--tools", ",".join(CLAUDE_TOOLS)),
+        ("--disallowedTools", ",".join(claude_deny_rules())),
+    ):
+        if values[option] != expected:
+            raise BlockedError(Reason.CLAUDE_UNSAFE_COMMAND, "wrong_value")
+    for rule in values["--allowedTools"].split(","):
+        if rule not in _CLAUDE_READ_RULES and not _CLAUDE_EDIT_RULE_RE.fullmatch(rule):
+            raise BlockedError(Reason.CLAUDE_UNSAFE_COMMAND, "broad_rule")
+
+
+def build_claude_env(config: RunnerConfig, trace_path: Path, temp_dir: Path) -> dict[str, str]:
+    """Lista cerrada: nada de `ANTHROPIC_*`, `CLAUDE*` ni tokens heredados.
+
+    De `extra_env`, que solo fijan los tests, pasan únicamente las variables del Claude falso
+    y un proxy local: lo demás podría cambiar a dónde habla Claude, o su traza.
+    """
+    env = {name: os.environ[name] for name in CLAUDE_ENV_ALLOWLIST if os.environ.get(name)}
+    git_folder = str(Path(find_git(config)).parent)
+    if sys.platform == "win32":
+        system = os.environ.get("SYSTEMROOT", r"C:\Windows")
+        folders = [rf"{system}\System32", system, rf"{system}\System32\Wbem", git_folder]
+    else:
+        folders = ["/usr/bin", "/bin", git_folder]
+    env["PATH"] = os.pathsep.join(folders)
+    env["TEMP"] = env["TMP"] = env["TMPDIR"] = str(temp_dir)
+    env.update(
+        {
+            "GIT_TERMINAL_PROMPT": "0",
+            "GCM_INTERACTIVE": "never",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "credential.helper",
+            "GIT_CONFIG_VALUE_0": "",
+            "GIT_TRACE": str(trace_path),
+            "GIT_OPTIONAL_LOCKS": "0",
+            "DISABLE_AUTOUPDATER": "1",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        }
+    )
+    for name, value in config.extra_env.items():
+        local_proxy = name == "HTTPS_PROXY" and value.startswith("http://127.0.0.1:")
+        if local_proxy or name.startswith("FAKE_CLAUDE_"):
+            env[name] = value
+    return env
+
+
+def check_claude_init(
+    init: Mapping[str, Any], *, session_id: str | None = None, cwd: Path | None = None
+) -> None:
+    """Compara el primer evento de forma exacta. Una capacidad inesperada lo detiene todo."""
+    if set(init) != CLAUDE_INIT_FIELDS:
+        raise BlockedError(Reason.CLAUDE_CAPABILITY_MISMATCH, "fields")
+    checks: dict[str, tuple[object, object]] = {
+        "version": (init.get("claude_code_version"), CLAUDE_VERSION),
+        "permission_mode": (init.get("permissionMode"), "dontAsk"),
+        "tools": (sorted(init.get("tools") or []), CLAUDE_EXPECTED_TOOLS),
+        "mcp": (init.get("mcp_servers"), []),
+        "additional_directories": (init.get("additional_directories"), []),
+        "skills": (init.get("skills"), []),
+        "slash_commands": (init.get("slash_commands"), []),
+        "agents": (sorted(init.get("agents") or []), CLAUDE_EXPECTED_AGENTS),
+        "plugins": (
+            init.get("plugins"),
+            [
+                {"name": name, "path": "builtin", "source": f"{name}@builtin"}
+                for name in CLAUDE_EXPECTED_PLUGINS
+            ],
+        ),
+        "api_key_source": (init.get("apiKeySource"), "none"),
+        "model": (str(init.get("model")).startswith("claude-sonnet"), True),
+    }
+    for name, expected in CLAUDE_INIT_FIXED_VALUES.items():
+        checks[name] = (init.get(name), expected)
+    if session_id is not None:
+        checks["session"] = (init.get("session_id"), session_id)
+    if cwd is not None and not all(
+        _same_path(str(init.get(name)), cwd) for name in ("cwd", "original_cwd")
+    ):
+        raise BlockedError(Reason.CLAUDE_CAPABILITY_MISMATCH, "cwd")
+    for name, (seen, expected) in checks.items():
+        if seen != expected:
+            raise BlockedError(Reason.CLAUDE_CAPABILITY_MISMATCH, name)
+
+
+def _stream_lines(data: bytes) -> list[str]:
+    """Solo por `\\n`: `splitlines` también parte en U+2028, válido dentro de un texto JSON."""
+    return data.decode("utf-8", "replace").split("\n")
+
+
+def _stream_event(line: str) -> dict[str, Any] | None:
+    try:
+        event = json.loads(line)
+    except ValueError:
+        return None
+    return event if isinstance(event, dict) else None
+
+
+def _stream_events(data: bytes) -> list[dict[str, Any]]:
+    events = (_stream_event(line) for line in _stream_lines(data))
+    return [event for event in events if event is not None]
+
+
+class _ClaudeInitWatcher:
+    """Revisa cada evento `init` mientras Claude corre, para cortarlo si no coincide."""
+
+    def __init__(self, log_path: Path, session_id: str, cwd: Path) -> None:
+        self._log_path = log_path
+        self._session_id = session_id
+        self._cwd = cwd
+        self._deadline = time.monotonic() + CLAUDE_INIT_TIMEOUT_SECONDS
+        self._offset = 0
+        self.seen = False
+        self.error: BlockedError | None = None
+
+    def inspect(self, data: bytes) -> None:
+        """Un segundo `init` tampoco puede traer otra cosa. Lo que no se pueda leer detiene."""
+        try:
+            for line in _stream_lines(data):
+                event = _stream_event(line)
+                if event is None:
+                    if line and _UNREADABLE_INIT_RE.search(line):
+                        self._fail("unreadable_init")
+                elif event.get("type") == "system" and event.get("subtype") == "init":
+                    self.seen = True
+                    check_claude_init(event, session_id=self._session_id, cwd=self._cwd)
+        except BlockedError as error:
+            self.error = self.error or error
+        except Exception as error:
+            # Como `BlockedError`, para que pase por la revisión de daños.
+            self._fail(type(error).__name__)
+
+    def _fail(self, detail: str) -> None:
+        self.error = self.error or BlockedError(Reason.CLAUDE_CAPABILITY_MISMATCH, detail)
+
+    def __call__(self) -> bool:
+        """Lee lo nuevo del log en cada vuelta. Una línea a medias espera a la siguiente."""
+        try:
+            with open(self._log_path, "rb") as log:
+                log.seek(self._offset)
+                data = log.read(MAX_EXECUTOR_OUTPUT_BYTES)
+        except OSError as error:
+            self._fail(type(error).__name__)
+            return True
+        complete = data[: data.rfind(b"\n") + 1]
+        self._offset += len(complete)
+        # Primero lo leído: una capacidad inesperada ahí sigue siendo el motivo.
+        self.inspect(complete)
+        # Lo que quedara detrás no se llegaría a leer: no se da por revisado. Es salida
+        # excesiva, no una capacidad vista.
+        if len(data) >= MAX_EXECUTOR_OUTPUT_BYTES:
+            self.error = self.error or BlockedError(
+                Reason.EXECUTOR_OUTPUT_TOO_LARGE, "log_too_large"
+            )
+            return True
+        if not self.seen and time.monotonic() > self._deadline:
+            self.error = BlockedError(Reason.CLAUDE_INIT_MISSING, "no_init_in_time")
+        return self.error is not None
+
+
+def check_git_trace(text: str, *, require_commands: bool = True) -> None:
+    """Los comandos Git que lanzó Claude Code, comparados con la lista exacta.
+
+    Cualquier línea que no se reconozca también detiene: lo prohibido por defecto.
+    """
+    commands = 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        found = _GIT_TRACE_RE.search(line)
+        if found is None:
+            raise BlockedError(Reason.CLAUDE_GIT_COMMAND_NOT_ALLOWED, "unknown_trace_line")
+        entry = found.group(1)
+        if entry.startswith(_GIT_TRACE_HARMLESS):
+            continue
+        match = _GIT_TRACE_COMMAND_RE.match(entry)
+        if match is None or match.group(1).strip() not in CLAUDE_READ_ONLY_GIT:
+            raise BlockedError(Reason.CLAUDE_GIT_COMMAND_NOT_ALLOWED)
+        commands += 1
+    if require_commands and not commands:
+        raise BlockedError(Reason.CLAUDE_GIT_TRACE_MISSING)
+
+
+def validate_structured_output(value: object) -> dict[str, Any]:
+    """Valida la forma. Lo que Claude diga nunca decide el resultado: Git manda."""
+    fields = {"result", "files_changed", "blocked", "reason"}
+    if not isinstance(value, dict) or set(value) != fields:
+        raise BlockedError(Reason.INVALID_STRUCTURED_OUTPUT, "fields")
+    if value["result"] not in ("done", "blocked") or type(value["blocked"]) is not bool:
+        raise BlockedError(Reason.INVALID_STRUCTURED_OUTPUT, "result")
+    if (value["result"] == "blocked") != value["blocked"]:
+        raise BlockedError(Reason.INVALID_STRUCTURED_OUTPUT, "incoherent")
+    paths = value["files_changed"]
+    if not isinstance(paths, list) or not all(isinstance(path, str) for path in paths):
+        raise BlockedError(Reason.INVALID_STRUCTURED_OUTPUT, "files_changed")
+    reason = value["reason"]
+    if not isinstance(reason, str) or not _EXECUTOR_REASON_RE.fullmatch(reason):
+        raise BlockedError(Reason.INVALID_STRUCTURED_OUTPUT, "reason")
+    return value
+
+
+def check_claude_report(structured: Mapping[str, Any], changes: Sequence[Change]) -> None:
+    declared = {
+        str(path).replace("\\", "/").removeprefix("./") for path in structured["files_changed"]
+    }
+    if declared != {change.path for change in changes}:
+        raise BlockedError(Reason.CLAUDE_REPORT_MISMATCH)
+
+
 def parse_executor_output(data: bytes) -> tuple[str, str | None]:
     """Contrato: la última línea no vacía es JSON con ``status`` y ``reason_code``."""
     lines = [line for line in data.decode("utf-8", "replace").splitlines() if line.strip()]
@@ -1472,6 +2060,9 @@ class RunReport:
     executor_returncode: int | None = None
     executor_status: str = ""
     executor_duration: float = 0.0
+    executor_version: str = ""
+    executor_session: str = ""
+    structured_output: dict[str, Any] | None = None
     changes: list[Change] = field(default_factory=list)
     profile: str = ""
     gates: list[GateRecord] = field(default_factory=list)
@@ -1512,6 +2103,14 @@ def render_evidence(report: RunReport) -> str:
         f"- Código de salida: `{report.executor_returncode}`",
         f"- Estado declarado: `{report.executor_status}`",
         f"- Duración: {report.executor_duration:.1f} s",
+        *(
+            [
+                f"- Versión validada: `{report.executor_version}`",
+                f"- Sesión, sin transcripción guardada: `{report.executor_session}`",
+            ]
+            if report.executor_version
+            else []
+        ),
         "",
         "## Alcance",
         "",
@@ -1697,6 +2296,8 @@ def _run_logged(
     env: Mapping[str, str],
     timeout: float,
     log_path: Path,
+    on_poll: Callable[[], bool] | None = None,
+    allow_claude: bool = False,
 ) -> tuple[ProcessResult, bytes]:
     """Ejecuta con log y devuelve su final. El log se limpia siempre, incluso con Ctrl+C."""
     try:
@@ -1709,7 +2310,12 @@ def _run_logged(
                 stdout=log,
                 kill_wait=config.kill_wait_seconds,
                 max_output=config.max_executor_output,
+                on_poll=on_poll,
+                allow_claude=allow_claude,
             )
+        # Última pasada antes de limpiar: lo escrito desde la vuelta anterior.
+        if on_poll is not None:
+            on_poll()
         with open(log_path, "rb") as log:
             log.seek(0, os.SEEK_END)
             log.seek(max(0, log.tell() - MAX_LOG_TAIL_BYTES))
@@ -1844,6 +2450,9 @@ def run_executor(
     report: RunReport,
 ) -> None:
     report.executor_kind = executor.kind
+    if isinstance(executor, ClaudeExecutor):
+        run_claude_executor(config, executor, spec, worktree, run_dir, report)
+        return
     spec_path = f"{SPEC_DIR}/{spec.id}.md"
     command = executor.command(worktree, spec_path)
     if command is None:
@@ -1874,6 +2483,112 @@ def run_executor(
     report.executor_status = status
     if status == "blocked":
         raise BlockedError(Reason.EXECUTOR_BLOCKED, reason or "")
+
+
+def claude_prefix(config: RunnerConfig, executor: ClaudeExecutor) -> tuple[str, ...]:
+    if executor.argv_prefix:
+        return executor.argv_prefix
+    found = _find_program(config, "claude")
+    if found is None:
+        raise BlockedError(Reason.CLAUDE_NOT_FOUND)
+    return (found,)
+
+
+def check_claude_version(
+    config: RunnerConfig, prefix: Sequence[str], env: Mapping[str, str], cwd: Path
+) -> str:
+    with tempfile.TemporaryFile() as out:
+        result = run_process(
+            [*prefix, "--version"],
+            cwd=cwd,
+            env=env,
+            timeout=GIT_TIMEOUT_SECONDS,
+            stdout=out,
+            kill_wait=config.kill_wait_seconds,
+            allow_claude=True,
+        )
+        out.seek(0)
+        words = out.read(200).decode("utf-8", "replace").split()
+    if result.orphan_suspected:
+        raise BlockedError(Reason.ORPHAN_SUSPECTED, "version_check")
+    if result.returncode != 0 or not words or words[0] != CLAUDE_VERSION:
+        raise BlockedError(Reason.CLAUDE_VERSION_MISMATCH)
+    return words[0]
+
+
+def run_claude_executor(
+    config: RunnerConfig,
+    executor: ClaudeExecutor,
+    spec: Spec,
+    worktree: Path,
+    run_dir: Path,
+    report: RunReport,
+) -> None:
+    # También aquí: esta función es pública, y estas dos barreras no dependen de quién llame.
+    ensure_not_real_repository(config, worktree)
+    validate_docs_only_spec(spec)
+    check_claude_user_settings(config)
+    prefix = claude_prefix(config, executor)
+    trace_path = run_dir / "claude-git-trace.log"
+    temp_dir = run_dir / "claude-tmp"
+    temp_dir.mkdir(exist_ok=True)
+    env = build_claude_env(config, trace_path, temp_dir)
+    report.executor_version = check_claude_version(config, prefix, env, worktree)
+    report.executor_session = str(uuid.uuid4())
+    argv = build_claude_argv(prefix, spec, report.executor_session)
+    log_path = run_dir / "executor.log"
+    watcher = _ClaudeInitWatcher(log_path, report.executor_session, worktree)
+    trace_text = ""
+    try:
+        result, tail = _run_logged(
+            config,
+            argv,
+            cwd=worktree,
+            env=env,
+            timeout=config.executor_timeout_seconds or spec.timeout_minutes * 60.0,
+            log_path=log_path,
+            on_poll=watcher,
+            allow_claude=True,
+        )
+    finally:
+        # Se lee antes de limpiar: la limpieza recorta y podría esconder una línea.
+        if trace_path.is_file():
+            if trace_path.stat().st_size > MAX_LOG_TAIL_BYTES:
+                trace_text = "unknown: trace too large"
+            else:
+                trace_text = trace_path.read_text(encoding="utf-8", errors="replace")
+        scrub_file(trace_path)
+    report.executor_returncode = result.returncode
+    report.executor_duration = result.duration
+    # La última línea puede no terminar en salto de línea.
+    watcher.inspect(tail)
+    # Un comando Git prohibido pesa más que cualquier otro motivo de parada.
+    check_git_trace(trace_text, require_commands=False)
+    if result.orphan_suspected:
+        raise BlockedError(Reason.ORPHAN_SUSPECTED)
+    if watcher.error is not None:
+        raise watcher.error
+    if result.timed_out:
+        raise BlockedError(Reason.EXECUTOR_TIMEOUT)
+    if result.output_exceeded:
+        raise BlockedError(Reason.EXECUTOR_OUTPUT_TOO_LARGE)
+    if result.left_processes:
+        raise BlockedError(Reason.EXECUTOR_LEFT_PROCESSES)
+    if not watcher.seen:
+        raise BlockedError(Reason.CLAUDE_INIT_MISSING)
+    if result.returncode != 0:
+        raise BlockedError(Reason.EXECUTOR_FAILED)
+    check_claude_version(config, prefix, env, worktree)
+    check_git_trace(trace_text)
+    final = next((e for e in reversed(_stream_events(tail)) if e.get("type") == "result"), None)
+    if final is None or final.get("is_error"):
+        raise BlockedError(Reason.EXECUTOR_FAILED, "no_result")
+    if final.get("session_id") != report.executor_session:
+        raise BlockedError(Reason.CLAUDE_CAPABILITY_MISMATCH, "result_session")
+    report.structured_output = validate_structured_output(final.get("structured_output"))
+    report.executor_status = report.structured_output["result"]
+    if report.structured_output["blocked"]:
+        raise BlockedError(Reason.EXECUTOR_BLOCKED, report.structured_output["reason"])
 
 
 def verify_after_executor(
@@ -1913,6 +2628,24 @@ def verify_after_executor(
         raise BlockedError(Reason.IGNORED_FILE_PRESENT)
 
 
+def _raise_if_damage_after_stop(
+    git: Git,
+    main_git: Git,
+    spec: Spec,
+    worktree: Path,
+    report: RunReport,
+    snapshot: RepoSnapshot,
+    git_dir: str,
+    stopped: BlockedError,
+) -> None:
+    try:
+        verify_after_executor(git, main_git, spec, worktree, report.spec_commit, snapshot, git_dir)
+        check_scope(collect_changes(git), spec)
+        _check_filesystem(worktree, [])
+    except BlockedError as damage:
+        raise BlockedError(damage.reason, f"after_{stopped.reason.value}") from stopped
+
+
 def write_sanitized_evidence(
     config: RunnerConfig, git: Git, worktree: Path, report: RunReport
 ) -> None:
@@ -1933,12 +2666,17 @@ def _pipeline(
     run_dir: Path,
     report: RunReport,
 ) -> None:
+    real_executor = isinstance(executor, ClaudeExecutor)
+    if real_executor:
+        ensure_not_real_repository(config)
     main_git = Git(config, config.repo_root, run_dir / "git.log")
     spec, base_sha = _validate_common(config, main_git, block_id)
     report.title = spec.title
     report.spec_sha256 = spec.sha256
     report.branch = spec.branch
     report.base_sha = base_sha
+    if real_executor:
+        validate_docs_only_spec(spec)
     if not confirm(spec):
         raise BlockedError(Reason.NOT_APPROVED)
 
@@ -1958,7 +2696,15 @@ def _pipeline(
     scan_secrets(config, worktree, run_dir, "specification", report)
     report.spec_commit = _commit(git, f"docs(orchestration): add approved spec for {spec.id}")
 
-    run_executor(config, executor, spec, worktree, run_dir, report)
+    try:
+        run_executor(config, executor, spec, worktree, run_dir, report)
+    except BlockedError as stopped:
+        if real_executor:
+            # Una parada no excusa los controles: un daño previo pesa más que el motivo declarado.
+            _raise_if_damage_after_stop(
+                git, main_git, spec, worktree, report, snapshot, git_dir, stopped
+            )
+        raise
     verify_after_executor(git, main_git, spec, worktree, report.spec_commit, snapshot, git_dir)
 
     report.changes = collect_changes(git)
@@ -1967,6 +2713,13 @@ def _pipeline(
     check_dependencies_unchanged(git, worktree, report.changes)
 
     report.profile = gate_profile(report.changes)
+    if real_executor:
+        # `pytest` ejecutaría código escrito por Claude con el usuario de Windows.
+        if report.profile == "code":
+            raise BlockedError(Reason.CODE_PROFILE_FORBIDDEN)
+        if report.structured_output is None:
+            raise BlockedError(Reason.INVALID_STRUCTURED_OUTPUT, "missing")
+        check_claude_report(report.structured_output, report.changes)
     if report.changes:
         # Cada archivo por su nombre: lo que no se revisó no puede entrar.
         _stage(git, [change.path for change in report.changes])
