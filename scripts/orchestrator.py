@@ -127,6 +127,13 @@ WINDOWS_KNOWN_TEST_FAILURES: Mapping[str, str] = {
 CLAUDE_VERSION = "2.1.316"
 CLAUDE_MODEL = "sonnet"
 CLAUDE_TOOLS = ("Read", "Edit", "Write", "Glob", "Grep")
+# Claude real nunca recibe consola (ADR 0037, §4): en O1.3.4, `Bash(<comando exacto>)` dejó
+# pasar otros comandos y también encadenarlos. Esta lista se escribe aparte, a propósito: si
+# alguien cambia `CLAUDE_TOOLS`, el comando, el primer evento y la importación se detienen igual.
+_CLAUDE_FILE_TOOLS = frozenset({"Read", "Edit", "Write", "Glob", "Grep"})
+_CLAUDE_OBSERVED_ONLY_TOOLS = frozenset({"StructuredOutput"})
+if not set(CLAUDE_TOOLS) <= _CLAUDE_FILE_TOOLS:
+    raise RuntimeError("ClaudeExecutor only accepts file tools: no console (ADR 0037)")
 CLAUDE_FROZEN_FLAGS = (
     "--safe-mode",
     "--restricted",
@@ -227,6 +234,7 @@ FORBIDDEN_CLAUDE_OPTIONS = frozenset(
         "--teleport",
         "--system-prompt",
         "--append-system-prompt",
+        "--managed-settings",
     }
 )
 CLAUDE_ENV_ALLOWLIST = (
@@ -277,6 +285,26 @@ CLAUDE_SCHEMA = {
 CLAUDE_MAX_ALLOWED_PATHS = 5
 CLAUDE_INIT_TIMEOUT_SECONDS = 60.0
 CLAUDE_USER_SETTINGS_ALLOWED = frozenset({"autoUpdatesChannel", "tui"})
+# Otro archivo de usuario que 2.1.316 puede leer como configuración (visto en el binario).
+CLAUDE_USER_ALTERNATE_SETTINGS = ("cowork_settings.json",)
+# Configuración administrada que 2.1.316 sigue aplicando con `--safe-mode` y `--restricted`.
+# Rutas y claves leídas del binario instalado, no supuestas. Se niega su presencia, sin leerla.
+CLAUDE_MANAGED_DIRS: Mapping[str, Path] = {
+    "win32": Path(r"C:\Program Files\ClaudeCode"),
+    "darwin": Path("/Library/Application Support/ClaudeCode"),
+}
+CLAUDE_MANAGED_DIR_OTHER = Path("/etc/claude-code")
+CLAUDE_POLICY_KEY = r"SOFTWARE\Policies\ClaudeCode"
+# La configuración administrada remota solo deja rastro en su caché local.
+CLAUDE_REMOTE_SETTINGS_FILES = (
+    "remote-settings.json",
+    "policy-limits.json",
+    "remote-settings-consent.json",
+    "remote-settings-helper-consent",
+)
+# Lo único que puede haber en el `.claude/` del proyecto: su efecto se ve en el primer evento,
+# que exige `skills` vacío y la lista exacta de agentes.
+CLAUDE_PROJECT_DIRS_ALLOWED = frozenset({"agents", "skills"})
 # Rutas que gitleaks excluye por defecto: un secreto ahí pasaría los escaneos.
 _GITLEAKS_EXCLUDED_PATH_RE = re.compile(
     r"(?i)(^|/)(node_modules|bower_components|vendor|v?env|virtualenv|lib(64)?|python)/"
@@ -505,6 +533,10 @@ class Reason(StrEnum):
     CODE_PROFILE_FORBIDDEN = "code_profile_forbidden"
     REAL_REPO_NOT_AUTHORIZED = "real_repo_not_authorized"
     CLAUDE_USER_SETTINGS_UNEXPECTED = "claude_user_settings_unexpected"
+    CLAUDE_PROJECT_SETTINGS_PRESENT = "claude_project_settings_present"
+    CLAUDE_PROJECT_MCP_PRESENT = "claude_project_mcp_present"
+    CLAUDE_MANAGED_SETTINGS_PRESENT = "claude_managed_settings_present"
+    DAMAGE_CHECK_FAILED = "damage_check_failed"
     INTERRUPTED = "interrupted"
     INTERNAL_ERROR = "internal_error"
 
@@ -576,6 +608,10 @@ MESSAGES: Mapping[Reason, str] = {
     Reason.CODE_PROFILE_FORBIDDEN: "El ejecutor real solo puede cambiar documentación.",
     Reason.REAL_REPO_NOT_AUTHORIZED: "El ejecutor real no está autorizado en el repositorio real.",
     Reason.CLAUDE_USER_SETTINGS_UNEXPECTED: "La configuración de usuario no es la validada.",
+    Reason.CLAUDE_PROJECT_SETTINGS_PRESENT: "Hay configuración de Claude en el proyecto.",
+    Reason.CLAUDE_PROJECT_MCP_PRESENT: "Hay configuración MCP en el proyecto.",
+    Reason.CLAUDE_MANAGED_SETTINGS_PRESENT: "Hay configuración administrada de Claude Code.",
+    Reason.DAMAGE_CHECK_FAILED: "No se pudo completar la revisión de daños tras la parada.",
     Reason.INTERRUPTED: "Ejecución interrumpida por el operador.",
     Reason.INTERNAL_ERROR: "Error interno del runner. Detalle en los logs locales.",
 }
@@ -626,6 +662,7 @@ class RunnerConfig:
     kill_wait_seconds: float = KILL_WAIT_SECONDS
     extra_env: Mapping[str, str] = field(default_factory=dict)
     claude_home: Path | None = None
+    claude_managed_dir: Path | None = None
 
     @property
     def inbox(self) -> Path:
@@ -1028,8 +1065,16 @@ def run_process(
             returncode: int | None = tree.popen.wait(timeout=1.0)
         except subprocess.TimeoutExpired:
             returncode = None
-    except BaseException:
+    except BaseException as error:
         tree.terminate()
+        # Con Ctrl+C también: la revisión de daños no debe correr mientras el árbol aún escribe.
+        # Si no se vacía, o no se sabe, eso pesa más; el motivo original queda encadenado.
+        try:
+            emptied = _wait_until_empty(tree, kill_wait)
+        except OSError:
+            emptied = False
+        if not emptied:
+            raise BlockedError(Reason.ORPHAN_SUSPECTED, "after_stop") from error
         raise
     finally:
         tree.close()
@@ -1718,9 +1763,11 @@ def check_claude_user_settings(config: RunnerConfig) -> None:
 
     Por eso se exige, antes de lanzar, que la configuración de usuario sea la ya medida.
     """
-    home = config.claude_home or Path.home() / ".claude"
+    home = _claude_home(config)
     if (home / "settings.local.json").exists():
         raise BlockedError(Reason.CLAUDE_USER_SETTINGS_UNEXPECTED, "settings_local")
+    if any((home / name).exists() for name in CLAUDE_USER_ALTERNATE_SETTINGS):
+        raise BlockedError(Reason.CLAUDE_USER_SETTINGS_UNEXPECTED, "alternate_settings")
     path = home / "settings.json"
     if not path.exists():
         return
@@ -1730,6 +1777,86 @@ def check_claude_user_settings(config: RunnerConfig) -> None:
         raise BlockedError(Reason.CLAUDE_USER_SETTINGS_UNEXPECTED, "unreadable") from error
     if not isinstance(data, dict) or set(data) - CLAUDE_USER_SETTINGS_ALLOWED:
         raise BlockedError(Reason.CLAUDE_USER_SETTINGS_UNEXPECTED, "unexpected_keys")
+
+
+def _claude_home(config: RunnerConfig) -> Path:
+    return config.claude_home or Path.home() / ".claude"
+
+
+def claude_policy_keys() -> list[str]:
+    """Claves de política de Claude Code en el registro. Solo se comprueba que existan.
+
+    Una clave que no se pueda abrir tampoco se da por ausente.
+    """
+    if sys.platform != "win32":
+        return []
+    import winreg
+
+    found = []
+    for hive, name in ((winreg.HKEY_LOCAL_MACHINE, "HKLM"), (winreg.HKEY_CURRENT_USER, "HKCU")):
+        for view in (winreg.KEY_WOW64_64KEY, winreg.KEY_WOW64_32KEY):
+            try:
+                winreg.OpenKey(hive, CLAUDE_POLICY_KEY, 0, winreg.KEY_READ | view).Close()
+            except FileNotFoundError:
+                continue
+            except OSError:
+                found.append(f"{name}:unreadable")
+                continue
+            found.append(name)
+    return found
+
+
+def check_claude_managed_settings(config: RunnerConfig) -> None:
+    """Lo administrado se aplica aunque `--safe-mode` y `--restricted` desactiven lo demás.
+
+    No se valida su contenido: con que exista, el bloque se detiene. La administrada remota
+    solo se detecta por su caché, por eso esto también se repite al terminar.
+    """
+    managed = config.claude_managed_dir or CLAUDE_MANAGED_DIRS.get(
+        sys.platform, CLAUDE_MANAGED_DIR_OTHER
+    )
+    if os.path.lexists(managed):
+        raise BlockedError(Reason.CLAUDE_MANAGED_SETTINGS_PRESENT, "managed_dir")
+    if claude_policy_keys():
+        raise BlockedError(Reason.CLAUDE_MANAGED_SETTINGS_PRESENT, "policy_registry")
+    home = _claude_home(config)
+    if any(os.path.lexists(home / name) for name in CLAUDE_REMOTE_SETTINGS_FILES):
+        raise BlockedError(Reason.CLAUDE_MANAGED_SETTINGS_PRESENT, "remote_settings")
+
+
+def check_claude_project_settings(config: RunnerConfig, git: Git) -> None:
+    """La copia no puede traer configuración de Claude ni MCP, aunque `--restricted` la ignore.
+
+    Se revisa todo lo que hay en la copia, versionado o no, y también las carpetas que la
+    contienen. Que 2.1.316 lea esas carpetas no se midió: se niega igual.
+    """
+    for path in _split_nul(git.run("ls-files", "-z", "--cached", "--others").stdout):
+        parts = path.lower().split("/")
+        if parts[-1] == ".mcp.json":
+            raise BlockedError(Reason.CLAUDE_PROJECT_MCP_PRESENT)
+        if ".claude" in parts[:-1]:
+            where = parts.index(".claude")
+            if where != 0 or len(parts) < 3 or parts[1] not in CLAUDE_PROJECT_DIRS_ALLOWED:
+                raise BlockedError(Reason.CLAUDE_PROJECT_SETTINGS_PRESENT)
+    user_home = _claude_home(config)
+    for folder in (git.cwd, *git.cwd.parents):
+        if os.path.lexists(folder / ".mcp.json"):
+            raise BlockedError(Reason.CLAUDE_PROJECT_MCP_PRESENT, "folder")
+        settings = folder / ".claude"
+        # La configuración de usuario ya tiene su propio control.
+        if folder == Path.home() or _same_path(settings, user_home):
+            continue
+        if any(
+            os.path.lexists(settings / name) for name in ("settings.json", "settings.local.json")
+        ):
+            raise BlockedError(Reason.CLAUDE_PROJECT_SETTINGS_PRESENT, "folder")
+
+
+def check_claude_configuration(config: RunnerConfig, git: Git) -> None:
+    """Toda la configuración que Claude Code podría cargar, por defecto denegada."""
+    check_claude_user_settings(config)
+    check_claude_managed_settings(config)
+    check_claude_project_settings(config, git)
 
 
 def claude_deny_rules() -> tuple[str, ...]:
@@ -1780,6 +1907,9 @@ def build_claude_argv(prefix: Sequence[str], spec: Spec, session_id: str) -> lis
 
 def validate_claude_argv(argv: Sequence[str], prefix_length: int = 1) -> None:
     """Última barrera antes de lanzar. Lista cerrada: cada opción una vez y con su valor exacto."""
+    # Por el prefijo no entra ninguna opción: solo nombra el programa.
+    if prefix_length < 1 or any(token.startswith("-") for token in argv[:prefix_length]):
+        raise BlockedError(Reason.CLAUDE_UNSAFE_COMMAND, "prefix_option")
     values: dict[str, str] = {}
     seen: set[str] = set()
     index = prefix_length
@@ -1799,6 +1929,11 @@ def validate_claude_argv(argv: Sequence[str], prefix_length: int = 1) -> None:
             raise BlockedError(Reason.CLAUDE_UNSAFE_COMMAND, "unknown_option")
     if seen != _CLAUDE_BARE_OPTIONS | _CLAUDE_VALUE_OPTIONS:
         raise BlockedError(Reason.CLAUDE_UNSAFE_COMMAND, "missing_option")
+    # Sin consola, con independencia de `CLAUDE_TOOLS`. Claude Code separa por comas o espacios.
+    for option in ("--tools", "--allowedTools", "--disallowedTools"):
+        for rule in re.split(r"[,\s]+", values[option].strip()):
+            if rule.split("(", 1)[0] not in _CLAUDE_FILE_TOOLS:
+                raise BlockedError(Reason.CLAUDE_UNSAFE_COMMAND, "not_a_file_tool")
     for option, expected in (
         ("--model", CLAUDE_MODEL),
         ("--output-format", "stream-json"),
@@ -1856,6 +1991,11 @@ def check_claude_init(
     """Compara el primer evento de forma exacta. Una capacidad inesperada lo detiene todo."""
     if set(init) != CLAUDE_INIT_FIELDS:
         raise BlockedError(Reason.CLAUDE_CAPABILITY_MISMATCH, "fields")
+    # Antes que la comparación exacta, y sin depender de `CLAUDE_EXPECTED_TOOLS`: ninguna consola.
+    tools = init.get("tools")
+    allowed_tools = _CLAUDE_FILE_TOOLS | _CLAUDE_OBSERVED_ONLY_TOOLS
+    if not isinstance(tools, list) or any(tool not in allowed_tools for tool in tools):
+        raise BlockedError(Reason.CLAUDE_CAPABILITY_MISMATCH, "not_a_file_tool")
     checks: dict[str, tuple[object, object]] = {
         "version": (init.get("claude_code_version"), CLAUDE_VERSION),
         "permission_mode": (init.get("permissionMode"), "dontAsk"),
@@ -2071,8 +2211,13 @@ class RunReport:
     result: Result = Result.BLOCKED
     reason: Reason | None = None
     detail: str = ""
+    # Si el ejecutor real se detiene: por qué se detuvo, y qué encontró la revisión de daños.
+    primary_reason: Reason | None = None
+    damage_check: str = ""
     worktree: Path | None = None
     run_dir: Path | None = None
+    # Solo para la revisión de daños. Nunca se escribe en la evidencia.
+    claude_git_trace: str | None = field(default=None, repr=False)
 
 
 def render_evidence(report: RunReport) -> str:
@@ -2138,6 +2283,9 @@ def render_evidence(report: RunReport) -> str:
     lines += ["", "## Resultado", "", f"- Resultado: `{report.result.value}`"]
     if report.reason is not None:
         lines.append(f"- Motivo: `{report.reason.value}`")
+    if report.primary_reason is not None:
+        lines.append(f"- Motivo de la parada del ejecutor: `{report.primary_reason.value}`")
+        lines.append(f"- Revisión de daños tras la parada: `{report.damage_check}`")
     lines.append("")
     return "\n".join(lines)
 
@@ -2516,6 +2664,18 @@ def check_claude_version(
     return words[0]
 
 
+def _read_claude_trace(path: Path) -> str:
+    """Lo que no se pudo leer no se da por limpio: una línea desconocida detiene el bloque."""
+    try:
+        if not path.is_file():
+            return ""
+        if path.stat().st_size > MAX_LOG_TAIL_BYTES:
+            return "unknown: trace too large"
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "unknown: trace unreadable"
+
+
 def run_claude_executor(
     config: RunnerConfig,
     executor: ClaudeExecutor,
@@ -2527,18 +2687,28 @@ def run_claude_executor(
     # También aquí: esta función es pública, y estas dos barreras no dependen de quién llame.
     ensure_not_real_repository(config, worktree)
     validate_docs_only_spec(spec)
-    check_claude_user_settings(config)
+    # Las rutas de usuario y administrada solo se cambian para el Claude falso: el real lee
+    # siempre las verdaderas, y los controles deben mirar esas.
+    if not executor.argv_prefix and (config.claude_home or config.claude_managed_dir):
+        raise BlockedError(Reason.CLAUDE_UNSAFE_COMMAND, "test_only_paths")
+    worktree_git = Git(config, worktree, run_dir / "git.log")
+    check_claude_configuration(config, worktree_git)
     prefix = claude_prefix(config, executor)
     trace_path = run_dir / "claude-git-trace.log"
     temp_dir = run_dir / "claude-tmp"
     temp_dir.mkdir(exist_ok=True)
     env = build_claude_env(config, trace_path, temp_dir)
-    report.executor_version = check_claude_version(config, prefix, env, worktree)
+    # Desde aquí Claude puede correr, ya con `--version`: una traza sin leer no es limpia.
+    report.claude_git_trace = "unknown: trace not read"
+    try:
+        report.executor_version = check_claude_version(config, prefix, env, worktree)
+    finally:
+        report.claude_git_trace = _read_claude_trace(trace_path)
     report.executor_session = str(uuid.uuid4())
     argv = build_claude_argv(prefix, spec, report.executor_session)
     log_path = run_dir / "executor.log"
     watcher = _ClaudeInitWatcher(log_path, report.executor_session, worktree)
-    trace_text = ""
+    report.claude_git_trace = "unknown: trace not read"
     try:
         result, tail = _run_logged(
             config,
@@ -2551,13 +2721,13 @@ def run_claude_executor(
             allow_claude=True,
         )
     finally:
-        # Se lee antes de limpiar: la limpieza recorta y podría esconder una línea.
-        if trace_path.is_file():
-            if trace_path.stat().st_size > MAX_LOG_TAIL_BYTES:
-                trace_text = "unknown: trace too large"
-            else:
-                trace_text = trace_path.read_text(encoding="utf-8", errors="replace")
-        scrub_file(trace_path)
+        # Se lee antes de limpiar: la limpieza recorta y podría esconder una línea. Queda en
+        # el informe también si se sale por Ctrl+C o por un error, para la revisión de daños.
+        try:
+            report.claude_git_trace = _read_claude_trace(trace_path)
+        finally:
+            scrub_file(trace_path)
+    trace_text = report.claude_git_trace or ""
     report.executor_returncode = result.returncode
     report.executor_duration = result.duration
     # La última línea puede no terminar en salto de línea.
@@ -2579,6 +2749,8 @@ def run_claude_executor(
     if result.returncode != 0:
         raise BlockedError(Reason.EXECUTOR_FAILED)
     check_claude_version(config, prefix, env, worktree)
+    # La administrada remota solo se ve por su caché, que puede aparecer durante la ejecución.
+    check_claude_configuration(config, worktree_git)
     check_git_trace(trace_text)
     final = next((e for e in reversed(_stream_events(tail)) if e.get("type") == "result"), None)
     if final is None or final.get("is_error"):
@@ -2628,7 +2800,16 @@ def verify_after_executor(
         raise BlockedError(Reason.IGNORED_FILE_PRESENT)
 
 
+def _stop_reason(stopped: BaseException) -> Reason:
+    if isinstance(stopped, BlockedError):
+        return stopped.reason
+    if isinstance(stopped, KeyboardInterrupt):
+        return Reason.INTERRUPTED
+    return Reason.INTERNAL_ERROR
+
+
 def _raise_if_damage_after_stop(
+    config: RunnerConfig,
     git: Git,
     main_git: Git,
     spec: Spec,
@@ -2636,14 +2817,39 @@ def _raise_if_damage_after_stop(
     report: RunReport,
     snapshot: RepoSnapshot,
     git_dir: str,
-    stopped: BlockedError,
+    stopped: BaseException,
 ) -> None:
+    """Cualquier salida del ejecutor real pasa por aquí: una parada, Ctrl+C o un error.
+
+    Conserva el motivo de la parada. Si encuentra un daño, ese daño es el motivo del bloque;
+    si no, la parada sigue su curso con su motivo original.
+    """
+    primary = _stop_reason(stopped)
+    report.primary_reason = primary
     try:
+        # El orden de siempre: un daño en el repositorio pesa más que un comando Git prohibido,
+        # este más que la configuración de Claude, y todo más que el motivo de la parada.
         verify_after_executor(git, main_git, spec, worktree, report.spec_commit, snapshot, git_dir)
         check_scope(collect_changes(git), spec)
         _check_filesystem(worktree, [])
+        # Tras Ctrl+C o un error, la traza aún no se había revisado.
+        if report.claude_git_trace is not None:
+            check_git_trace(report.claude_git_trace, require_commands=False)
+        check_claude_configuration(config, git)
     except BlockedError as damage:
-        raise BlockedError(damage.reason, f"after_{stopped.reason.value}") from stopped
+        report.damage_check = damage.reason.value
+        if damage.reason is primary:
+            return
+        raise BlockedError(damage.reason, f"after_{primary.value}") from stopped
+    except KeyboardInterrupt:
+        # Un segundo Ctrl+C corta la revisión: queda dicho que no terminó.
+        report.damage_check = "interrupted"
+        raise
+    except Exception as error:
+        # Sin poder revisar, no se puede decir que no hubo daño.
+        report.damage_check = Reason.DAMAGE_CHECK_FAILED.value
+        raise BlockedError(Reason.DAMAGE_CHECK_FAILED, f"after_{primary.value}") from error
+    report.damage_check = "no_damage"
 
 
 def write_sanitized_evidence(
@@ -2698,11 +2904,12 @@ def _pipeline(
 
     try:
         run_executor(config, executor, spec, worktree, run_dir, report)
-    except BlockedError as stopped:
+    except BaseException as stopped:
         if real_executor:
-            # Una parada no excusa los controles: un daño previo pesa más que el motivo declarado.
+            # Ninguna salida excusa los controles, tampoco Ctrl+C o un error al leer el log:
+            # un daño previo pesa más que el motivo de la parada.
             _raise_if_damage_after_stop(
-                git, main_git, spec, worktree, report, snapshot, git_dir, stopped
+                config, git, main_git, spec, worktree, report, snapshot, git_dir, stopped
             )
         raise
     verify_after_executor(git, main_git, spec, worktree, report.spec_commit, snapshot, git_dir)

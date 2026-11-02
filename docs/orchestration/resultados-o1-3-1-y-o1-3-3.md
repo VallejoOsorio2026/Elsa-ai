@@ -99,7 +99,10 @@ autenticación no viaja por él, porque el TLS no se establece; el proxy no lee 
 | Muerte deliberada del runner | 24 procesos del job vistos, 0 vivos |
 | Repositorio real | Idéntico antes y después |
 
-**Sin demostrar:** un hijo o nieto de larga duración lanzado por Claude. Exige consola, y sigue sin autorizarse.
+**NO APLICABLE POR DISEÑO:** un hijo o nieto de larga duración lanzado por Claude mediante una consola. O1.3.4
+mostró que la consola no se puede acotar, y Claude real ya no la recibe
+([`resultados-o1-3-4.md`](resultados-o1-3-4.md); ADR 0037, §4). Los procesos internos de Claude Code son los
+que miden las pruebas de esta tabla.
 
 ## Coste
 

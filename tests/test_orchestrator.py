@@ -582,6 +582,8 @@ def test_runner_only_imports_a_closed_list_of_modules() -> None:
         "typing",
         "unicodedata",
         "uuid",
+        # Solo para ver si existen las claves de política de Claude Code (ADR 0037).
+        "winreg",
         "yaml",
     }
     imported: set[str] = set()

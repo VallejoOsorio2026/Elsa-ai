@@ -12,7 +12,7 @@ import json
 import sys
 import time
 from collections.abc import Iterator
-from dataclasses import replace
+from dataclasses import fields, replace
 from pathlib import Path
 from typing import Any
 
@@ -298,13 +298,14 @@ def test_observed_init_is_accepted() -> None:
         ("claude_code_version", "2.1.317", "version"),
         ("permissionMode", "acceptEdits", "permission_mode"),
         ("permissionMode", None, "permission_mode"),
-        ("tools", [*GOOD_INIT["tools"], "Bash"], "tools"),
-        ("tools", [*GOOD_INIT["tools"], "PowerShell"], "tools"),
-        ("tools", [*GOOD_INIT["tools"], "WebFetch"], "tools"),
-        ("tools", [*GOOD_INIT["tools"], "WebSearch"], "tools"),
-        ("tools", [*GOOD_INIT["tools"], "Task"], "tools"),
+        ("tools", [*GOOD_INIT["tools"], "Bash"], "not_a_file_tool"),
+        ("tools", [*GOOD_INIT["tools"], "PowerShell"], "not_a_file_tool"),
+        ("tools", [*GOOD_INIT["tools"], "WebFetch"], "not_a_file_tool"),
+        ("tools", [*GOOD_INIT["tools"], "WebSearch"], "not_a_file_tool"),
+        ("tools", [*GOOD_INIT["tools"], "Task"], "not_a_file_tool"),
         ("tools", ["Read"], "tools"),
-        ("tools", None, "tools"),
+        ("tools", ["Read", "Read", "Edit", "Glob", "Grep", "Write"], "tools"),
+        ("tools", None, "not_a_file_tool"),
         ("mcp_servers", [{"name": "x"}], "mcp"),
         ("mcp_servers", None, "mcp"),
         ("additional_directories", ["C:/x"], "additional_directories"),
@@ -363,7 +364,7 @@ def test_later_init_events_are_watched_during_the_run(tmp_path: Path) -> None:
         handle.write(bad[20:])
     assert watcher() is True
     assert watcher.error is not None
-    assert watcher.error.detail == "tools"
+    assert watcher.error.detail == "not_a_file_tool"
 
 
 def _watcher_on(tmp_path: Path, data: bytes) -> orchestrator._ClaudeInitWatcher:
@@ -393,14 +394,15 @@ def test_separators_inside_a_text_do_not_split_an_event(tmp_path: Path) -> None:
     watcher = _watcher_on(tmp_path, f"{json.dumps(good)}\n{text}\n".encode())
     assert watcher() is True
     assert watcher.error is not None
-    assert watcher.error.detail == "tools"
+    assert watcher.error.detail == "not_a_file_tool"
 
 
 @pytest.mark.parametrize(
     ("change", "detail"),
     [
         ({"plugins": ["x"]}, "plugins"),
-        ({"tools": ["Read", 1]}, "TypeError"),
+        ({"tools": ["Read", 1]}, "not_a_file_tool"),
+        ({"agents": ["Read", 1]}, "TypeError"),
     ],
 )
 def test_malformed_init_is_a_stop_not_an_internal_error(
@@ -443,7 +445,7 @@ def test_capability_seen_before_the_reading_limit_keeps_priority(
     assert watcher() is True
     assert watcher.error is not None
     assert watcher.error.reason is Reason.CLAUDE_CAPABILITY_MISMATCH
-    assert watcher.error.detail == "tools"
+    assert watcher.error.detail == "not_a_file_tool"
 
 
 def test_unreadable_log_is_a_stop_not_an_internal_error(tmp_path: Path) -> None:
@@ -861,7 +863,12 @@ class ClaudeSandbox(Sandbox):
         )
 
     def run_claude(self, scenario: str, **changes: Any) -> RunReport:
-        config = replace(self.config, claude_home=self.root / "claude-home", **changes)
+        config = replace(
+            self.config,
+            claude_home=self.root / "claude-home",
+            claude_managed_dir=self.root / "managed",
+            **changes,
+        )
         return run_block(config, BLOCK, executor=self.executor(scenario), confirm=lambda _s: True)
 
 
@@ -1063,3 +1070,547 @@ def test_logs_do_not_keep_known_secrets(box: ClaudeSandbox) -> None:
     for path in report.run_dir.iterdir():
         if path.is_file():
             assert token not in path.read_text(encoding="utf-8", errors="replace"), path.name
+
+
+# --- Sin consola, por diseño (ADR 0037, §4) -------------------------------------------------
+
+CONSOLE_NAMES = ["Bash", "PowerShell", "cmd", "shell", "bash", "Terminal", "Console"]
+
+
+def _tool_names(argv: list[str]) -> list[str]:
+    names = []
+    for option in ("--tools", "--allowedTools", "--disallowedTools"):
+        for rule in _option(argv, option).replace(" ", ",").split(","):
+            names.append(rule.split("(", 1)[0])
+    return names
+
+
+def test_built_command_only_names_file_tools() -> None:
+    argv = _argv()
+    assert set(_tool_names(argv)) == {"Read", "Edit", "Write", "Glob", "Grep"}
+    lowered = {token.lower() for token in argv}
+    assert not lowered & {name.lower() for name in CONSOLE_NAMES}
+
+
+@pytest.mark.parametrize("option", ["--tools", "--allowedTools", "--disallowedTools"])
+@pytest.mark.parametrize(
+    "rule",
+    [
+        "Bash",
+        "PowerShell",
+        "cmd",
+        "shell",
+        "bash",
+        "Bash(git status)",
+        "Bash(C:/Python314/python.exe x.py)",
+        "PowerShell(Get-ChildItem)",
+        "Task",
+        "Agent",
+        "WebFetch",
+        "NotebookEdit",
+        "mcp__x__y",
+    ],
+)
+def test_validator_refuses_any_console_or_non_file_tool(option: str, rule: str) -> None:
+    argv = _argv()
+    index = argv.index(option) + 1
+    for joined in (f"{argv[index]},{rule}", f"{argv[index]} {rule}"):
+        bad = [*argv[:index], joined, *argv[index + 1 :]]
+        with pytest.raises(BlockedError) as caught:
+            validate_claude_argv(bad)
+        assert caught.value.reason is Reason.CLAUDE_UNSAFE_COMMAND
+        assert caught.value.detail == "not_a_file_tool"
+
+
+@pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
+def test_changing_the_tool_constant_cannot_add_a_console(
+    monkeypatch: pytest.MonkeyPatch, tool: str
+) -> None:
+    monkeypatch.setattr(orchestrator, "CLAUDE_TOOLS", (*orchestrator.CLAUDE_TOOLS, tool))
+    with pytest.raises(BlockedError) as caught:
+        _argv()
+    assert caught.value.detail == "not_a_file_tool"
+
+
+@pytest.mark.parametrize("tool", ["Bash", "PowerShell"])
+def test_changing_the_expected_tools_cannot_accept_a_console(
+    monkeypatch: pytest.MonkeyPatch, tool: str
+) -> None:
+    # Lo que hizo la sonda de O1.3.4, fuera del repositorio: ya no basta.
+    tools = sorted([*GOOD_INIT["tools"], tool])
+    monkeypatch.setattr(orchestrator, "CLAUDE_EXPECTED_TOOLS", tools)
+    with pytest.raises(BlockedError) as caught:
+        check_claude_init({**GOOD_INIT, "tools": tools})
+    assert caught.value.detail == "not_a_file_tool"
+
+
+def test_runner_refuses_to_import_with_a_console_tool() -> None:
+    source = RUNNER_PATH.read_text(encoding="utf-8")
+    original = 'CLAUDE_TOOLS = ("Read", "Edit", "Write", "Glob", "Grep")'
+    assert source.count(original) == 1
+    mutated = source.replace(original, original[:-1] + ', "Bash")')
+    with pytest.raises(RuntimeError, match="no console"):
+        exec(compile(mutated, "orchestrator_mutated", "exec"), {"__name__": "mutated"})
+
+
+def test_executor_has_no_way_to_add_tools() -> None:
+    assert {f.name for f in fields(ClaudeExecutor)} == {"argv_prefix", "kind"}
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        ("claude", "--tools", "Bash"),
+        ("claude", "--allowedTools=Bash"),
+        ("claude", "-p", "x"),
+        (),
+    ],
+)
+def test_prefix_cannot_carry_options(prefix: tuple[str, ...]) -> None:
+    with pytest.raises(BlockedError) as caught:
+        build_claude_argv(prefix, _spec(), "00000000-0000-0000-0000-000000000000")
+    assert caught.value.detail == "prefix_option"
+
+
+def test_prefix_with_options_never_launches_claude(box: ClaudeSandbox) -> None:
+    executor = ClaudeExecutor(
+        argv_prefix=(sys.executable, str(FAKE_CLAUDE), "success", str(box.record), "--tools")
+    )
+    config = replace(
+        box.config, claude_home=box.root / "claude-home", claude_managed_dir=box.root / "m"
+    )
+    report = run_block(config, BLOCK, executor=executor, confirm=lambda _s: True)
+    _blocked(report, Reason.CLAUDE_UNSAFE_COMMAND)
+    calls = box.record.read_text(encoding="utf-8").splitlines()
+    assert all("--version" in call for call in calls)
+
+
+def test_environment_never_names_another_managed_settings_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CLAUDE_CODE_MANAGED_SETTINGS_PATH", str(tmp_path))
+    config = orchestrator.RunnerConfig(
+        repo_root=tmp_path,
+        external_root=tmp_path / "ext",
+        expected_origin="x",
+        tool_python=Path(sys.executable),
+        extra_env={"CLAUDE_CODE_MANAGED_SETTINGS_PATH": str(tmp_path)},
+    )
+    env = orchestrator.build_claude_env(config, tmp_path / "trace", tmp_path / "tmp")
+    assert {n for n in env if n.startswith("CLAUDE")} == {
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"
+    }
+
+
+def test_managed_settings_option_is_forbidden() -> None:
+    assert "--managed-settings" in FORBIDDEN_CLAUDE_OPTIONS
+
+
+# --- Toda parada del ejecutor real revisa daños --------------------------------------------
+
+
+def _interrupt_once_init_is_seen(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ctrl+C donde de verdad llega: mientras el runner vigila a Claude."""
+    original = orchestrator._ClaudeInitWatcher.__call__
+
+    def interrupting(self: orchestrator._ClaudeInitWatcher) -> bool:
+        stop = original(self)
+        if self.seen:
+            raise KeyboardInterrupt
+        return stop
+
+    monkeypatch.setattr(orchestrator._ClaudeInitWatcher, "__call__", interrupting)
+
+
+def _fail_reading_the_log(monkeypatch: pytest.MonkeyPatch) -> None:
+    original = orchestrator._run_logged
+
+    def failing(config: Any, argv: list[str], **kwargs: Any) -> Any:
+        done = original(config, argv, **kwargs)
+        # Solo el log de Claude: el escaneo de secretos también pasa por aquí.
+        if "--session-id" in argv:
+            raise OSError("log unreadable")
+        return done
+
+    monkeypatch.setattr(orchestrator, "_run_logged", failing)
+
+
+def _stopped(report: RunReport, reason: Reason, primary: Reason, damage: str) -> None:
+    _blocked(report, reason)
+    assert report.primary_reason is primary, report
+    assert report.damage_check == damage, report
+    if reason is not primary:
+        assert report.detail == f"after_{primary.value}"
+    assert report.run_dir is not None
+    local = (report.run_dir / "report.md").read_text(encoding="utf-8")
+    assert f"`{primary.value}`" in local and f"`{damage}`" in local
+
+
+def test_ctrl_c_without_damage_keeps_its_reason(
+    box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _interrupt_once_init_is_seen(monkeypatch)
+    _stopped(box.run_claude("hang"), Reason.INTERRUPTED, Reason.INTERRUPTED, "no_damage")
+
+
+@pytest.mark.parametrize(
+    ("scenario", "reason"),
+    [
+        ("hook_then_hang", Reason.REPO_INVARIANT_BROKEN),
+        ("scope_then_hang", Reason.SCOPE_VIOLATION),
+        ("push_then_hang", Reason.CLAUDE_GIT_COMMAND_NOT_ALLOWED),
+    ],
+)
+def test_ctrl_c_still_runs_every_damage_check(
+    box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch, scenario: str, reason: Reason
+) -> None:
+    _interrupt_once_init_is_seen(monkeypatch)
+    head_before = box.main_state()[0]
+    report = box.run_claude(scenario)
+    _stopped(report, reason, Reason.INTERRUPTED, reason.value)
+    assert box.main_state()[0] == head_before
+
+
+MISMATCH = Reason.CLAUDE_CAPABILITY_MISMATCH
+
+
+@pytest.mark.parametrize(
+    ("scenario", "reason", "primary"),
+    [
+        ("hook_then_malformed_init", Reason.REPO_INVARIANT_BROKEN, MISMATCH),
+        ("hook_then_extra_tool", Reason.REPO_INVARIANT_BROKEN, MISMATCH),
+        ("hook_then_second_init", Reason.REPO_INVARIANT_BROKEN, MISMATCH),
+        ("scope_then_extra_field", Reason.SCOPE_VIOLATION, Reason.INVALID_STRUCTURED_OUTPUT),
+        ("scope_then_no_structured", Reason.SCOPE_VIOLATION, Reason.INVALID_STRUCTURED_OUTPUT),
+        ("scope_then_hang", Reason.SCOPE_VIOLATION, Reason.EXECUTOR_TIMEOUT),
+    ],
+)
+def test_every_stop_runs_the_damage_checks(
+    box: ClaudeSandbox, scenario: str, reason: Reason, primary: Reason
+) -> None:
+    report = box.run_claude(scenario, executor_timeout_seconds=5.0)
+    _stopped(report, reason, primary, reason.value)
+
+
+def test_output_too_large_runs_the_damage_checks(box: ClaudeSandbox) -> None:
+    report = box.run_claude("scope_then_flood", max_executor_output=256 * 1024)
+    _stopped(report, Reason.SCOPE_VIOLATION, Reason.EXECUTOR_OUTPUT_TOO_LARGE, "scope_violation")
+
+
+def test_malformed_init_without_damage_keeps_its_reason(box: ClaudeSandbox) -> None:
+    report = box.run_claude("malformed_init")
+    _stopped(report, MISMATCH, MISMATCH, "no_damage")
+    assert report.detail == "unreadable_init"
+
+
+def test_declared_block_without_damage_keeps_its_reason(box: ClaudeSandbox) -> None:
+    report = box.run_claude("declares_blocked")
+    _stopped(report, Reason.EXECUTOR_BLOCKED, Reason.EXECUTOR_BLOCKED, "no_damage")
+
+
+def test_error_reading_the_log_still_runs_the_damage_checks(
+    box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fail_reading_the_log(monkeypatch)
+    report = box.run_claude("hook_then_success")
+    _stopped(report, Reason.REPO_INVARIANT_BROKEN, Reason.INTERNAL_ERROR, "repo_invariant_broken")
+
+
+def test_error_reading_the_log_without_damage_is_an_internal_error(
+    box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fail_reading_the_log(monkeypatch)
+    _stopped(box.run_claude("success"), Reason.INTERNAL_ERROR, Reason.INTERNAL_ERROR, "no_damage")
+
+
+def test_unreadable_trace_is_not_taken_as_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    trace = tmp_path / "trace.log"
+    trace.write_text("x", encoding="utf-8")
+
+    def unreadable(*_args: Any, **_kwargs: Any) -> str:
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(Path, "read_text", unreadable)
+    text = orchestrator._read_claude_trace(trace)
+    monkeypatch.undo()
+    assert text == "unknown: trace unreadable"
+    with pytest.raises(BlockedError) as caught:
+        check_git_trace(text, require_commands=False)
+    assert caught.value.reason is Reason.CLAUDE_GIT_COMMAND_NOT_ALLOWED
+
+
+def test_damage_check_that_cannot_finish_is_its_own_stop(
+    box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(_git: Any) -> list[Change]:
+        raise RuntimeError("cannot list changes")
+
+    monkeypatch.setattr(orchestrator, "collect_changes", broken)
+    report = box.run_claude("declares_blocked")
+    _stopped(report, Reason.DAMAGE_CHECK_FAILED, Reason.EXECUTOR_BLOCKED, "damage_check_failed")
+
+
+# --- Configuración de Claude: proyecto, local y administrada, por defecto denegada ---------
+
+
+def _commit_to_main(box: ClaudeSandbox, files: dict[str, str]) -> None:
+    for path, text in files.items():
+        target = box.repo / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8", newline="\n")
+    _git(box.repo, "add", ".")
+    _git(box.repo, "commit", "--quiet", "-m", "chore: x")
+    _git(box.repo, "push", "--quiet", "origin", "main")
+
+
+@pytest.mark.parametrize(
+    ("files", "reason"),
+    [
+        ({".claude/settings.json": "{}"}, Reason.CLAUDE_PROJECT_SETTINGS_PRESENT),
+        ({".claude/settings.local.json": "{}"}, Reason.CLAUDE_PROJECT_SETTINGS_PRESENT),
+        ({".claude/hooks/x.sh": "x"}, Reason.CLAUDE_PROJECT_SETTINGS_PRESENT),
+        ({".claude/commands/x.md": "x"}, Reason.CLAUDE_PROJECT_SETTINGS_PRESENT),
+        ({".Claude/Settings.json": "{}"}, Reason.CLAUDE_PROJECT_SETTINGS_PRESENT),
+        ({"docs/.claude/skills/x.md": "x"}, Reason.CLAUDE_PROJECT_SETTINGS_PRESENT),
+        ({".mcp.json": "{}"}, Reason.CLAUDE_PROJECT_MCP_PRESENT),
+        ({"docs/.mcp.json": "{}"}, Reason.CLAUDE_PROJECT_MCP_PRESENT),
+    ],
+)
+def test_project_configuration_stops_before_launching(
+    box: ClaudeSandbox, files: dict[str, str], reason: Reason
+) -> None:
+    _commit_to_main(box, files)
+    _blocked(box.run_claude("success"), reason)
+    assert not box.record.exists()
+
+
+def test_project_agents_and_skills_are_accepted(box: ClaudeSandbox) -> None:
+    _commit_to_main(box, {".claude/agents/x.md": "x\n", ".claude/skills/y/SKILL.md": "y\n"})
+    assert box.run_claude("success").result is Result.VERIFIED_LOCAL
+
+
+def _plain_git(tmp_path: Path) -> tuple[orchestrator.RunnerConfig, orchestrator.Git]:
+    repo = tmp_path / "parent" / "repo"
+    repo.mkdir(parents=True)
+    _git(repo.parent, "init", "--quiet", str(repo))
+    config = orchestrator.RunnerConfig(
+        repo_root=repo,
+        external_root=tmp_path / "ext",
+        expected_origin="x",
+        tool_python=Path(sys.executable),
+        claude_home=tmp_path / "claude-home",
+    )
+    return config, orchestrator.Git(config, repo)
+
+
+@pytest.mark.parametrize(
+    ("path", "reason"),
+    [
+        (".mcp.json", Reason.CLAUDE_PROJECT_MCP_PRESENT),
+        (".claude/settings.json", Reason.CLAUDE_PROJECT_SETTINGS_PRESENT),
+        (".claude/settings.local.json", Reason.CLAUDE_PROJECT_SETTINGS_PRESENT),
+    ],
+)
+def test_configuration_in_an_enclosing_folder_also_stops(
+    tmp_path: Path, path: str, reason: Reason
+) -> None:
+    config, git = _plain_git(tmp_path)
+    target = tmp_path / "parent" / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("{}", encoding="utf-8")
+    with pytest.raises(BlockedError) as caught:
+        orchestrator.check_claude_project_settings(config, git)
+    assert caught.value.reason is reason
+    assert caught.value.detail == "folder"
+
+
+def test_untracked_project_settings_also_stop(tmp_path: Path) -> None:
+    config, git = _plain_git(tmp_path)
+    (git.cwd / ".claude").mkdir()
+    (git.cwd / ".claude" / "settings.local.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(BlockedError) as caught:
+        orchestrator.check_claude_project_settings(config, git)
+    assert caught.value.reason is Reason.CLAUDE_PROJECT_SETTINGS_PRESENT
+
+
+def _managed_config(tmp_path: Path) -> orchestrator.RunnerConfig:
+    return orchestrator.RunnerConfig(
+        repo_root=tmp_path,
+        external_root=tmp_path / "ext",
+        expected_origin="x",
+        tool_python=Path(sys.executable),
+        claude_home=tmp_path / "claude-home",
+        claude_managed_dir=tmp_path / "managed",
+    )
+
+
+def test_no_managed_configuration_passes(tmp_path: Path) -> None:
+    orchestrator.check_claude_managed_settings(_managed_config(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "entry", ["managed-settings.json", "managed-settings.d", "managed-mcp.json"]
+)
+def test_any_managed_folder_stops_without_reading_it(tmp_path: Path, entry: str) -> None:
+    config = _managed_config(tmp_path)
+    assert config.claude_managed_dir is not None
+    config.claude_managed_dir.mkdir()
+    (config.claude_managed_dir / entry).write_text("no se lee", encoding="utf-8")
+    with pytest.raises(BlockedError) as caught:
+        orchestrator.check_claude_managed_settings(config)
+    assert caught.value.reason is Reason.CLAUDE_MANAGED_SETTINGS_PRESENT
+    assert caught.value.detail == "managed_dir"
+
+
+def test_policy_registry_keys_stop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(orchestrator, "claude_policy_keys", lambda: ["HKLM"])
+    with pytest.raises(BlockedError) as caught:
+        orchestrator.check_claude_managed_settings(_managed_config(tmp_path))
+    assert caught.value.detail == "policy_registry"
+
+
+@pytest.mark.parametrize("name", orchestrator.CLAUDE_REMOTE_SETTINGS_FILES)
+def test_remote_managed_cache_stops(tmp_path: Path, name: str) -> None:
+    config = _managed_config(tmp_path)
+    assert config.claude_home is not None
+    config.claude_home.mkdir()
+    (config.claude_home / name).write_text("{}", encoding="utf-8")
+    with pytest.raises(BlockedError) as caught:
+        orchestrator.check_claude_managed_settings(config)
+    assert caught.value.detail == "remote_settings"
+
+
+def test_managed_sources_are_the_ones_read_from_the_binary() -> None:
+    assert orchestrator.CLAUDE_MANAGED_DIRS["win32"] == Path(r"C:\Program Files\ClaudeCode")
+    assert orchestrator.CLAUDE_POLICY_KEY == r"SOFTWARE\Policies\ClaudeCode"
+
+
+def test_registry_probe_is_empty_off_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(orchestrator.sys, "platform", "linux")
+    assert orchestrator.claude_policy_keys() == []
+
+
+def test_alternate_user_settings_stop(tmp_path: Path) -> None:
+    config = _managed_config(tmp_path)
+    assert config.claude_home is not None
+    config.claude_home.mkdir()
+    (config.claude_home / "cowork_settings.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(BlockedError) as caught:
+        orchestrator.check_claude_user_settings(config)
+    assert caught.value.detail == "alternate_settings"
+
+
+def test_managed_configuration_stops_before_launching(box: ClaudeSandbox) -> None:
+    (box.root / "managed").mkdir()
+    _blocked(box.run_claude("success"), Reason.CLAUDE_MANAGED_SETTINGS_PRESENT)
+    assert not box.record.exists()
+
+
+def test_remote_managed_cache_appearing_during_the_run_stops(box: ClaudeSandbox) -> None:
+    home = box.root / "claude-home"
+    home.mkdir()
+    report = box.run_claude(
+        "remote_settings_appear",
+        extra_env={
+            **box.config.extra_env,
+            "FAKE_CLAUDE_REMOTE_SETTINGS": str(home / "remote-settings.json"),
+        },
+    )
+    _blocked(report, Reason.CLAUDE_MANAGED_SETTINGS_PRESENT)
+    assert not report.content_commit
+
+
+# --- Correcciones de la revisión de seguridad de O1.3.5 -------------------------------------
+
+
+def test_forbidden_git_command_outranks_configuration_after_a_stop(box: ClaudeSandbox) -> None:
+    home = box.root / "claude-home"
+    home.mkdir()
+    report = box.run_claude(
+        "push_then_remote_settings_appear",
+        extra_env={
+            **box.config.extra_env,
+            "FAKE_CLAUDE_REMOTE_SETTINGS": str(home / "remote-settings.json"),
+        },
+    )
+    _stopped(
+        report,
+        Reason.CLAUDE_GIT_COMMAND_NOT_ALLOWED,
+        Reason.CLAUDE_GIT_COMMAND_NOT_ALLOWED,
+        "claude_git_command_not_allowed",
+    )
+
+
+def test_real_claude_refuses_paths_meant_for_the_fake_one(
+    box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Si la barrera fallara, el test no debe llegar nunca a lanzar el Claude real.
+    def never(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("the real Claude must not be launched")
+
+    monkeypatch.setattr(orchestrator, "claude_prefix", never)
+    monkeypatch.setattr(orchestrator, "check_claude_version", never)
+    monkeypatch.setattr(orchestrator, "claude_policy_keys", lambda: [])
+    config = replace(
+        box.config, claude_home=box.root / "claude-home", claude_managed_dir=box.root / "m"
+    )
+    report = run_block(config, BLOCK, executor=ClaudeExecutor(), confirm=lambda _s: True)
+    _blocked(report, Reason.CLAUDE_UNSAFE_COMMAND)
+    assert report.detail == "test_only_paths"
+
+
+def test_a_second_ctrl_c_during_the_damage_check_is_reported(
+    box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def interrupted(_git: Any) -> list[Change]:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(orchestrator, "collect_changes", interrupted)
+    report = box.run_claude("declares_blocked")
+    _blocked(report, Reason.INTERRUPTED)
+    assert report.primary_reason is Reason.EXECUTOR_BLOCKED
+    assert report.damage_check == "interrupted"
+    assert report.run_dir is not None
+    assert "`interrupted`" in (report.run_dir / "report.md").read_text(encoding="utf-8")
+
+
+def test_trace_never_read_is_not_taken_as_clean(
+    box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Un segundo Ctrl+C justo cuando se iba a leer la traza.
+    def interrupted(_path: Path) -> str:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(orchestrator, "_read_claude_trace", interrupted)
+    report = box.run_claude("success")
+    _stopped(
+        report,
+        Reason.CLAUDE_GIT_COMMAND_NOT_ALLOWED,
+        Reason.INTERRUPTED,
+        "claude_git_command_not_allowed",
+    )
+
+
+def test_a_tree_that_does_not_empty_after_a_stop_is_an_orphan(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(orchestrator, "_wait_until_empty", lambda _tree, _seconds: False)
+
+    def interrupt() -> bool:
+        raise KeyboardInterrupt
+
+    with open(tmp_path / "out.log", "wb") as out, pytest.raises(BlockedError) as caught:
+        orchestrator.run_process(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+            cwd=tmp_path,
+            env=dict(orchestrator.build_env(_managed_config(tmp_path))),
+            timeout=30.0,
+            stdout=out,
+            kill_wait=1.0,
+            on_poll=interrupt,
+        )
+    assert caught.value.reason is Reason.ORPHAN_SUSPECTED
+    assert caught.value.detail == "after_stop"
+    assert isinstance(caught.value.__cause__, KeyboardInterrupt)

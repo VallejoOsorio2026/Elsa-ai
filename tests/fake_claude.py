@@ -148,6 +148,31 @@ def ok_output(files: list[str] | None = None) -> dict:
     }
 
 
+def plant_hook() -> None:
+    # Sin traza: el único motivo debe ser el hook, no este `git`.
+    env = {name: value for name, value in os.environ.items() if name != "GIT_TRACE"}
+    common = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    ).stdout.strip()
+    Path(common, "hooks", "post-commit").write_text("#!/bin/sh\n", encoding="utf-8")
+
+
+def write_out_of_scope() -> None:
+    Path("docs").mkdir(exist_ok=True)
+    Path("docs/fuera.md").write_text("fuera\n", encoding="utf-8")
+
+
+DAMAGE_FIRST = {
+    "hook_then_": plant_hook,
+    "scope_then_": write_out_of_scope,
+    "push_then_": lambda: trace("git push origin main"),
+}
+
+
 def main() -> int:
     scenario, record = sys.argv[1], Path(sys.argv[2])
     args = sys.argv[3:]
@@ -161,9 +186,22 @@ def main() -> int:
         print(f"{'9.9.9' if changed else VERSION} (Claude Code)", flush=True)
         return 0
 
+    # Un daño hecho antes del primer evento, seguido de otro escenario: así se prueba que
+    # cualquier parada revisa los daños, sea cual sea su motivo.
+    for prefix, damage in DAMAGE_FIRST.items():
+        if scenario.startswith(prefix):
+            damage()
+            scenario = scenario.removeprefix(prefix)
     if scenario == "no_init_hang":
         time.sleep(600)
         return 0
+    if scenario == "malformed_init":
+        print('{"type": "system", "subtype": "init", "tools": [', flush=True)
+        time.sleep(600)
+        return 0
+    if scenario == "remote_settings_appear":
+        Path(os.environ["FAKE_CLAUDE_REMOTE_SETTINGS"]).write_text("{}", encoding="utf-8")
+        scenario = "success"
     if scenario == "no_init":
         SESSION["id"] = args[args.index("--session-id") + 1]
         trace(*GIT_TRACE_OK)
