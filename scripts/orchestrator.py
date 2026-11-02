@@ -137,6 +137,66 @@ CLAUDE_FROZEN_FLAGS = (
 CLAUDE_EXPECTED_TOOLS = sorted(("Edit", "Glob", "Grep", "Read", "StructuredOutput", "Write"))
 CLAUDE_EXPECTED_AGENTS = sorted(("claude", "Explore", "general-purpose", "Plan"))
 CLAUDE_EXPECTED_PLUGINS = sorted(("cc-plugin-agents-md", "cc-plugin-plugin-authoring"))
+# Los 27 campos del primer evento con estas opciones: un campo nuevo o ausente detiene el
+# bloque. Sin comparar su valor, solo `uuid` y `powershell_path`, que cambian por ejecución
+# o por máquina. De `model` basta el prefijo, porque `sonnet` es un alias.
+CLAUDE_INIT_FIELDS = frozenset(
+    {
+        "type",
+        "subtype",
+        "uuid",
+        "session_id",
+        "cwd",
+        "original_cwd",
+        "powershell_path",
+        "claude_code_version",
+        "permissionMode",
+        "tools",
+        "mcp_servers",
+        "additional_directories",
+        "skills",
+        "slash_commands",
+        "agents",
+        "plugins",
+        "apiKeySource",
+        "model",
+        "analytics_disabled",
+        "capabilities",
+        "fast_mode_disabled_reason",
+        "fast_mode_state",
+        "output_style",
+        "per_turn_effort_active",
+        "product_feedback_disabled",
+        "ultrathink_available",
+        "view_mode",
+    }
+)
+CLAUDE_INIT_FIXED_VALUES: Mapping[str, object] = {
+    "analytics_disabled": True,
+    "capabilities": [
+        "interrupt_receipt_v1",
+        "interrupt_cancel_queued_v1",
+        "interrupt_send_now_v1",
+        "interrupt_requeue_taken_v1",
+        "msg_lifecycle_v1",
+        "request_marker_lists_v1",
+        "ask_user_question_unanswered_v1",
+        "lifecycle_wakeup_source_v1",
+        "sdk_mcp_tools_list_changed",
+        "sdk_mcp_manifests",
+        "mcp_read_resource_v1",
+        "mcp_tool_ui_meta_v1",
+        "ui_surface_v1",
+        "mcp_call_result_not_for_model_v1",
+    ],
+    "fast_mode_disabled_reason": "sdk_opt_in_required",
+    "fast_mode_state": "off",
+    "output_style": "default",
+    "per_turn_effort_active": True,
+    "product_feedback_disabled": True,
+    "ultrathink_available": False,
+    "view_mode": "default",
+}
 # Nada de esto puede aparecer nunca en el comando. `--settings` encabeza la lista: con
 # `-p`, un archivo inválido se ignora en silencio (medido en O1.3.1).
 FORBIDDEN_CLAUDE_OPTIONS = frozenset(
@@ -325,7 +385,11 @@ _FORBIDDEN_PROGRAMS = frozenset({"claude", "gh"})
 _GIT_TRACE_RE = re.compile(r"\btrace: (.*)$")
 _GIT_TRACE_COMMAND_RE = re.compile(r"(?:built-in|exec|run_command): (.*)$")
 _GIT_TRACE_HARMLESS = ("resolved executable dir: ",)
-_GITHUB_SSH_RE = re.compile(r"^(?:ssh://)?git@github\.com[:/]")
+# Ni el esquema, ni el usuario, ni el anfitrión o su alias, ni el puerto cambian de qué
+# repositorio se habla: solo cuenta la ruta.
+_ORIGIN_RE = re.compile(r"^(?:[a-z][a-z0-9+.\-]*://)?(?:[^/]*@)?[^:/@]+(?::\d+)?[:/]+(.+)$")
+# Una línea que no se pudo leer y parece un `init` no se da por inofensiva.
+_UNREADABLE_INIT_RE = re.compile(r'"subtype"\s*:\s*"init"')
 
 _ALLOWED_GIT_COMMANDS = frozenset(
     {
@@ -1622,15 +1686,31 @@ def validate_docs_only_spec(spec: Spec) -> None:
 
 
 def normalized_origin(url: str) -> str:
-    """Para comparar: `git@github.com:x/y.git` y `https://github.com/x/y` son el mismo."""
-    url = _GITHUB_SSH_RE.sub("https://github.com/", url.strip().lower())
-    return url.removesuffix("/").removesuffix(".git")
+    """Dueño y repositorio. `git@alias:x/y.git` y `https://github.com/x/y` son el mismo."""
+    text = url.strip().lower()
+    found = _ORIGIN_RE.fullmatch(text)
+    path = found.group(1) if found is not None else text
+    return re.sub(r"/+", "/", path).strip("/").removesuffix(".git").rstrip("/")
 
 
-def ensure_not_real_repository(config: RunnerConfig) -> None:
-    """El primer run real exige otro gate humano y un cambio deliberado de esta función."""
-    if normalized_origin(config.expected_origin) == normalized_origin(EXPECTED_ORIGIN):
+def ensure_not_real_repository(config: RunnerConfig, cwd: Path | None = None) -> None:
+    """El primer run real exige otro gate humano y un cambio deliberado de esta función.
+
+    La configuración sola no dice dónde se está: también se le pregunta a Git, por las URL
+    de lectura y de envío. Protege de un error, no de quien cambie el remoto a propósito.
+    """
+    real = normalized_origin(EXPECTED_ORIGIN)
+    if normalized_origin(config.expected_origin) == real:
         raise BlockedError(Reason.REAL_REPO_NOT_AUTHORIZED)
+    git = Git(config, cwd or config.repo_root)
+    for extra in ((), ("--push",)):
+        found = git.run("remote", "get-url", *extra, "--all", "origin", check=False)
+        urls = found.text.splitlines()
+        # Sin URL configurada, Git responde con éxito y repite el nombre del remoto.
+        if found.returncode != 0 or not urls or "origin" in urls:
+            raise BlockedError(Reason.REAL_REPO_NOT_AUTHORIZED, "origin_unreadable")
+        if any(normalized_origin(url) == real for url in urls):
+            raise BlockedError(Reason.REAL_REPO_NOT_AUTHORIZED)
 
 
 def check_claude_user_settings(config: RunnerConfig) -> None:
@@ -1774,7 +1854,8 @@ def check_claude_init(
     init: Mapping[str, Any], *, session_id: str | None = None, cwd: Path | None = None
 ) -> None:
     """Compara el primer evento de forma exacta. Una capacidad inesperada lo detiene todo."""
-    plugins = [plugin.get("source") for plugin in init.get("plugins") or []]
+    if set(init) != CLAUDE_INIT_FIELDS:
+        raise BlockedError(Reason.CLAUDE_CAPABILITY_MISMATCH, "fields")
     checks: dict[str, tuple[object, object]] = {
         "version": (init.get("claude_code_version"), CLAUDE_VERSION),
         "permission_mode": (init.get("permissionMode"), "dontAsk"),
@@ -1785,60 +1866,96 @@ def check_claude_init(
         "slash_commands": (init.get("slash_commands"), []),
         "agents": (sorted(init.get("agents") or []), CLAUDE_EXPECTED_AGENTS),
         "plugins": (
-            sorted(str(source) for source in plugins),
-            [f"{name}@builtin" for name in CLAUDE_EXPECTED_PLUGINS],
+            init.get("plugins"),
+            [
+                {"name": name, "path": "builtin", "source": f"{name}@builtin"}
+                for name in CLAUDE_EXPECTED_PLUGINS
+            ],
         ),
         "api_key_source": (init.get("apiKeySource"), "none"),
         "model": (str(init.get("model")).startswith("claude-sonnet"), True),
     }
+    for name, expected in CLAUDE_INIT_FIXED_VALUES.items():
+        checks[name] = (init.get(name), expected)
     if session_id is not None:
         checks["session"] = (init.get("session_id"), session_id)
-    if cwd is not None and not _same_path(str(init.get("cwd")), cwd):
+    if cwd is not None and not all(
+        _same_path(str(init.get(name)), cwd) for name in ("cwd", "original_cwd")
+    ):
         raise BlockedError(Reason.CLAUDE_CAPABILITY_MISMATCH, "cwd")
     for name, (seen, expected) in checks.items():
         if seen != expected:
             raise BlockedError(Reason.CLAUDE_CAPABILITY_MISMATCH, name)
 
 
+def _stream_lines(data: bytes) -> list[str]:
+    """Solo por `\\n`: `splitlines` también parte en U+2028, válido dentro de un texto JSON."""
+    return data.decode("utf-8", "replace").split("\n")
+
+
+def _stream_event(line: str) -> dict[str, Any] | None:
+    try:
+        event = json.loads(line)
+    except ValueError:
+        return None
+    return event if isinstance(event, dict) else None
+
+
 def _stream_events(data: bytes) -> list[dict[str, Any]]:
-    events = []
-    for line in data.decode("utf-8", "replace").splitlines():
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(event, dict):
-            events.append(event)
-    return events
+    events = (_stream_event(line) for line in _stream_lines(data))
+    return [event for event in events if event is not None]
 
 
 class _ClaudeInitWatcher:
-    """Revisa el primer evento mientras Claude arranca, para cortarlo si no coincide."""
+    """Revisa cada evento `init` mientras Claude corre, para cortarlo si no coincide."""
 
     def __init__(self, log_path: Path, session_id: str, cwd: Path) -> None:
         self._log_path = log_path
         self._session_id = session_id
         self._cwd = cwd
         self._deadline = time.monotonic() + CLAUDE_INIT_TIMEOUT_SECONDS
+        self._offset = 0
         self.seen = False
         self.error: BlockedError | None = None
 
     def inspect(self, data: bytes) -> None:
-        """Revisa todos los eventos `init`: un segundo tampoco puede traer otra cosa."""
-        for event in _stream_events(data):
-            if event.get("type") == "system" and event.get("subtype") == "init":
-                self.seen = True
-                try:
+        """Un segundo `init` tampoco puede traer otra cosa. Lo que no se pueda leer detiene."""
+        try:
+            for line in _stream_lines(data):
+                event = _stream_event(line)
+                if event is None:
+                    if line and _UNREADABLE_INIT_RE.search(line):
+                        self._fail("unreadable_init")
+                elif event.get("type") == "system" and event.get("subtype") == "init":
+                    self.seen = True
                     check_claude_init(event, session_id=self._session_id, cwd=self._cwd)
-                except BlockedError as error:
-                    self.error = self.error or error
+        except BlockedError as error:
+            self.error = self.error or error
+        except Exception as error:
+            # Como `BlockedError`, para que pase por la revisión de daños.
+            self._fail(type(error).__name__)
+
+    def _fail(self, detail: str) -> None:
+        self.error = self.error or BlockedError(Reason.CLAUDE_CAPABILITY_MISMATCH, detail)
 
     def __call__(self) -> bool:
-        if not self.seen:
+        """Lee lo nuevo del log en cada vuelta. Una línea a medias espera a la siguiente."""
+        try:
             with open(self._log_path, "rb") as log:
-                self.inspect(log.read(MAX_LOG_TAIL_BYTES))
-            if not self.seen and time.monotonic() > self._deadline:
-                self.error = BlockedError(Reason.CLAUDE_INIT_MISSING, "no_init_in_time")
+                log.seek(self._offset)
+                data = log.read(MAX_EXECUTOR_OUTPUT_BYTES)
+        except OSError as error:
+            self._fail(type(error).__name__)
+            return True
+        # Lo que quedara detrás no se llegaría a leer: no se da por revisado.
+        if len(data) >= MAX_EXECUTOR_OUTPUT_BYTES:
+            self._fail("log_too_large")
+            return True
+        complete = data[: data.rfind(b"\n") + 1]
+        self._offset += len(complete)
+        self.inspect(complete)
+        if not self.seen and time.monotonic() > self._deadline:
+            self.error = BlockedError(Reason.CLAUDE_INIT_MISSING, "no_init_in_time")
         return self.error is not None
 
 
@@ -2192,6 +2309,9 @@ def _run_logged(
                 on_poll=on_poll,
                 allow_claude=allow_claude,
             )
+        # Última pasada antes de limpiar: lo escrito desde la vuelta anterior.
+        if on_poll is not None:
+            on_poll()
         with open(log_path, "rb") as log:
             log.seek(0, os.SEEK_END)
             log.seek(max(0, log.tell() - MAX_LOG_TAIL_BYTES))
@@ -2401,7 +2521,7 @@ def run_claude_executor(
     report: RunReport,
 ) -> None:
     # También aquí: esta función es pública, y estas dos barreras no dependen de quién llame.
-    ensure_not_real_repository(config)
+    ensure_not_real_repository(config, worktree)
     validate_docs_only_spec(spec)
     check_claude_user_settings(config)
     prefix = claude_prefix(config, executor)
@@ -2436,6 +2556,7 @@ def run_claude_executor(
         scrub_file(trace_path)
     report.executor_returncode = result.returncode
     report.executor_duration = result.duration
+    # La última línea puede no terminar en salto de línea.
     watcher.inspect(tail)
     # Un comando Git prohibido pesa más que cualquier otro motivo de parada.
     check_git_trace(trace_text, require_commands=False)
