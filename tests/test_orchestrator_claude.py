@@ -1543,11 +1543,37 @@ def test_forbidden_git_command_outranks_configuration_after_a_stop(box: ClaudeSa
     )
 
 
-def test_real_claude_refuses_paths_meant_for_the_fake_one(box: ClaudeSandbox) -> None:
-    config = replace(box.config, claude_home=box.root / "claude-home")
+def test_real_claude_refuses_paths_meant_for_the_fake_one(
+    box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Si la barrera fallara, el test no debe llegar nunca a lanzar el Claude real.
+    def never(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("the real Claude must not be launched")
+
+    monkeypatch.setattr(orchestrator, "claude_prefix", never)
+    monkeypatch.setattr(orchestrator, "check_claude_version", never)
+    monkeypatch.setattr(orchestrator, "claude_policy_keys", lambda: [])
+    config = replace(
+        box.config, claude_home=box.root / "claude-home", claude_managed_dir=box.root / "m"
+    )
     report = run_block(config, BLOCK, executor=ClaudeExecutor(), confirm=lambda _s: True)
     _blocked(report, Reason.CLAUDE_UNSAFE_COMMAND)
     assert report.detail == "test_only_paths"
+
+
+def test_a_second_ctrl_c_during_the_damage_check_is_reported(
+    box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def interrupted(_git: Any) -> list[Change]:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(orchestrator, "collect_changes", interrupted)
+    report = box.run_claude("declares_blocked")
+    _blocked(report, Reason.INTERRUPTED)
+    assert report.primary_reason is Reason.EXECUTOR_BLOCKED
+    assert report.damage_check == "interrupted"
+    assert report.run_dir is not None
+    assert "`interrupted`" in (report.run_dir / "report.md").read_text(encoding="utf-8")
 
 
 def test_trace_never_read_is_not_taken_as_clean(

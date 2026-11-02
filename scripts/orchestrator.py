@@ -2698,13 +2698,13 @@ def run_claude_executor(
     temp_dir = run_dir / "claude-tmp"
     temp_dir.mkdir(exist_ok=True)
     env = build_claude_env(config, trace_path, temp_dir)
+    # Desde aquí Claude puede correr, ya con `--version`: una traza sin leer no es limpia.
+    report.claude_git_trace = "unknown: trace not read"
     report.executor_version = check_claude_version(config, prefix, env, worktree)
     report.executor_session = str(uuid.uuid4())
     argv = build_claude_argv(prefix, spec, report.executor_session)
     log_path = run_dir / "executor.log"
     watcher = _ClaudeInitWatcher(log_path, report.executor_session, worktree)
-    # Desde aquí Claude puede haber corrido: una traza que no se llegue a leer no es limpia.
-    report.claude_git_trace = "unknown: trace not read"
     try:
         result, tail = _run_logged(
             config,
@@ -2719,8 +2719,10 @@ def run_claude_executor(
     finally:
         # Se lee antes de limpiar: la limpieza recorta y podría esconder una línea. Queda en
         # el informe también si se sale por Ctrl+C o por un error, para la revisión de daños.
-        report.claude_git_trace = _read_claude_trace(trace_path)
-        scrub_file(trace_path)
+        try:
+            report.claude_git_trace = _read_claude_trace(trace_path)
+        finally:
+            scrub_file(trace_path)
     trace_text = report.claude_git_trace or ""
     report.executor_returncode = result.returncode
     report.executor_duration = result.duration
