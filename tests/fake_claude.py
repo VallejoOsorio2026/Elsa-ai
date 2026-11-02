@@ -20,6 +20,32 @@ ALLOWED_FILE = "docs/permitido.md"
 INIT: dict[str, Any] = {
     "type": "system",
     "subtype": "init",
+    "uuid": "00000000-0000-0000-0000-000000000000",
+    "powershell_path": "powershell.exe",
+    "analytics_disabled": True,
+    "capabilities": [
+        "interrupt_receipt_v1",
+        "interrupt_cancel_queued_v1",
+        "interrupt_send_now_v1",
+        "interrupt_requeue_taken_v1",
+        "msg_lifecycle_v1",
+        "request_marker_lists_v1",
+        "ask_user_question_unanswered_v1",
+        "lifecycle_wakeup_source_v1",
+        "sdk_mcp_tools_list_changed",
+        "sdk_mcp_manifests",
+        "mcp_read_resource_v1",
+        "mcp_tool_ui_meta_v1",
+        "ui_surface_v1",
+        "mcp_call_result_not_for_model_v1",
+    ],
+    "fast_mode_disabled_reason": "sdk_opt_in_required",
+    "fast_mode_state": "off",
+    "output_style": "default",
+    "per_turn_effort_active": True,
+    "product_feedback_disabled": True,
+    "ultrathink_available": False,
+    "view_mode": "default",
     "claude_code_version": VERSION,
     "permissionMode": "dontAsk",
     "tools": ["Edit", "Glob", "Grep", "Read", "StructuredOutput", "Write"],
@@ -29,8 +55,16 @@ INIT: dict[str, Any] = {
     "slash_commands": [],
     "agents": ["claude", "Explore", "general-purpose", "Plan"],
     "plugins": [
-        {"name": "cc-plugin-agents-md", "source": "cc-plugin-agents-md@builtin"},
-        {"name": "cc-plugin-plugin-authoring", "source": "cc-plugin-plugin-authoring@builtin"},
+        {
+            "name": "cc-plugin-agents-md",
+            "path": "builtin",
+            "source": "cc-plugin-agents-md@builtin",
+        },
+        {
+            "name": "cc-plugin-plugin-authoring",
+            "path": "builtin",
+            "source": "cc-plugin-plugin-authoring@builtin",
+        },
     ],
     "apiKeySource": "none",
     "model": "claude-sonnet-5-5",
@@ -45,6 +79,8 @@ GIT_TRACE_OK = [
 ]
 INIT_CHANGES: dict[str, tuple[str, Any]] = {
     "extra_tool": ("tools", [*INIT["tools"], "Bash"]),
+    "unknown_init_field": ("hooks", ["x"]),
+    "other_output_style": ("output_style", "otro"),
     "missing_tool": ("tools", ["Edit", "Glob", "Grep", "Read", "Write"]),
     "mcp_server": ("mcp_servers", [{"name": "x", "status": "connected"}]),
     "additional_directory": ("additional_directories", ["C:/otra"]),
@@ -136,7 +172,12 @@ def main() -> int:
         return 0
 
     SESSION["id"] = args[args.index("--session-id") + 1]
-    init: dict[str, Any] = {**copy.deepcopy(INIT), "session_id": SESSION["id"], "cwd": os.getcwd()}
+    init: dict[str, Any] = {
+        **copy.deepcopy(INIT),
+        "session_id": SESSION["id"],
+        "cwd": os.getcwd(),
+        "original_cwd": os.getcwd(),
+    }
     if scenario in INIT_CHANGES:
         key, value = INIT_CHANGES[scenario]
         init[key] = value
@@ -205,6 +246,13 @@ def main() -> int:
     elif scenario == "second_init":
         write_allowed()
         emit({**init, "tools": [*init["tools"], "Bash"]})
+        result(ok_output())
+    elif scenario == "second_init_buried":
+        write_allowed()
+        emit({**init, "tools": [*init["tools"], "Bash"]})
+        # Más que el final del log que se conserva: no debe depender de ese final.
+        for _ in range(2200):
+            emit({"type": "assistant", "message": "x" * 1024})
         result(ok_output())
     elif scenario == "other_result_session":
         write_allowed()

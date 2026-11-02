@@ -47,6 +47,14 @@ BLOCK = "T1.1"
 ALLOWED = "[docs/permitido.md]"
 
 GOOD_INIT: dict[str, Any] = {
+    "type": "system",
+    "subtype": "init",
+    "uuid": "u",
+    "session_id": "s",
+    "cwd": "c",
+    "original_cwd": "c",
+    "powershell_path": "powershell.exe",
+    **orchestrator.CLAUDE_INIT_FIXED_VALUES,
     "claude_code_version": orchestrator.CLAUDE_VERSION,
     "permissionMode": "dontAsk",
     "tools": ["Edit", "Glob", "Grep", "Read", "StructuredOutput", "Write"],
@@ -56,8 +64,16 @@ GOOD_INIT: dict[str, Any] = {
     "slash_commands": [],
     "agents": ["claude", "Explore", "general-purpose", "Plan"],
     "plugins": [
-        {"source": "cc-plugin-agents-md@builtin"},
-        {"source": "cc-plugin-plugin-authoring@builtin"},
+        {
+            "name": "cc-plugin-agents-md",
+            "path": "builtin",
+            "source": "cc-plugin-agents-md@builtin",
+        },
+        {
+            "name": "cc-plugin-plugin-authoring",
+            "path": "builtin",
+            "source": "cc-plugin-plugin-authoring@builtin",
+        },
     ],
     "apiKeySource": "none",
     "model": "claude-sonnet-5-5",
@@ -303,6 +319,11 @@ def test_observed_init_is_accepted() -> None:
         ("model", "claude-opus-5-5", "model"),
         ("plugins", [], "plugins"),
         ("apiKeySource", "ANTHROPIC_API_KEY", "api_key_source"),
+        ("output_style", "otro", "output_style"),
+        ("view_mode", "otro", "view_mode"),
+        ("fast_mode_state", "on", "fast_mode_state"),
+        ("ultrathink_available", True, "ultrathink_available"),
+        ("capabilities", ["otra"], "capabilities"),
     ],
 )
 def test_any_unexpected_capability_stops(field: str, value: object, detail: str) -> None:
@@ -312,8 +333,114 @@ def test_any_unexpected_capability_stops(field: str, value: object, detail: str)
     assert caught.value.detail == detail
 
 
+def test_first_event_fields_are_a_closed_list() -> None:
+    assert set(GOOD_INIT) == orchestrator.CLAUDE_INIT_FIELDS
+    for extra in ("hooks", "messaging_socket_path", "terminal_slash_commands"):
+        with pytest.raises(BlockedError) as caught:
+            check_claude_init({**GOOD_INIT, extra: "x"})
+        assert caught.value.detail == "fields"
+    for missing in orchestrator.CLAUDE_INIT_FIELDS:
+        without = {key: value for key, value in GOOD_INIT.items() if key != missing}
+        with pytest.raises(BlockedError) as caught:
+            check_claude_init(without)
+        assert caught.value.detail == "fields"
+
+
+def test_later_init_events_are_watched_during_the_run(tmp_path: Path) -> None:
+    log = tmp_path / "executor.log"
+    good = {**GOOD_INIT, "cwd": str(tmp_path), "original_cwd": str(tmp_path)}
+    line = json.dumps(good).encode() + b"\n"
+    log.write_bytes(line)
+    watcher = orchestrator._ClaudeInitWatcher(log, "s", tmp_path)
+    assert watcher() is False
+    assert watcher.seen
+    # Una línea a medias no se da por perdida: espera a la vuelta siguiente.
+    bad = json.dumps({**good, "tools": ["Bash"]}).encode() + b"\n"
+    with open(log, "ab") as handle:
+        handle.write(bad[:20])
+    assert watcher() is False
+    with open(log, "ab") as handle:
+        handle.write(bad[20:])
+    assert watcher() is True
+    assert watcher.error is not None
+    assert watcher.error.detail == "tools"
+
+
+def _watcher_on(tmp_path: Path, data: bytes) -> orchestrator._ClaudeInitWatcher:
+    log = tmp_path / "executor.log"
+    log.write_bytes(data)
+    return orchestrator._ClaudeInitWatcher(log, "s", tmp_path)
+
+
+def _good_init_line(tmp_path: Path) -> str:
+    return json.dumps({**GOOD_INIT, "cwd": str(tmp_path), "original_cwd": str(tmp_path)})
+
+
+def test_init_hidden_behind_other_output_stops(tmp_path: Path) -> None:
+    line = _good_init_line(tmp_path)
+    watcher = _watcher_on(tmp_path, f"{line}\naviso sin salto {line}\n".encode())
+    assert watcher() is True
+    assert watcher.error is not None
+    assert watcher.error.detail == "unreadable_init"
+
+
+def test_separators_inside_a_text_do_not_split_an_event(tmp_path: Path) -> None:
+    # JSON admite U+2028 sin escapar; `splitlines` lo tomaría por un fin de línea.
+    good = {**GOOD_INIT, "cwd": str(tmp_path), "original_cwd": str(tmp_path)}
+    bad = {**good, "tools": ["Bash"], "uuid": "a\u2028b"}
+    text = json.dumps(bad, ensure_ascii=False)
+    assert orchestrator._stream_events(f"{text}\n".encode())[0]["uuid"] == "a\u2028b"
+    watcher = _watcher_on(tmp_path, f"{json.dumps(good)}\n{text}\n".encode())
+    assert watcher() is True
+    assert watcher.error is not None
+    assert watcher.error.detail == "tools"
+
+
+@pytest.mark.parametrize(
+    ("change", "detail"),
+    [
+        ({"plugins": ["x"]}, "plugins"),
+        ({"tools": ["Read", 1]}, "TypeError"),
+    ],
+)
+def test_malformed_init_is_a_stop_not_an_internal_error(
+    tmp_path: Path, change: dict[str, Any], detail: str
+) -> None:
+    good = {**GOOD_INIT, "cwd": str(tmp_path), "original_cwd": str(tmp_path)}
+    watcher = _watcher_on(tmp_path, json.dumps({**good, **change}).encode() + b"\n")
+    assert watcher() is True
+    assert watcher.error is not None
+    assert watcher.error.detail == detail
+
+
+def test_line_too_deep_to_parse_is_a_stop_not_an_internal_error(tmp_path: Path) -> None:
+    deep = b'{"a":' * 200_000 + b"1" + b"}" * 200_000 + b"\n"
+    watcher = _watcher_on(tmp_path, deep)
+    assert watcher() is True
+    assert watcher.error is not None
+    assert watcher.error.detail == "RecursionError"
+
+
+def test_log_beyond_the_reading_limit_stops(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    line = _good_init_line(tmp_path)
+    monkeypatch.setattr(orchestrator, "MAX_EXECUTOR_OUTPUT_BYTES", len(line))
+    watcher = _watcher_on(tmp_path, f"{line}\n{line}\n".encode())
+    assert watcher() is True
+    assert watcher.error is not None
+    assert watcher.error.detail == "log_too_large"
+
+
+def test_unreadable_log_is_a_stop_not_an_internal_error(tmp_path: Path) -> None:
+    watcher = orchestrator._ClaudeInitWatcher(tmp_path / "no_existe", "s", tmp_path)
+    assert watcher() is True
+    assert watcher.error is not None
+    assert watcher.error.detail == "FileNotFoundError"
+
+
 def test_session_and_folder_of_the_first_event_must_match(tmp_path: Path) -> None:
-    good = {**GOOD_INIT, "session_id": "s", "cwd": str(tmp_path)}
+    good = {**GOOD_INIT, "session_id": "s", "cwd": str(tmp_path), "original_cwd": str(tmp_path)}
     check_claude_init(good, session_id="s", cwd=tmp_path)
     with pytest.raises(BlockedError) as caught:
         check_claude_init(good, session_id="otra", cwd=tmp_path)
@@ -517,6 +644,16 @@ def test_extra_env_cannot_change_the_closed_environment(
         "https://github.com/vallejoosorio2026/elsa-ai/",
         "git@github.com:VallejoOsorio2026/Elsa-ai.git",
         "ssh://git@github.com/VallejoOsorio2026/Elsa-ai.git",
+        "https://www.github.com/VallejoOsorio2026/Elsa-ai.git",
+        "https://user@github.com/VallejoOsorio2026/Elsa-ai.git",
+        "https://user:clave@github.com/VallejoOsorio2026/Elsa-ai.git",
+        "https://github.com:443/VallejoOsorio2026/Elsa-ai.git",
+        "git://github.com/VallejoOsorio2026/Elsa-ai.git",
+        "ssh://git@ssh.github.com:443/VallejoOsorio2026/Elsa-ai.git",
+        "https://github.com//VallejoOsorio2026//Elsa-ai.git/",
+        "git@github.com-work:VallejoOsorio2026/Elsa-ai.git",
+        "https://user:p@ss@github.com/VallejoOsorio2026/Elsa-ai.git",
+        "https://otro.example/VallejoOsorio2026/Elsa-ai.git",
     ],
 )
 def test_every_spelling_of_the_real_origin_is_refused(tmp_path: Path, url: str) -> None:
@@ -529,6 +666,79 @@ def test_every_spelling_of_the_real_origin_is_refused(tmp_path: Path, url: str) 
     with pytest.raises(BlockedError) as caught:
         orchestrator.ensure_not_real_repository(config)
     assert caught.value.reason is Reason.REAL_REPO_NOT_AUTHORIZED
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com/otra/Elsa-ai.git",
+        "https://github.com/VallejoOsorio2026/Otro.git",
+        "C:/desechable/origin.git",
+        "C:\\desechable\\origin.git",
+        "/tmp/desechable/origin.git",
+    ],
+)
+def test_other_origins_are_not_the_real_one(url: str) -> None:
+    real = orchestrator.normalized_origin(orchestrator.EXPECTED_ORIGIN)
+    assert orchestrator.normalized_origin(url) != real
+
+
+def _repo_with_origin(tmp_path: Path, *urls: tuple[str, ...]) -> orchestrator.RunnerConfig:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    for args in urls:
+        _git(repo, "remote", *args)
+    return orchestrator.RunnerConfig(
+        repo_root=repo,
+        external_root=tmp_path / "ext",
+        expected_origin="https://github.com/otra/Elsa-ai.git",
+        tool_python=Path(sys.executable),
+    )
+
+
+@pytest.mark.parametrize(
+    "urls",
+    [
+        [("add", "origin", orchestrator.EXPECTED_ORIGIN)],
+        [("add", "origin", "git@github.com:VallejoOsorio2026/Elsa-ai.git")],
+        [
+            ("add", "origin", "https://github.com/otra/Elsa-ai.git"),
+            ("set-url", "--push", "origin", orchestrator.EXPECTED_ORIGIN),
+        ],
+        [
+            ("add", "origin", "https://github.com/otra/Elsa-ai.git"),
+            ("set-url", "--add", "origin", orchestrator.EXPECTED_ORIGIN),
+        ],
+    ],
+)
+def test_git_is_asked_whatever_the_configuration_says(
+    tmp_path: Path, urls: list[tuple[str, ...]]
+) -> None:
+    config = _repo_with_origin(tmp_path, *urls)
+    with pytest.raises(BlockedError) as caught:
+        orchestrator.ensure_not_real_repository(config)
+    assert caught.value.reason is Reason.REAL_REPO_NOT_AUTHORIZED
+
+
+def test_origin_without_url_is_refused(tmp_path: Path) -> None:
+    config = _repo_with_origin(tmp_path, ("add", "origin", "https://github.com/otra/x.git"))
+    _git(config.repo_root, "config", "--unset", "remote.origin.url")
+    with pytest.raises(BlockedError) as caught:
+        orchestrator.ensure_not_real_repository(config)
+    assert caught.value.detail == "origin_unreadable"
+
+
+def test_repository_without_origin_is_refused(tmp_path: Path) -> None:
+    config = _repo_with_origin(tmp_path)
+    with pytest.raises(BlockedError) as caught:
+        orchestrator.ensure_not_real_repository(config)
+    assert caught.value.detail == "origin_unreadable"
+
+
+def test_other_repository_passes_the_guard(tmp_path: Path) -> None:
+    config = _repo_with_origin(tmp_path, ("add", "origin", "https://github.com/otra/Elsa-ai.git"))
+    orchestrator.ensure_not_real_repository(config)
 
 
 def _home(tmp_path: Path, **files: str) -> orchestrator.RunnerConfig:
@@ -739,6 +949,9 @@ def test_unexpected_capability_kills_the_process_at_once(box: ClaudeSandbox, sce
         ("token", Reason.SECRET_DETECTED),
         ("uppercase_md", Reason.CODE_PROFILE_FORBIDDEN),
         ("second_init", Reason.CLAUDE_CAPABILITY_MISMATCH),
+        ("second_init_buried", Reason.CLAUDE_CAPABILITY_MISMATCH),
+        ("unknown_init_field", Reason.CLAUDE_CAPABILITY_MISMATCH),
+        ("other_output_style", Reason.CLAUDE_CAPABILITY_MISMATCH),
         ("other_result_session", Reason.CLAUDE_CAPABILITY_MISMATCH),
         ("blocked_after_planting_hook", Reason.REPO_INVARIANT_BROKEN),
         ("exit_after_planting_hook", Reason.REPO_INVARIANT_BROKEN),
