@@ -429,7 +429,21 @@ def test_log_beyond_the_reading_limit_stops(
     watcher = _watcher_on(tmp_path, f"{line}\n{line}\n".encode())
     assert watcher() is True
     assert watcher.error is not None
+    assert watcher.error.reason is Reason.EXECUTOR_OUTPUT_TOO_LARGE
     assert watcher.error.detail == "log_too_large"
+
+
+def test_capability_seen_before_the_reading_limit_keeps_priority(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    good = {**GOOD_INIT, "cwd": str(tmp_path), "original_cwd": str(tmp_path)}
+    bad = json.dumps({**good, "tools": ["Bash"]})
+    monkeypatch.setattr(orchestrator, "MAX_EXECUTOR_OUTPUT_BYTES", len(bad) + 1)
+    watcher = _watcher_on(tmp_path, f"{bad}\n{bad}\n".encode())
+    assert watcher() is True
+    assert watcher.error is not None
+    assert watcher.error.reason is Reason.CLAUDE_CAPABILITY_MISMATCH
+    assert watcher.error.detail == "tools"
 
 
 def test_unreadable_log_is_a_stop_not_an_internal_error(tmp_path: Path) -> None:
@@ -1028,6 +1042,15 @@ def test_timeout_kills_a_child_of_claude(box: ClaudeSandbox, tmp_path: Path) -> 
 
 
 def test_excessive_output_is_cut(box: ClaudeSandbox) -> None:
+    report = box.run_claude("flood", max_executor_output=256 * 1024)
+    _blocked(report, Reason.EXECUTOR_OUTPUT_TOO_LARGE)
+
+
+def test_flood_beyond_the_reading_limit_is_still_output_too_large(
+    box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # En Linux, entre dos vueltas se escribe más que el tope de lectura: así falló la CI.
+    monkeypatch.setattr(orchestrator, "MAX_EXECUTOR_OUTPUT_BYTES", 64 * 1024)
     report = box.run_claude("flood", max_executor_output=256 * 1024)
     _blocked(report, Reason.EXECUTOR_OUTPUT_TOO_LARGE)
 

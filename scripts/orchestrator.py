@@ -1947,13 +1947,17 @@ class _ClaudeInitWatcher:
         except OSError as error:
             self._fail(type(error).__name__)
             return True
-        # Lo que quedara detrás no se llegaría a leer: no se da por revisado.
-        if len(data) >= MAX_EXECUTOR_OUTPUT_BYTES:
-            self._fail("log_too_large")
-            return True
         complete = data[: data.rfind(b"\n") + 1]
         self._offset += len(complete)
+        # Primero lo leído: una capacidad inesperada ahí sigue siendo el motivo.
         self.inspect(complete)
+        # Lo que quedara detrás no se llegaría a leer: no se da por revisado. Es salida
+        # excesiva, no una capacidad vista.
+        if len(data) >= MAX_EXECUTOR_OUTPUT_BYTES:
+            self.error = self.error or BlockedError(
+                Reason.EXECUTOR_OUTPUT_TOO_LARGE, "log_too_large"
+            )
+            return True
         if not self.seen and time.monotonic() > self._deadline:
             self.error = BlockedError(Reason.CLAUDE_INIT_MISSING, "no_init_in_time")
         return self.error is not None
