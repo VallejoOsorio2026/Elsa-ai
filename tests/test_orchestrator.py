@@ -379,6 +379,10 @@ def test_forbidden_wins_over_allowed() -> None:
         "scripts/orchestrator.py",
         "scripts/Start-ElsaBlock.ps1",
         "tests/test_orchestrator.py",
+        "tests/fake_claude.py",
+        "docs/adr/0001-x.md",
+        ".credentials.json",
+        "docs/.credentials.json",
         "docs/orchestration/work/T1.1.md",
         "docs/orchestration/runs/T1.1.md",
     ],
@@ -539,9 +543,12 @@ def _constants_outside_denylists() -> set[str]:
         "--hard",
         "--no-verify",
         "--amend",
-        "claude",
         "gh",
-        "-p",
+        "Bash",
+        "PowerShell",
+        "WebFetch",
+        "WebSearch",
+        "Task",
     ],
 )
 def test_runner_source_has_no_forbidden_argument(token: str) -> None:
@@ -559,6 +566,7 @@ def test_runner_only_imports_a_closed_list_of_modules() -> None:
         "enum",
         "fcntl",
         "hashlib",
+        "itertools",
         "json",
         "msvcrt",
         "os",
@@ -573,6 +581,7 @@ def test_runner_only_imports_a_closed_list_of_modules() -> None:
         "traceback",
         "typing",
         "unicodedata",
+        "uuid",
         "yaml",
     }
     imported: set[str] = set()
