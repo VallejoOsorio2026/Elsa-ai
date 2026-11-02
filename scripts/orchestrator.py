@@ -2700,11 +2700,15 @@ def run_claude_executor(
     env = build_claude_env(config, trace_path, temp_dir)
     # Desde aquí Claude puede correr, ya con `--version`: una traza sin leer no es limpia.
     report.claude_git_trace = "unknown: trace not read"
-    report.executor_version = check_claude_version(config, prefix, env, worktree)
+    try:
+        report.executor_version = check_claude_version(config, prefix, env, worktree)
+    finally:
+        report.claude_git_trace = _read_claude_trace(trace_path)
     report.executor_session = str(uuid.uuid4())
     argv = build_claude_argv(prefix, spec, report.executor_session)
     log_path = run_dir / "executor.log"
     watcher = _ClaudeInitWatcher(log_path, report.executor_session, worktree)
+    report.claude_git_trace = "unknown: trace not read"
     try:
         result, tail = _run_logged(
             config,
