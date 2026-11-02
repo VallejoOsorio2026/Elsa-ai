@@ -1,11 +1,12 @@
 # ADR 0037 — Límites del ejecutor Claude real
 
 - Estado: **propuesto**
-- Fecha de la decisión: **2026-11-01**
-- Bloque: **O1**, incremento **O1.3.2**
-- **Decide**: con qué condiciones el runner puede lanzar Claude Code real, y qué no garantiza
-- **No decide**: el primer `run` real sobre el repositorio (`O1.3.R1`), ni dar consola a Claude, ni
-  O1.4. Cada uno exige un gate humano propio
+- Fecha de la decisión: **2026-11-01**; actualizado el **2026-11-02** en O1.3.5
+- Bloque: **O1**, incrementos **O1.3.2** y **O1.3.5**
+- **Decide**: con qué condiciones el runner puede lanzar Claude Code real, y qué no garantiza. Desde
+  O1.3.5, también que **Claude real en O1 no recibe consola**, y qué configuración de Claude Code se niega
+- **No decide**: el primer `run` real sobre el repositorio (`O1.3.R1`) ni O1.4. Cada uno exige un gate
+  humano propio
 - **No reabre** el [ADR 0036](0036-orquestacion-semiautomatica-de-bloques.md), cuyo §9 condicionaba el
   ejecutor a una prueba de bloqueo. Esa prueba ya se hizo:
   [`resultados-o1-3-1-y-o1-3-3.md`](../orchestration/resultados-o1-3-1-y-o1-3-3.md)
@@ -20,6 +21,10 @@ procesos vivos.
 
 **Pero eso no es aislamiento.** Claude Code corre con el usuario de Windows y con acceso a la red. Lo que
 lo limita son sus propias restricciones y las comprobaciones posteriores del runner.
+
+O1.3.4 probó, también fuera del repositorio, si una consola limitada a un comando fijo bastaba para lanzar
+un hijo y un nieto bajo control. No bastó: la prueba se detuvo antes de las terminaciones, y O1.3.5 cierra
+la consola por diseño (§4).
 
 ## 2. Decisión: vocabulario
 
@@ -43,6 +48,28 @@ detiene antes de cualquier control.
 
 ## 4. Decisión: sin consola y sin capacidades añadidas
 
+**Claude real en O1 no recibe consola.** Ni `Bash`, ni `PowerShell`, ni ninguna herramienta que ejecute
+comandos o código, ni `WebFetch`, `WebSearch`, `Task`, MCP o `NotebookEdit`. **No hay excepción para comandos
+«seguros».** En O1.3.4, una regla `Bash(<comando exacto>)` con `dontAsk` dejó ejecutar otros comandos de solo
+lectura, como `cat`, `whoami` o `git status`, y también encadenar el comando permitido con otro
+([`resultados-o1-3-4.md`](../orchestration/resultados-o1-3-4.md)). Una consola acotada no existe en 2.1.316.
+
+El runner lo hace cumplir por su cuenta, con una lista literal de herramientas de archivos escrita aparte de
+`CLAUDE_TOOLS`. Si alguien añade una consola a esa constante, o a las herramientas esperadas, se detiene igual:
+
+- **al importar** el runner, si `CLAUDE_TOOLS` incluye otra cosa;
+- **al construir el comando**, si `--tools`, `--allowedTools` o `--disallowedTools` nombran otra herramienta,
+  separada por comas o por espacios;
+- **en el primer evento**, si aparece otra herramienta, antes de la comparación exacta.
+
+`ClaudeExecutor` no tiene ningún parámetro para ampliar herramientas. Su prefijo, que solo usan los tests, no
+puede llevar opciones con guion; la barrera de fondo es que el prefijo no se puede fijar desde la consola. Con el
+Claude real, tampoco se aceptan las rutas de usuario y administrada que los tests sustituyen. Los agentes que
+lista el primer evento no son herramientas ejecutables: sin herramienta de subagentes, nadie puede invocarlos.
+
+Esto no afecta a los comandos propios del runner: Git, gitleaks y los controles de calidad siguen codificados
+en `scripts/orchestrator.py`. Eso no es dar consola a Claude.
+
 El comando siempre lleva:
 
 ```text
@@ -56,13 +83,29 @@ El comando siempre lleva:
   otras (medido).
 - **Sin `--settings`.** Con `-p`, un archivo inválido se ignora en silencio (medido). Antes de lanzar se
   comprueba una **lista cerrada de opciones**: cada una una sola vez y con su valor exacto.
-- **Configuración de usuario.** El primer evento no muestra permisos ni hooks de usuario. El runner exige que
-  `~/.claude/settings.json` solo tenga las claves ya medidas, y que no exista `settings.local.json`. Solo lee
-  sus nombres de clave.
+- **Configuración de Claude Code, por defecto denegada.** El primer evento no muestra permisos ni hooks, y la
+  configuración administrada se aplica aunque `--safe-mode` y `--restricted` desactiven lo demás. El runner lo
+  comprueba antes de lanzar, al terminar y en la revisión de daños. Ver la tabla siguiente.
 - **Permisos de escritura con `Edit(ruta)`.** `Write(ruta)` sola no concede nada, y `Edit(ruta)` también
   autoriza `Write` (medido).
 - **Denegación de `.env`** en sus 8 variantes de mayúsculas, aunque la copia no lo contenga. Se midieron
   `.env` y `.ENV`.
+
+Las fuentes de configuración se leyeron del binario de 2.1.316 instalado, no se supusieron. **De ninguna se lee
+el contenido**, salvo los nombres de clave de `~/.claude/settings.json`:
+
+| Fuente | Qué detiene el bloque |
+|---|---|
+| Usuario | `settings.json` con claves distintas de las medidas, `settings.local.json` o `cowork_settings.json` |
+| Proyecto | En la copia, versionado o no: cualquier `.mcp.json`, y en `.claude/` cualquier cosa fuera de `agents/` y `skills/`, cuyo efecto ya controla el primer evento. En las carpetas que la contienen: `.mcp.json`, `.claude/settings.json` o `.claude/settings.local.json` |
+| Administrada en archivo | Que exista `C:\Program Files\ClaudeCode`, donde 2.1.316 busca `managed-settings.json`, `managed-settings.d\` y `managed-mcp.json` |
+| Administrada en el registro | Que exista `SOFTWARE\Policies\ClaudeCode` en `HKLM` o `HKCU`, en sus vistas de 32 y 64 bits, o que no se pueda abrir |
+| Administrada remota | Su caché en `~/.claude`: `remote-settings.json`, `policy-limits.json` y los archivos de consentimiento |
+| Otra ruta administrada | `CLAUDE_CODE_MANAGED_SETTINGS_PATH` nunca llega al proceso, por el entorno cerrado, y `--managed-settings` está prohibida |
+
+**Límites.** La administrada remota solo se detecta por su caché, y por eso también se comprueba al terminar:
+es detección, no prevención. No se midió si 2.1.316 lee configuración de las carpetas que contienen la copia:
+se niega igual.
 
 ## 5. Decisión: versión exacta y primer evento
 
@@ -94,8 +137,18 @@ como `-C`, y el proceso vigilado controla esa variable y ese archivo.
 
 `structured_output` se valida en forma y se compara con Git. Una discrepancia bloquea. **Todos los controles
 independientes del runner siguen activos:** alcance, archivos ignorados, `HEAD`, índice, `.git`, enlaces y
-junctions, y gitleaks. **También cuando Claude se detiene:** en un timeout, un error o un `blocked`, se revisan
-la traza, el repositorio y el alcance, y un daño pesa más que el motivo declarado.
+junctions, y gitleaks. **También cuando Claude se detiene, por cualquier camino:** timeout, error, `blocked`,
+capacidad inesperada, `init` ilegible, salida excesiva, `structured_output` inválido, un error al leer el log y
+Ctrl+C. Tras cualquier excepción, el runner espera primero a que el job quede vacío; si no se vacía, el motivo
+es `orphan_suspected`.
+
+La revisión de daños mira, en este orden, el repositorio principal y su `.git`, `HEAD` y la rama, la
+especificación, el índice, los archivos ignorados, el alcance, enlaces y junctions, la traza de Git y la
+configuración de Claude Code. Un daño en el repositorio pesa más que un comando Git prohibido, este más que la
+configuración, y todo más que el motivo de la parada. **El motivo de la parada no se pierde:** el informe guarda
+los dos. Una traza que no se llegó a leer no se da por limpia. Si la revisión falla, el motivo es
+`damage_check_failed`: sin revisar, no se puede decir que no hubo daño. Si un segundo Ctrl+C la corta, el
+bloque termina como `interrupted` y el informe dice que la revisión quedó a medias.
 
 ## 9. Decisión: el repositorio real sigue cerrado
 
@@ -112,6 +165,9 @@ Abrirlo exige un gate humano y un cambio deliberado de esa función.
 - Una nueva versión de Claude Code exige repetir las pruebas reales antes de aceptarla. Lo mismo un cambio en
   `.claude/` o `CLAUDE.md` que altere el primer evento: las pruebas reales copian esa estructura.
 - Las pruebas reales consumen uso y corren solo a mano, con `ELSA_O1_CLAUDE_LIVE=1`. CI nunca las ejecuta.
+- Dar consola a Claude real exigiría un ADR nuevo que reemplace el §4. O1.3.4 muestra por qué una regla de
+  comando exacto no basta.
+- Cuando llegue, `O1.3.R1` trabajará en una copia de trabajo que crea el runner, nunca sobre `main`.
 
 ## 11. Riesgos residuales
 
@@ -121,17 +177,21 @@ Abrirlo exige un gate humano y un cambio deliberado de esa función.
 | Red disponible para el proceso | **No resuelto.** Sin herramienta para que el modelo dirija tráfico |
 | Credential Manager accesible al usuario | **Mitigado.** Sin consola, y con `credential.helper` anulado para Git interno |
 | `.credentials.json` accesible al proceso | **Mitigado.** Claude Code lo necesita; el modelo tiene confinamiento |
-| Hijo y nieto de larga duración de Claude | **Sin demostrar.** Exige consola, y sigue sin autorizarse |
+| Hijo y nieto de larga duración lanzados por Claude mediante una consola | **NO APLICABLE POR DISEÑO.** Claude real no recibe consola (§4; O1.3.4) |
+| Procesos internos propios de Claude Code, como `git`, `reg.exe`, `where.exe` o `conhost.exe` | **Mitigado.** Los terminan el Job Object, el timeout, Ctrl+C y la muerte del runner, con 0 vivos (medido en O1.3.2). **No es aislamiento de Windows** |
+| Configuración administrada remota | **Detectado**, no prevenido: solo por su caché local, antes y después de lanzar. Puede traer hooks, que se ejecutan aunque Claude no tenga consola. **Antes de `O1.3.R1`**, confirmar que la cuenta no pertenece a una organización con configuración remota |
+| Comandos de solo lectura que Claude Code autoriza por su cuenta | **NO APLICABLE POR DISEÑO.** Solo ocurren con consola (medido en O1.3.4) |
 | Procesos creados a través de otros servicios de Windows | **No resuelto** |
 | Configuración global de Git | **No resuelto** |
 | Exclusiones por ruta de gitleaks | **Mitigado.** Solo `.md` en rutas exactas, sin las exclusiones por defecto; `.md` en `docs/` se escanea (medido en una ruta) |
 | Un hook alterado queda como línea base del siguiente `run` | **Mitigado.** El bloque que lo causó se detiene; el siguiente no lo sabe. Revisar antes de `O1.3.R1` |
 | Seis variantes de `Glob` y `Grep` quedaron INCONCLUSO en O1.3.3 | **Sin explicar.** Sin datos expuestos, pero sin rechazo ni mecanismo conocido |
-| `--safe-mode` frente a configuración de usuario distinta | **Sin medir.** Por eso se exige que sea la ya medida |
+| `--safe-mode` frente a configuración de usuario distinta | **Sin medir.** Por eso se exige que sea la ya medida, y se niega la de proyecto y la administrada (§4) |
 | Valores del primer evento que dependan de la cuenta, como `fast_mode_state` | **Inferencia.** Un cambio ajeno al proyecto detendría el bloque, sin daño; habría que volver a medir |
 | `claude.exe` plantado en el `PATH` | **No resuelto.** La versión la declara el propio binario |
 | Limpieza de logs y carpeta temporal de Claude | **Parcial.** Sin borrar, fuera del repositorio |
 
 ## 12. Fuera de esta decisión
 
-`O1.3.R1`, la consola para Claude, O1.4, el perfil `code` y las 3 pruebas que fallan en Windows.
+`O1.3.R1`, O1.4, el perfil `code` y las 3 pruebas que fallan en Windows. La consola para Claude ya no está
+fuera de esta decisión: el §4 la descarta.

@@ -180,9 +180,11 @@ detiene el bloque. Corregirlas es un pendiente de un bloque aparte; ver
 
 ## 11. Ejecutor Claude real
 
-`ClaudeExecutor` lanza Claude Code real sin consola. **No está aislado:** corre con el usuario de Windows y con
-acceso a la red. Límites y motivos: [ADR 0037](../adr/0037-limites-del-ejecutor-claude-real.md). Mediciones:
-[`resultados-o1-3-1-y-o1-3-3.md`](resultados-o1-3-1-y-o1-3-3.md).
+`ClaudeExecutor` lanza Claude Code real **sin consola, por diseño**: solo herramientas de archivos. **No está
+aislado:** corre con el usuario de Windows y con acceso a la red. Límites y motivos:
+[ADR 0037](../adr/0037-limites-del-ejecutor-claude-real.md). Mediciones:
+[`resultados-o1-3-1-y-o1-3-3.md`](resultados-o1-3-1-y-o1-3-3.md) y
+[`resultados-o1-3-4.md`](resultados-o1-3-4.md), que muestra por qué una consola acotada no basta.
 
 **No se puede usar desde la consola,** y se niega a trabajar sobre el repositorio real. Esa barrera protege de un error, no de un cambio deliberado. Hoy solo lo invocan los
 tests.
@@ -191,13 +193,14 @@ tests.
 |---|---|
 | Versión | Exige exactamente 2.1.316, antes y después. Otra detiene el bloque |
 | Primer evento | Lista cerrada de sus 27 campos y sus valores, también en un `init` posterior; salvedades en el ADR 0037, §5. Una diferencia termina el proceso |
-| Configuración de usuario | Solo las claves ya medidas en `~/.claude/settings.json`; otra detiene el bloque antes de lanzar |
+| Consola | **Nunca.** Solo `Read`, `Edit`, `Write`, `Glob` y `Grep`, con una lista propia que se comprueba al importar el runner, al construir el comando y en el primer evento |
+| Configuración de Claude Code | Por defecto denegada, antes y después de lanzar: de usuario solo las claves medidas; de proyecto, nada fuera de `.claude/agents` y `.claude/skills`, y ningún `.mcp.json`; ninguna administrada, en archivo, registro o caché remota. Detalle en el ADR 0037, §4 |
 | Comando | Lista cerrada de opciones con valor exacto, sin `--settings`, reglas `Edit(ruta)` y denegación de `.env` |
 | Entorno | Lista cerrada de variables, sin tokens |
 | Comandos Git internos | `GIT_TRACE`; solo los comandos de lectura ya observados. Otro detiene el bloque |
 | Especificación | Solo rutas exactas de documentación |
 | Salida | Se valida `structured_output` y se compara con Git |
-| Paradas | En un timeout, un error o un `blocked` también se revisan la traza, el repositorio y el alcance |
+| Paradas | Cualquier salida, incluidos Ctrl+C y un error al leer el log, revisa repositorio, alcance, traza de Git y configuración, en ese orden. El informe guarda el motivo de la parada y el resultado de esa revisión; un daño pesa más |
 | Perfil `code` | **Prohibido** |
 
 **Si Claude Code se actualiza,** el runner se detendrá. Hay que repetir las pruebas reales con la versión nueva y
