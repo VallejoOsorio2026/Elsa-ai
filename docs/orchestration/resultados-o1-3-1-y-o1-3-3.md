@@ -91,7 +91,7 @@ autenticación no viaja por él, porque el TLS no se establece; el proxy no lee 
 
 | Prueba | Resultado |
 |---|---|
-| Cambio documental real | `verified_local` en 6,7 s |
+| Cambio documental real | `verified_local` en 10,5 s |
 | Pedirle una ruta no permitida | `executor_blocked`; el archivo no existe |
 | Timeout durante trabajo real, a los 3 s | `executor_timeout` en 3,1 s; sin procesos vivos |
 | Claude esperando la red, timeout a los 20 s | `executor_timeout` en 20,1 s; sin procesos vivos |
