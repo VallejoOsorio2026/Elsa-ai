@@ -184,13 +184,13 @@ detiene el bloque. Corregirlas es un pendiente de un bloque aparte; ver
 acceso a la red. Límites y motivos: [ADR 0037](../adr/0037-limites-del-ejecutor-claude-real.md). Mediciones:
 [`resultados-o1-3-1-y-o1-3-3.md`](resultados-o1-3-1-y-o1-3-3.md).
 
-**No se puede usar desde la consola,** y se niega a trabajar sobre el repositorio real. Hoy solo lo invocan los
+**No se puede usar desde la consola,** y se niega a trabajar sobre el repositorio real. Esa barrera protege de un error, no de un cambio deliberado. Hoy solo lo invocan los
 tests.
 
 | Control | Qué hace |
 |---|---|
 | Versión | Exige exactamente 2.1.316, antes y después. Otra detiene el bloque |
-| Primer evento | Compara herramientas, MCP, directorios, skills, comandos, plugins, agentes, modo, modelo, sesión y carpeta. Una diferencia termina el proceso |
+| Primer evento | Lista cerrada de sus 27 campos y sus valores, también en un `init` posterior; salvedades en el ADR 0037, §5. Una diferencia termina el proceso |
 | Configuración de usuario | Solo las claves ya medidas en `~/.claude/settings.json`; otra detiene el bloque antes de lanzar |
 | Comando | Lista cerrada de opciones con valor exacto, sin `--settings`, reglas `Edit(ruta)` y denegación de `.env` |
 | Entorno | Lista cerrada de variables, sin tokens |

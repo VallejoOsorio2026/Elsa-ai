@@ -69,10 +69,13 @@ El comando siempre lleva:
 Todo se midió en **2.1.316**. Otra versión detiene el bloque, antes de lanzar y al terminar. El runner no
 cambia la configuración de actualizaciones.
 
-El primer evento se compara **de forma exacta**: herramientas, MCP, directorios adicionales, skills,
-comandos, plugins y su origen, agentes, modo de permisos, origen de la clave, modelo, sesión y carpeta. Una
-diferencia termina el proceso, y sin primer evento en 60 s también. **Lo que ocurra antes del primer evento y
-hasta unos 100 ms después solo se puede detectar, no impedir.**
+El primer evento se compara **de forma exacta**, con lista cerrada de sus 27 campos: un campo nuevo o ausente
+o un valor distinto termina el proceso, y sin primer evento en 60 s también. Hay tres salvedades: `uuid` y
+`powershell_path` no se comparan, porque cambian por ejecución o por máquina; `tools` y `agents` se comparan sin
+importar el orden; y `model` solo exige el prefijo `claude-sonnet`, porque `sonnet` es un alias. El log se vigila
+durante toda la ejecución: un `init` posterior también se compara, y una línea ilegible que parezca un `init`
+detiene el bloque. **Lo que ocurra antes del primer evento y hasta unos 100 ms después solo se puede detectar,
+no impedir.**
 
 ## 6. Decisión: entorno cerrado
 
@@ -97,8 +100,11 @@ la traza, el repositorio y el alcance, y un daño pesa más que el motivo declar
 ## 9. Decisión: el repositorio real sigue cerrado
 
 `ClaudeExecutor` no está en la consola, solo se inyecta por código y se niega a trabajar si `origin` es el
-repositorio autorizado, en cualquiera de sus formas de escribirlo. Abrirlo exige un gate humano y un cambio
-deliberado de esa función.
+repositorio autorizado. Lo comprueba en la configuración y preguntándole a Git, por las URL de lectura y de
+envío. Compara solo dueño y repositorio, en cualquier anfitrión, para reconocer HTTPS, SSH, usuario, puerto y
+alias de host. Un repositorio sin `origin` legible también se rechaza. **Protege de un error, no de un cambio
+deliberado:** quien cambie el remoto o el código la salta, y formas raras como `%2D` en la URL no se reconocen.
+Abrirlo exige un gate humano y un cambio deliberado de esa función.
 
 ## 10. Consecuencias
 
@@ -122,6 +128,7 @@ deliberado de esa función.
 | Un hook alterado queda como línea base del siguiente `run` | **Mitigado.** El bloque que lo causó se detiene; el siguiente no lo sabe. Revisar antes de `O1.3.R1` |
 | Seis variantes de `Glob` y `Grep` quedaron INCONCLUSO en O1.3.3 | **Sin explicar.** Sin datos expuestos, pero sin rechazo ni mecanismo conocido |
 | `--safe-mode` frente a configuración de usuario distinta | **Sin medir.** Por eso se exige que sea la ya medida |
+| Valores del primer evento que dependan de la cuenta, como `fast_mode_state` | **Inferencia.** Un cambio ajeno al proyecto detendría el bloque, sin daño; habría que volver a medir |
 | `claude.exe` plantado en el `PATH` | **No resuelto.** La versión la declara el propio binario |
 | Limpieza de logs y carpeta temporal de Claude | **Parcial.** Sin borrar, fuera del repositorio |
 

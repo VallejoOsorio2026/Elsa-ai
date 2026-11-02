@@ -34,6 +34,11 @@ donde se indica.
 | `--restricted` | Sin diferencia en la lista inicial. No se comprobó aquí el confinamiento sin ella |
 | `--strict-mcp-config` | Sin diferencia hoy: no hay MCP de usuario |
 
+**Campos del primer evento:** los 27 que hoy exige el runner aparecen en los 58 registros guardados de las sondas
+(las 53 ejecuciones, más sondas interrumpidas o repetidas). Salvo identificadores y carpetas, cada valor fue el mismo
+en todos, excepto al retirar una opción a propósito. Solo aparecieron dos campos más: `messaging_socket_path` al quitar `--restricted` y
+`terminal_slash_commands` al quitar `--disable-slash-commands`.
+
 ## O1.3.3: pruebas negativas
 
 La clasificación sale del registro de cada ejecución, no de lo que Claude dijo. **Una negativa del modelo no
@@ -80,18 +85,18 @@ herramienta devolvió un resultado vacío en vez de rechazarlo. **No se conoce e
 
 ## O1.3.2: pruebas reales de procesos
 
-Con `tests/test_orchestrator_claude_live.py`, ya con el ejecutor integrado en el runner, en repositorios desechables
+Con `tests/test_orchestrator_claude_live.py`, sobre el último árbol de este PR, ya con el ejecutor integrado en el runner, en repositorios desechables
 y sin consola, con `.claude/` y `CLAUDE.md` copiados al desechable. Para que Claude quede esperando se usa un proxy local que nunca responde. **Inferencia:** la
 autenticación no viaja por él, porque el TLS no se establece; el proxy no lee nada.
 
 | Prueba | Resultado |
 |---|---|
-| Cambio documental real | `verified_local` en 7,5 s |
+| Cambio documental real | `verified_local` en 6,7 s |
 | Pedirle una ruta no permitida | `executor_blocked`; el archivo no existe |
 | Timeout durante trabajo real, a los 3 s | `executor_timeout` en 3,1 s; sin procesos vivos |
 | Claude esperando la red, timeout a los 20 s | `executor_timeout` en 20,1 s; sin procesos vivos |
 | Ctrl+C real en una consola propia | `interrupted`; 24 procesos del job vistos, 0 vivos |
-| Muerte deliberada del runner | 22 procesos del job vistos, 0 vivos |
+| Muerte deliberada del runner | 24 procesos del job vistos, 0 vivos |
 | Repositorio real | Idéntico antes y después |
 
 **Sin demostrar:** un hijo o nieto de larga duración lanzado por Claude. Exige consola, y sigue sin autorizarse.
