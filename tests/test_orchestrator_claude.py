@@ -1897,7 +1897,8 @@ def _authorization_for(
         "branch": spec.branch,
         "allowed_paths": spec.allowed_paths,
         "path": config.authorizations / f"{spec.id}.json",
-        "raw_sha256": "0" * 64,
+        # La huella del archivo gastado: así es como queda tras `consume`.
+        "raw_sha256": hashlib.sha256(used.read_bytes()).hexdigest(),
         **changes,
     }
     return orchestrator.RealRunAuthorization(**values)
@@ -1942,8 +1943,29 @@ def test_target_check_requires_a_spent_authorization(real: RealBox) -> None:
     authorization.path.write_text("{}", encoding="utf-8")
     assert _target(real, spec, authorization) == "not_consumed"
     authorization.path.unlink()
-    (real.box.config.used_authorizations / f"{spec.id}.json").unlink()
+    used = real.box.config.used_authorizations / f"{spec.id}.json"
+    # Cualquier archivo gastado no basta: debe ser el de esta autorización.
+    used.write_text('{"otra": true}', encoding="utf-8")
     assert _target(real, spec, authorization) == "not_consumed"
+    used.unlink()
+    assert _target(real, spec, authorization) == "not_consumed"
+
+
+def test_spec_commit_may_carry_only_the_spec(real: RealBox) -> None:
+    spec = replace(_spec(), branch=REAL_BRANCH)
+    base = _git(real.box.repo, "rev-parse", "HEAD")
+    _git(
+        real.box.repo, "worktree", "add", "--quiet", "-b", REAL_BRANCH, str(real.box.worktree), base
+    )
+    work = real.box.worktree
+    (work / "docs/orchestration/work").mkdir(parents=True)
+    (work / f"docs/orchestration/work/{BLOCK}.md").write_text("spec\n", encoding="utf-8")
+    (work / "CLAUDE.md").write_text("otras instrucciones\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "--quiet", "--no-verify", "-m", "chore: spec y algo más")
+    commit = _git(work, "rev-parse", "HEAD")
+    authorization = _authorization_for(real.box.config, spec, base_sha=base)
+    assert _target(real, spec, authorization, commit) == "spec_commit"
 
 
 def test_claude_targets_only_its_branch_on_the_authorized_base(real: RealBox) -> None:

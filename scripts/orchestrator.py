@@ -1977,6 +1977,13 @@ def check_authorized_target(
     used = config.used_authorizations / f"{authorization.block_id}.json"
     if os.path.lexists(authorization.path) or not used.is_file():
         raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "not_consumed")
+    # Gastada, y precisamente esta: el archivo usado es el mismo que se validó.
+    try:
+        spent = hashlib.sha256(used.read_bytes()).hexdigest()
+    except OSError as error:
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "not_consumed") from error
+    if spent != authorization.raw_sha256:
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "not_consumed")
     if _same_path(worktree, config.repo_root) or not _same_path(
         worktree, worktree_path(config, spec.id)
     ):
@@ -1991,6 +1998,10 @@ def check_authorized_target(
         raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "spec_commit")
     if git.run("rev-parse", "HEAD^", check=False).text != authorization.base_sha:
         raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "base_sha")
+    # Y ese commit solo trae la especificación: nada más que le hable a Claude.
+    added = git.run("diff", "--name-only", "-z", authorization.base_sha, spec_commit).stdout
+    if _split_nul(added) != [f"{SPEC_DIR}/{spec.id}.md"]:
+        raise BlockedError(Reason.REAL_RUN_AUTHORIZATION_MISMATCH, "spec_commit")
 
 
 def runner_folders_snapshot(config: RunnerConfig) -> tuple[str, ...]:
@@ -3156,9 +3167,9 @@ def _pipeline(
     authorization: RealRunAuthorization | None = None
     if real_executor:
         authorization = load_real_run_authorization(config, block_id)
-        # Sin autorización, como siempre: el repositorio real se rechaza antes que nada.
-        if authorization is None:
-            ensure_not_real_repository(config)
+        # Sin autorización, como siempre: el repositorio real se rechaza antes que nada. Con
+        # ella, el remoto exacto también se exige antes de cualquier consulta a la red.
+        check_real_repository_access(config, config.repo_root, authorization)
     main_git = Git(config, config.repo_root, run_dir / "git.log")
     spec, base_sha = _validate_common(config, main_git, block_id)
     report.title = spec.title
@@ -3169,7 +3180,6 @@ def _pipeline(
         validate_docs_only_spec(spec)
     if authorization is not None:
         # Todo lo que la autorización cita, ya validado por el runner y sin crear nada aún.
-        check_real_repository_access(config, config.repo_root, authorization)
         authorize_real_run(authorization, spec, base_sha, executor, main_git)
     if not confirm(spec):
         raise BlockedError(Reason.NOT_APPROVED)

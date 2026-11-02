@@ -189,9 +189,10 @@ no es un interruptor: es una orden humana para un único run, y todo lo demás d
   ejecución se detiene después, la autorización sigue gastada, y ese bloque no admite otra: reintentar exige
   un identificador nuevo. Si el archivo cambió entre la validación y ese momento, el bloque se detiene.
 - **Qué exige además.** El Claude real, sin prefijo: un Claude falso nunca trabaja sobre el repositorio real.
-  Antes de lanzarlo, sin fiarse de quien llama: que la autorización coincida con la especificación y ya esté
-  gastada, que la copia sea la del bloque y no el clon principal, y que esté en la rama autorizada, con
-  `HEAD` en el commit de la especificación y su padre en la base. Al terminar, que los cambios sean exactamente
+  Antes de lanzarlo, sin fiarse de quien llama: que la autorización coincida con la especificación y que el
+  archivo gastado sea precisamente el suyo, que la copia sea la del bloque y no el clon principal, y que esté
+  en la rama autorizada, con `HEAD` en el commit de la especificación, que solo trae la especificación, y su
+  padre en la base. Con autorización, el remoto exacto se exige antes de cualquier consulta a la red. Al terminar, que los cambios sean exactamente
   las rutas autorizadas, todas nuevas, y que la bandeja y las carpetas de autorizaciones no hayan cambiado:
   eso se comprueba en todo run del ejecutor real, también tras una parada.
 - **Qué no concede.** Ni consola, ni perfil `code`, ni push, ni merge, ni despliegue, ni cambios en `main`. El

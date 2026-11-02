@@ -237,6 +237,10 @@ el runner la rechaza. Con PowerShell 5.1 sirve
 - `origin`, en lectura y en envío, debe ser exactamente `https://github.com/VallejoOsorio2026/Elsa-ai.git`.
 - El run deja 3 commits locales en la rama: la especificación, el contenido y la evidencia. Solo el de contenido
   lleva los archivos autorizados.
+- **Si un run se detiene con `repo_invariant_broken` y detalle `runner_folders`**, algo escribió en la bandeja
+  o en las autorizaciones durante la ejecución. El runner lo detecta, pero no lo borra. Antes de cualquier
+  otro run, revise a mano `inbox\`, `authorizations\` y `state\authorizations-used\`, y retire lo que no haya
+  escrito Juan o el operador.
 
 **Si Claude Code se actualiza,** el runner se detendrá. Hay que repetir las pruebas reales con la versión nueva y
 registrarla, por decisión explícita.
