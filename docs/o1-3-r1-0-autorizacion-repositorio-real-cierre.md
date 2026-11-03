@@ -85,8 +85,8 @@ deliberado» que exigía el [ADR 0037](adr/0037-limites-del-ejecutor-claude-real
 
 Todo **HECHO MEDIDO**, en Windows, en la copia del bloque:
 
-- Una selección por palabras clave de 76 tests, sobre el árbol de `4f06a9e`. Incluye los 53 tests nuevos de
-  R1.0 y 23 que ya existían.
+- Una selección por palabras clave de 76 tests, sobre el árbol de `4f06a9e`: 44 de los 53 tests nuevos de
+  R1.0 y 32 que ya existían. Los 53 nuevos corrieron todos en la pasada de los tests del runner.
 - Todos los tests del runner, sobre `4f06a9e`: `test_orchestrator.py`, `test_orchestrator_claude.py`,
   `test_orchestrator_integration.py`, `test_orchestrator_rehearsal.py` y `test_orchestrator_claude_live.py`,
   que se omite sin `ELSA_O1_CLAUDE_LIVE=1`.
@@ -130,7 +130,8 @@ git diff --check origin/main..HEAD: sin salida
 - **HECHO MEDIDO.** El diff de código de los tres commits es `scripts/orchestrator.py` y dos archivos de
   tests.
 - **HECHO MEDIDO.** R1.0 añade 27 funciones de test, que dan 53 tests nuevos al recolectarlos. La selección
-  ejecutada tiene 76 tests: esos 53 y 23 que ya existían.
+  ejecutada tiene 76 tests: 44 de esos 53 y 32 que ya existían. Los 53 corrieron en los tests del runner,
+  sobre `4f06a9e`.
 - **HECHO MEDIDO.** 0 ejecuciones del Claude real en este bloque y 0 llamadas al modelo desde el runner.
 
 ## 10. Aportes de Claude Code
