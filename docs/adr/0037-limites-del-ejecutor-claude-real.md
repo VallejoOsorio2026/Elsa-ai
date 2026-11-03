@@ -183,8 +183,11 @@ no es un interruptor: es una orden humana para un único run, y todo lo demás d
   | `executor` | Solo `claude` |
   | `console` | Solo `false` |
 
-- **Cuándo se valida.** Tras las validaciones de solo lectura del runner y antes de crear nada. Sin archivo,
-  el repositorio real se rechaza como siempre, antes que nada.
+- **Cuándo se valida.** En dos momentos, y siempre antes de crear nada:
+  - **Lo primero del run:** se carga el archivo y se exige el remoto exacto. Sin archivo, el repositorio real se
+    rechaza como siempre, antes que nada.
+  - **Después de las validaciones de solo lectura del runner** (especificación, repositorio, base y rama libre):
+    se compara con la especificación y con la base validada.
 - **Un solo uso.** Antes de crear la copia, el archivo se mueve a `state\authorizations-used\`. Si la
   ejecución se detiene después, la autorización sigue gastada, y ese bloque no admite otra: reintentar exige
   un identificador nuevo. Si el archivo cambió entre la validación y ese momento, el bloque se detiene.
@@ -192,7 +195,7 @@ no es un interruptor: es una orden humana para un único run, y todo lo demás d
   Antes de lanzarlo, sin fiarse de quien llama: que la autorización coincida con la especificación y que el
   archivo gastado sea precisamente el suyo, que la copia sea la del bloque y no el clon principal, y que esté
   en la rama autorizada, con `HEAD` en el commit de la especificación, que solo trae la especificación, y su
-  padre en la base. Con autorización, el remoto exacto se exige antes de cualquier consulta a la red. Al terminar, que los cambios sean exactamente
+  padre en la base. Al terminar, que los cambios sean exactamente
   las rutas autorizadas, todas nuevas, y que la bandeja y las carpetas de autorizaciones no hayan cambiado:
   eso se comprueba en todo run del ejecutor real, también tras una parada.
 - **Qué no concede.** Ni consola, ni perfil `code`, ni push, ni merge, ni despliegue, ni cambios en `main`. El

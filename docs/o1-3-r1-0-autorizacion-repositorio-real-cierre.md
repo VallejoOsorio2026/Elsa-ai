@@ -85,7 +85,8 @@ deliberado» que exigía el [ADR 0037](adr/0037-limites-del-ejecutor-claude-real
 
 Todo **HECHO MEDIDO**, en Windows, en la copia del bloque:
 
-- 76 tests de este bloque, sobre el árbol de `4f06a9e`.
+- Una selección por palabras clave de 76 tests, sobre el árbol de `4f06a9e`. Incluye los 53 tests nuevos de
+  R1.0 y 23 que ya existían.
 - Todos los tests del runner, sobre `4f06a9e`: `test_orchestrator.py`, `test_orchestrator_claude.py`,
   `test_orchestrator_integration.py`, `test_orchestrator_rehearsal.py` y `test_orchestrator_claude_live.py`,
   que se omite sin `ELSA_O1_CLAUDE_LIVE=1`.
@@ -109,7 +110,7 @@ La suite completa se lanzó con `--deselect` de cada prueba de `WINDOWS_KNOWN_TE
 ## 8. Resultados
 
 ```text
-tests del bloque (4f06a9e):   76 passed, 367 deselected, 2 warnings in 127.81s
+selección ejecutada (4f06a9e): 76 passed, 367 deselected, 2 warnings in 127.81s
 tests del runner (4f06a9e):   860 passed, 11 skipped, 2 warnings in 1464.59s (0:24:24)
 suite completa   (cef1f6f):   3002 passed, 242 skipped, 3 deselected, 3 warnings in 1684.49s (0:28:04)
 mypy --platform linux:        Success: no issues found in 263 source files
@@ -127,7 +128,9 @@ git diff --check origin/main..HEAD: sin salida
 ## 9. Métricas
 
 - **HECHO MEDIDO.** El diff de código de los tres commits es `scripts/orchestrator.py` y dos archivos de
-  tests. Hay 76 tests propios del bloque.
+  tests.
+- **HECHO MEDIDO.** R1.0 añade 27 funciones de test, que dan 53 tests nuevos al recolectarlos. La selección
+  ejecutada tiene 76 tests: esos 53 y 23 que ya existían.
 - **HECHO MEDIDO.** 0 ejecuciones del Claude real en este bloque y 0 llamadas al modelo desde el runner.
 
 ## 10. Aportes de Claude Code
