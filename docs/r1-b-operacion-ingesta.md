@@ -8,8 +8,8 @@ concedido mientras no lo diga Juan en la conversación del bloque:
 | Fase | Autorización | Qué hace |
 |---|---|---|
 | Precondiciones | **G-0** | Verificar Render (A2) y resolver la inconsistencia DEV/TEST de PC1 |
-| Escrituras | **G-W** | Crear activos y documentos, e ingerir las versiones |
-| Publicación | **G-P** | Aprobar y publicar tres versiones |
+| Escrituras | **G-W** | Crear activos y documentos, e ingerir las cuatro versiones, incluida la v2 de la prensa |
+| Publicación | **G-P** | Aprobar y publicar tres versiones; ninguna ingesta |
 
 Ver el cierre de R1.A ([`r1-a-entorno-supabase-test-cierre.md`](r1-a-entorno-supabase-test-cierre.md),
 §20) para los pendientes que condicionan G-W.
@@ -70,14 +70,25 @@ uv run python -m $tool ingest --domain mantenimiento --document prensa-nota-en `
   --file bench/corpus-sintetico/prensa-ejemplo-en-v1.md --actor <ACTOR>
 uv run python -m $tool ingest --domain mantenimiento --document bomba-manual `
   --file bench/corpus-sintetico/bomba-ejemplo-v1.md --actor <ACTOR>
+
+# La revisión 2 de la prensa: se ingiere aquí y se dejará pendiente.
+# Es la trampa de versión de la evaluación.
+uv run python -m $tool ingest --domain mantenimiento --document prensa-manual `
+  --file bench/corpus-sintetico/prensa-ejemplo-v2.md --actor <ACTOR>
 ```
 
 Cada `ingest` imprime la versión creada (`v1 pending_validation <uuid>`) y su
-número de chunks. **Ingerir no aprueba ni publica.**
+número de chunks. **Ingerir no aprueba ni publica.** La v2 de la prensa debe
+ingerirse **después** de la v1, para que reciba el número de versión 2.
+
+Al terminar G-W, `status` debe mostrar las cuatro versiones en
+`pending_validation` y ninguna publicada.
 
 ## 3. Publicación (G-P)
 
-Con los UUID que imprimió cada `ingest`, o los que muestra `status`:
+**G-P no incluye ninguna ingesta ni ninguna otra escritura**: solo aprueba y
+publica la v1 de cada documento. La v2 de la prensa no se aprueba ni se
+publica. Con los UUID que imprimió cada `ingest`, o los que muestra `status`:
 
 ```powershell
 uv run python -m $tool approve --version <uuid prensa-manual v1> --actor <ACTOR>
@@ -86,14 +97,6 @@ uv run python -m $tool approve --version <uuid prensa-nota-en v1> --actor <ACTOR
 uv run python -m $tool publish --version <uuid prensa-nota-en v1> --actor <ACTOR>
 uv run python -m $tool approve --version <uuid bomba-manual v1> --actor <ACTOR>
 uv run python -m $tool publish --version <uuid bomba-manual v1> --actor <ACTOR>
-```
-
-Después, la revisión 2 de la prensa se ingiere **y se deja pendiente**. Es la
-trampa de versión de la evaluación:
-
-```powershell
-uv run python -m $tool ingest --domain mantenimiento --document prensa-manual `
-  --file bench/corpus-sintetico/prensa-ejemplo-v2.md --actor <ACTOR>
 ```
 
 ## 4. Verificación

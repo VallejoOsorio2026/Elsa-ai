@@ -390,16 +390,25 @@ async def _load_r1_corpus(h: Harness) -> None:
             entry["language"],
         ]
         assert await h.cli(argv) == EXIT_OK
-    for entry in manifest["documents"]:
-        if not entry["published"]:
-            continue
-        assert await h.cli(_ingest(entry["code"], entry["file"])) == EXIT_OK
-        document = await h.document(entry["code"])
-        (version,) = await h.stores.documents.list_versions(document.id)
-        assert await h.cli(["approve", "--version", version.id, "--actor", ACTOR]) == EXIT_OK
-        assert await h.cli(["publish", "--version", version.id, "--actor", ACTOR]) == EXIT_OK
-    # La revisión 2 se ingiere y se deja pendiente: es la trampa de versión.
-    assert await h.cli(_ingest("prensa-manual", "prensa-ejemplo-v2.md")) == EXIT_OK
+    # G-W: todas las ingestas, también la revisión 2, que será la trampa de
+    # versión. Al terminar esta fase nada está aprobado ni publicado.
+    for code, file in (
+        ("prensa-manual", "prensa-ejemplo-v1.md"),
+        ("prensa-nota-en", "prensa-ejemplo-en-v1.md"),
+        ("bomba-manual", "bomba-ejemplo-v1.md"),
+        ("prensa-manual", "prensa-ejemplo-v2.md"),
+    ):
+        assert await h.cli(_ingest(code, file)) == EXIT_OK
+    for document in await h.stores.documents.list_documents(domain=DOMAIN):
+        for version in await h.stores.documents.list_versions(document.id):
+            assert version.state is DocumentVersionState.PENDING_VALIDATION
+    # G-P: solo aprobar y publicar la v1 de cada documento.
+    for code in ("prensa-manual", "prensa-nota-en", "bomba-manual"):
+        document = await h.document(code)
+        versions = await h.stores.documents.list_versions(document.id)
+        first = next(v for v in versions if v.version_number == 1)
+        assert await h.cli(["approve", "--version", first.id, "--actor", ACTOR]) == EXIT_OK
+        assert await h.cli(["publish", "--version", first.id, "--actor", ACTOR]) == EXIT_OK
 
 
 @dataclass(frozen=True)
