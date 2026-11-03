@@ -8,6 +8,7 @@ versión real, que consumen uso y solo corren a mano, están en
 from __future__ import annotations
 
 import ast
+import hashlib
 import json
 import sys
 import time
@@ -1614,3 +1615,459 @@ def test_a_tree_that_does_not_empty_after_a_stop_is_an_orphan(
     assert caught.value.reason is Reason.ORPHAN_SUSPECTED
     assert caught.value.detail == "after_stop"
     assert isinstance(caught.value.__cause__, KeyboardInterrupt)
+
+
+# --- Repositorio real: autorización de un solo uso (ADR 0037, §9) --------------------------
+
+REAL_BRANCH = "claude/t1-1-prueba"
+
+
+class RealBox:
+    """El sandbox hace de repositorio real: solo cambia `EXPECTED_ORIGIN`, y solo en el test.
+
+    El Claude real nunca se lanza: `claude_prefix` devuelve el Claude falso, y el ejecutor
+    sigue siendo el real, sin prefijo, como en un run de verdad.
+    """
+
+    def __init__(self, box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.box = box
+        self.monkeypatch = monkeypatch
+        self.config_checks = 0
+        monkeypatch.setattr(orchestrator, "EXPECTED_ORIGIN", box.config.expected_origin)
+
+        def configuration(_config: Any, _git: Any) -> None:
+            # La configuración real de esta máquina no es la del test; su control tiene tests.
+            self.config_checks += 1
+
+        monkeypatch.setattr(orchestrator, "check_claude_configuration", configuration)
+
+    @property
+    def authorization_path(self) -> Path:
+        return self.box.config.authorizations / f"{BLOCK}.json"
+
+    @property
+    def used_path(self) -> Path:
+        return self.box.config.used_authorizations / f"{BLOCK}.json"
+
+    def spec_sha256(self) -> str:
+        raw = (self.box.config.inbox / f"{BLOCK}.md").read_bytes()
+        return hashlib.sha256(raw).hexdigest()
+
+    def authorize(self, *, drop: tuple[str, ...] = (), **changes: Any) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "schema": orchestrator.REAL_RUN_AUTHORIZATION_SCHEMA,
+            "block_id": BLOCK,
+            "repository": "VallejoOsorio2026/Elsa-ai",
+            "base_sha": _git(self.box.repo, "rev-parse", "HEAD"),
+            "spec_sha256": self.spec_sha256(),
+            "branch": REAL_BRANCH,
+            "allowed_paths": ["docs/permitido.md"],
+            "change": "add",
+            "profile": "docs",
+            "executor": "claude",
+            "console": False,
+        }
+        data.update(changes)
+        for name in drop:
+            del data[name]
+        self.write(json.dumps(data))
+        return data
+
+    def write(self, text: str) -> None:
+        self.authorization_path.parent.mkdir(parents=True, exist_ok=True)
+        self.authorization_path.write_text(text, encoding="utf-8")
+
+    def run(self, scenario: str = "success", executor: ClaudeExecutor | None = None) -> RunReport:
+        prefix = (sys.executable, str(FAKE_CLAUDE), scenario, str(self.box.record))
+        self.monkeypatch.setattr(orchestrator, "claude_prefix", lambda _c, _e: prefix)
+        return run_block(
+            self.box.config,
+            BLOCK,
+            executor=executor or ClaudeExecutor(),
+            confirm=lambda _s: True,
+        )
+
+    def nothing_created(self) -> None:
+        assert not self.box.worktree.exists()
+        assert _git(self.box.repo, "branch", "--list", REAL_BRANCH) == ""
+        assert not self.box.record.exists()
+
+
+@pytest.fixture
+def real(box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch) -> RealBox:
+    return RealBox(box, monkeypatch)
+
+
+def test_real_repository_name_is_bound_to_the_expected_origin() -> None:
+    assert orchestrator.normalized_origin(orchestrator.EXPECTED_ORIGIN) == (
+        orchestrator.REAL_REPOSITORY.lower()
+    )
+
+
+def test_exact_authorization_reaches_verified_local_once(real: RealBox) -> None:
+    head_before = real.box.main_state()
+    origin_before = real.box.origin_refs()
+    real.authorize()
+    report = real.run()
+    assert report.result is Result.VERIFIED_LOCAL, report
+    assert report.real_run_authorized
+    assert [(c.path, c.status) for c in report.changes] == [("docs/permitido.md", "A")]
+    # Un solo uso: retirada antes de crear la copia, y fuera del repositorio.
+    assert not real.authorization_path.exists() and real.used_path.exists()
+    assert real.config_checks >= 2
+    assert real.box.main_state() == head_before
+    assert real.box.origin_refs() == origin_before
+    evidence = (real.box.worktree / f"docs/orchestration/runs/{BLOCK}.md").read_text(
+        encoding="utf-8"
+    )
+    assert "autorización de un solo uso, consumida" in evidence
+    assert report.spec_sha256 in evidence
+
+
+def test_without_authorization_the_real_repository_stays_closed(real: RealBox) -> None:
+    _blocked(real.run(), Reason.REAL_REPO_NOT_AUTHORIZED)
+    real.nothing_created()
+
+
+def test_authorization_is_never_reused(real: RealBox) -> None:
+    data = real.authorize()
+    assert real.run().result is Result.VERIFIED_LOCAL
+    # Aunque alguien vuelva a dejar la misma autorización, ese bloque ya la gastó.
+    real.write(json.dumps(data))
+    _blocked(real.run(), Reason.REAL_RUN_AUTHORIZATION_USED)
+
+
+def test_a_stopped_run_still_spends_its_authorization(real: RealBox) -> None:
+    real.authorize()
+    _blocked(real.run("declares_blocked"), Reason.EXECUTOR_BLOCKED)
+    assert real.used_path.exists()
+    _blocked(real.run(), Reason.REAL_RUN_AUTHORIZATION_USED)
+
+
+@pytest.mark.parametrize(
+    ("changes", "detail"),
+    [
+        ({"base_sha": "0" * 40}, "base_sha"),
+        ({"repository": "otro/Elsa-ai"}, "repository"),
+        ({"repository": "VallejoOsorio2026/otro"}, "repository"),
+        ({"spec_sha256": "0" * 64}, "spec_sha256"),
+        ({"branch": "claude/t1-1-otra"}, "branch"),
+        ({"allowed_paths": ["docs/permitido.md", "docs/otro.md"]}, "allowed_paths"),
+        ({"allowed_paths": ["docs/**"]}, "allowed_paths"),
+        ({"allowed_paths": ["docs/otro.md"]}, "allowed_paths"),
+        ({"block_id": "T1.2"}, "block_id"),
+    ],
+)
+def test_any_difference_with_the_run_stops_before_creating_anything(
+    real: RealBox, changes: dict[str, Any], detail: str
+) -> None:
+    real.authorize(**changes)
+    report = real.run()
+    _blocked(report, Reason.REAL_RUN_AUTHORIZATION_MISMATCH)
+    assert report.detail == detail
+    real.nothing_created()
+    assert real.authorization_path.exists() and not real.used_path.exists()
+
+
+@pytest.mark.parametrize(
+    ("changes", "drop", "detail"),
+    [
+        ({"console": True}, (), "console"),
+        ({"console": 0}, (), "console"),
+        ({"console": "false"}, (), "console"),
+        ({"profile": "code"}, (), "profile"),
+        ({"executor": "fake"}, (), "executor"),
+        ({"change": "modify"}, (), "change"),
+        ({"schema": "otro/1"}, (), "schema"),
+        ({"branch": "main"}, (), "branch"),
+        ({"base_sha": "HEAD"}, (), "base_sha"),
+        ({"allowed_paths": []}, (), "allowed_paths"),
+        ({"allowed_paths": "docs/permitido.md"}, (), "allowed_paths"),
+        ({"tools": ["Bash"]}, (), "fields"),
+        ({"allow_real_repo": True}, (), "fields"),
+        ({}, ("console",), "fields"),
+        ({}, ("base_sha",), "fields"),
+    ],
+)
+def test_malformed_authorization_stops_before_creating_anything(
+    real: RealBox, changes: dict[str, Any], drop: tuple[str, ...], detail: str
+) -> None:
+    real.authorize(drop=drop, **changes)
+    report = real.run()
+    _blocked(report, Reason.REAL_RUN_AUTHORIZATION_INVALID)
+    assert report.detail == detail
+    real.nothing_created()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "no es json",
+        "[]",
+        '{"console": false, "console": true}',
+        "x" * (orchestrator.MAX_AUTHORIZATION_BYTES + 1),
+    ],
+)
+def test_unreadable_authorization_stops(real: RealBox, text: str) -> None:
+    real.write(text)
+    _blocked(real.run(), Reason.REAL_RUN_AUTHORIZATION_INVALID)
+    real.nothing_created()
+
+
+def test_fake_claude_never_works_on_the_real_repository(real: RealBox) -> None:
+    real.authorize()
+    report = real.run(executor=real.box.executor("success"))
+    _blocked(report, Reason.REAL_RUN_AUTHORIZATION_MISMATCH)
+    assert report.detail == "executor"
+    real.nothing_created()
+
+
+def test_authorization_only_adds_files(real: RealBox) -> None:
+    real.box.write_spec(allowed="[docs/existing.md]")
+    real.authorize(allowed_paths=["docs/existing.md"])
+    report = real.run()
+    _blocked(report, Reason.REAL_RUN_AUTHORIZATION_MISMATCH)
+    assert report.detail == "path_exists"
+    real.nothing_created()
+
+
+def test_every_authorized_file_must_be_created(real: RealBox) -> None:
+    real.box.write_spec(allowed="[docs/permitido.md, docs/segundo.md]")
+    real.authorize(allowed_paths=["docs/permitido.md", "docs/segundo.md"])
+    report = real.run()
+    _blocked(report, Reason.REAL_RUN_AUTHORIZATION_MISMATCH)
+    assert report.detail == "changes"
+    assert not report.content_commit
+
+
+def test_no_change_is_not_what_was_authorized(real: RealBox) -> None:
+    real.authorize()
+    report = real.run("no_change")
+    _blocked(report, Reason.REAL_RUN_AUTHORIZATION_MISMATCH)
+    assert report.detail == "changes"
+
+
+def test_a_second_file_stops_the_authorized_run(real: RealBox) -> None:
+    real.authorize()
+    report = real.run("out_of_scope")
+    _blocked(report, Reason.SCOPE_VIOLATION)
+    assert not report.content_commit
+
+
+def test_authorization_changed_after_validation_is_refused(real: RealBox) -> None:
+    real.authorize()
+
+    def tamper(_spec: Spec) -> bool:
+        real.authorize(base_sha="1" * 40)
+        return True
+
+    report = run_block(real.box.config, BLOCK, executor=ClaudeExecutor(), confirm=tamper)
+    _blocked(report, Reason.REAL_RUN_AUTHORIZATION_INVALID)
+    assert report.detail == "changed"
+    real.nothing_created()
+
+
+def test_authorization_for_a_disposable_repository_is_refused(
+    box: ClaudeSandbox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_origin = orchestrator.EXPECTED_ORIGIN
+    real = RealBox(box, monkeypatch)
+    real.authorize()
+    # Sin hacer pasar el sandbox por el repositorio real: la autorización no le corresponde.
+    monkeypatch.setattr(orchestrator, "EXPECTED_ORIGIN", real_origin)
+    report = real.run()
+    _blocked(report, Reason.REAL_RUN_AUTHORIZATION_MISMATCH)
+    assert report.detail == "repository"
+    real.nothing_created()
+
+
+def _authorization_for(
+    config: orchestrator.RunnerConfig, spec: Spec, **changes: Any
+) -> orchestrator.RealRunAuthorization:
+    """Una autorización que coincide con `spec` y ya está gastada, como tras `consume`."""
+    used = config.used_authorizations / f"{spec.id}.json"
+    used.parent.mkdir(parents=True, exist_ok=True)
+    if not used.exists():
+        used.write_text("{}", encoding="utf-8")
+    values: dict[str, Any] = {
+        "block_id": spec.id,
+        "repository": "VallejoOsorio2026/Elsa-ai",
+        "base_sha": "0" * 40,
+        "spec_sha256": spec.sha256,
+        "branch": spec.branch,
+        "allowed_paths": spec.allowed_paths,
+        "path": config.authorizations / f"{spec.id}.json",
+        # La huella del archivo gastado: así es como queda tras `consume`.
+        "raw_sha256": hashlib.sha256(used.read_bytes()).hexdigest(),
+        **changes,
+    }
+    return orchestrator.RealRunAuthorization(**values)
+
+
+def _target(real: RealBox, spec: Spec, authorization: Any, commit: str = "") -> str:
+    with pytest.raises(BlockedError) as caught:
+        orchestrator.check_authorized_target(
+            real.box.config, real.box.worktree, spec, ClaudeExecutor(), authorization, commit
+        )
+    assert caught.value.reason is Reason.REAL_RUN_AUTHORIZATION_MISMATCH
+    return caught.value.detail
+
+
+def test_claude_never_targets_the_main_clone(real: RealBox) -> None:
+    spec = replace(_spec(), branch=REAL_BRANCH)
+    authorization = _authorization_for(real.box.config, spec)
+    with pytest.raises(BlockedError) as caught:
+        orchestrator.check_authorized_target(
+            real.box.config, real.box.repo, spec, ClaudeExecutor(), authorization, ""
+        )
+    assert caught.value.detail == "worktree"
+
+
+def test_target_check_does_not_trust_its_caller(real: RealBox) -> None:
+    # Una autorización construida a mano, o de otra especificación, tampoco abre nada.
+    spec = replace(_spec(), branch=REAL_BRANCH)
+    config = real.box.config
+    for authorization, detail in (
+        (_authorization_for(config, spec, spec_sha256="1" * 64), "spec_sha256"),
+        (_authorization_for(config, spec, block_id="T1.2"), "block_id"),
+        (_authorization_for(config, spec, allowed_paths=("docs/otro.md",)), "allowed_paths"),
+        (_authorization_for(config, spec, branch="claude/t1-1-otra"), "branch"),
+    ):
+        assert _target(real, spec, authorization) == detail
+
+
+def test_target_check_requires_a_spent_authorization(real: RealBox) -> None:
+    spec = replace(_spec(), branch=REAL_BRANCH)
+    authorization = _authorization_for(real.box.config, spec)
+    authorization.path.parent.mkdir(parents=True, exist_ok=True)
+    authorization.path.write_text("{}", encoding="utf-8")
+    assert _target(real, spec, authorization) == "not_consumed"
+    authorization.path.unlink()
+    used = real.box.config.used_authorizations / f"{spec.id}.json"
+    # Cualquier archivo gastado no basta: debe ser el de esta autorización.
+    used.write_text('{"otra": true}', encoding="utf-8")
+    assert _target(real, spec, authorization) == "not_consumed"
+    used.unlink()
+    assert _target(real, spec, authorization) == "not_consumed"
+
+
+def test_spec_commit_may_carry_only_the_spec(real: RealBox) -> None:
+    spec = replace(_spec(), branch=REAL_BRANCH)
+    base = _git(real.box.repo, "rev-parse", "HEAD")
+    _git(
+        real.box.repo, "worktree", "add", "--quiet", "-b", REAL_BRANCH, str(real.box.worktree), base
+    )
+    work = real.box.worktree
+    (work / "docs/orchestration/work").mkdir(parents=True)
+    (work / f"docs/orchestration/work/{BLOCK}.md").write_text("spec\n", encoding="utf-8")
+    (work / "CLAUDE.md").write_text("otras instrucciones\n", encoding="utf-8")
+    _git(work, "add", ".")
+    _git(work, "commit", "--quiet", "--no-verify", "-m", "chore: spec y algo más")
+    commit = _git(work, "rev-parse", "HEAD")
+    authorization = _authorization_for(real.box.config, spec, base_sha=base)
+    assert _target(real, spec, authorization, commit) == "spec_commit"
+
+
+def test_claude_targets_only_its_branch_on_the_authorized_base(real: RealBox) -> None:
+    real.authorize()
+    report = real.run()
+    assert report.result is Result.VERIFIED_LOCAL
+    head = _git(real.box.worktree, "rev-parse", "HEAD")
+    other = replace(_spec(), branch="claude/t1-1-otra")
+    assert _target(real, other, _authorization_for(real.box.config, other)) == "branch"
+    spec = replace(_spec(), branch=REAL_BRANCH)
+    authorization = _authorization_for(real.box.config, spec, base_sha=report.base_sha)
+    # Tras el run, HEAD ya no es el commit de la especificación, ni su padre la base.
+    assert _target(real, spec, authorization, report.spec_commit) == "spec_commit"
+    assert _target(real, spec, authorization, head) == "base_sha"
+
+
+def test_target_check_refuses_another_executor(real: RealBox) -> None:
+    spec = replace(_spec(), branch=REAL_BRANCH)
+    with pytest.raises(BlockedError) as caught:
+        orchestrator.check_authorized_target(
+            real.box.config,
+            real.box.worktree,
+            spec,
+            real.box.executor("success"),
+            _authorization_for(real.box.config, spec),
+            "",
+        )
+    assert caught.value.detail == "executor"
+
+
+def test_authorization_that_is_not_a_file_stops(real: RealBox) -> None:
+    real.authorization_path.mkdir(parents=True)
+    report = real.run()
+    _blocked(report, Reason.REAL_RUN_AUTHORIZATION_INVALID)
+    assert report.detail == "not_a_file"
+    real.nothing_created()
+
+
+def test_authorization_removed_after_validation_stops(real: RealBox) -> None:
+    real.authorize()
+
+    def remove(_spec: Spec) -> bool:
+        real.authorization_path.unlink()
+        return True
+
+    report = run_block(real.box.config, BLOCK, executor=ClaudeExecutor(), confirm=remove)
+    _blocked(report, Reason.REAL_RUN_AUTHORIZATION_INVALID)
+    assert report.detail == "unreadable"
+    real.nothing_created()
+
+
+def test_existing_file_with_other_case_is_not_new(real: RealBox) -> None:
+    real.box.write_spec(allowed="[docs/Existing.md]")
+    real.authorize(allowed_paths=["docs/Existing.md"])
+    report = real.run()
+    _blocked(report, Reason.REAL_RUN_AUTHORIZATION_MISMATCH)
+    assert report.detail == "path_exists"
+
+
+def test_authorized_mode_accepts_no_other_spelling_of_the_remote(real: RealBox) -> None:
+    # Normalizar sirve para rechazar; para permitir, ni otro anfitrión.
+    _git(real.box.repo, "config", "remote.origin.pushurl", "https://otro/VallejoOsorio2026/Elsa-ai")
+    real.authorize()
+    report = real.run()
+    _blocked(report, Reason.REAL_RUN_AUTHORIZATION_MISMATCH)
+    assert report.detail == "repository"
+    real.nothing_created()
+
+
+@pytest.mark.parametrize(
+    ("scenario", "primary"),
+    [("plant_then_success", None), ("plant_then_declares_blocked", Reason.EXECUTOR_BLOCKED)],
+)
+def test_anything_planted_in_the_runner_folders_stops(
+    box: ClaudeSandbox, scenario: str, primary: Reason | None
+) -> None:
+    planted = box.config.authorizations / "T9.9.json"
+    report = box.run_claude(
+        scenario, extra_env={**box.config.extra_env, "FAKE_CLAUDE_PLANT": str(planted)}
+    )
+    _blocked(report, Reason.REPO_INVARIANT_BROKEN)
+    assert report.detail.startswith("runner_folders") or report.detail.startswith("after_")
+    assert report.primary_reason is primary
+    assert not report.content_commit
+
+
+def test_authorized_changes_must_be_exactly_the_new_files() -> None:
+    authorization = orchestrator.RealRunAuthorization(
+        block_id=BLOCK,
+        repository="VallejoOsorio2026/Elsa-ai",
+        base_sha="0" * 40,
+        spec_sha256="0" * 64,
+        branch=REAL_BRANCH,
+        allowed_paths=("docs/permitido.md",),
+        path=Path("x.json"),
+        raw_sha256="0" * 64,
+    )
+    orchestrator.check_authorized_changes(authorization, [Change("docs/permitido.md", "A")])
+    for changes in (
+        [Change("docs/permitido.md", "M")],
+        [Change("docs/permitido.md", "A"), Change("docs/otro.md", "A")],
+        [],
+    ):
+        with pytest.raises(BlockedError):
+            orchestrator.check_authorized_changes(authorization, changes)

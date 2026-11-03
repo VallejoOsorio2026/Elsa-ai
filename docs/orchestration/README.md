@@ -14,10 +14,10 @@ Las reglas del proyecto siguen en [`CLAUDE.md`](../../CLAUDE.md); aquí no se re
 | Especificaciones de bloque | Existen en [`work/`](work/) |
 | Escaneo local de secretos | Se activa una vez por clon (§6) |
 | Runner local | Existe desde O1.2: [`scripts/orchestrator.py`](../../scripts/orchestrator.py), ver §10 |
-| Ejecutor real (Claude Code sin supervisión) | Existe en el código, **solo para repositorios desechables**. No está en la consola ni autorizado en el repositorio real. Ver §11 y [ADR 0037](../adr/0037-limites-del-ejecutor-claude-real.md) |
+| Ejecutor real (Claude Code sin supervisión) | Existe en el código, para repositorios desechables. No está en la consola. En el repositorio real, **solo con una autorización de un uso** para un run documental concreto. Ver §11 y [ADR 0037](../adr/0037-limites-del-ejecutor-claude-real.md) |
 | Publicar la rama, leer CI y dar el enlace del PR desde el runner | **No existe.** Corresponde a O1.4 |
 
-Mientras el ejecutor real no esté autorizado en el repositorio, un bloque que cambie archivos se dirige **a mano**.
+Salvo un run documental autorizado de forma expresa, un bloque que cambie archivos se dirige **a mano**.
 
 ## 2. Cómo se trabaja hoy
 
@@ -145,8 +145,9 @@ puede inyectar desde el código de los tests. Requiere red para consultar GitHub
 `main` remoto, no empieza.
 
 **Carpetas, en `%USERPROFILE%\elsa-o1\`:** `inbox\` (especificaciones), `worktrees\` (copias),
-`logs\` (salidas crudas e informes de bloques detenidos, nunca versionados) y `state\` (solo el
-lock). Son locales y no se publican.
+`logs\` (salidas crudas e informes de bloques detenidos, nunca versionados), `authorizations\`
+(autorizaciones de run real, §11) y `state\` (el lock y las autorizaciones ya usadas). Son locales y
+no se publican.
 
 **Qué comprueba por su cuenta, sin creer al ejecutor:** el diff real contra las rutas permitidas,
 archivos ignorados, enlaces y junctions en toda la copia, repositorios anidados, que el ejecutor no
@@ -186,8 +187,9 @@ aislado:** corre con el usuario de Windows y con acceso a la red. Límites y mot
 [`resultados-o1-3-1-y-o1-3-3.md`](resultados-o1-3-1-y-o1-3-3.md) y
 [`resultados-o1-3-4.md`](resultados-o1-3-4.md), que muestra por qué una consola acotada no basta.
 
-**No se puede usar desde la consola,** y se niega a trabajar sobre el repositorio real. Esa barrera protege de un error, no de un cambio deliberado. Hoy solo lo invocan los
-tests.
+**No se puede usar desde la consola.** Solo se inyecta por código, y sobre el repositorio real se niega a
+trabajar salvo con una autorización de un solo uso para ese run. Esa barrera protege de un error, no de un
+cambio deliberado.
 
 | Control | Qué hace |
 |---|---|
@@ -202,6 +204,43 @@ tests.
 | Salida | Se valida `structured_output` y se compara con Git |
 | Paradas | Cualquier salida, incluidos Ctrl+C y un error al leer el log, revisa repositorio, alcance, traza de Git y configuración, en ese orden. El informe guarda el motivo de la parada y el resultado de esa revisión; un daño pesa más |
 | Perfil `code` | **Prohibido** |
+| Repositorio real | Cerrado por defecto. Solo con una autorización de un uso, exacta para el run; ver abajo |
+
+**Autorizar un run sobre el repositorio real.** Lo decide Juan, para un único run (ADR 0037, §9). Escribe
+el archivo él, o el operador (la sesión de Claude Code que dirige el bloque) con los valores exactos que Juan
+da por escrito; **nunca el Claude que lanza el runner**. Se escribe
+`%USERPROFILE%\elsa-o1\authorizations\<id>.json`, en **UTF-8 sin BOM**, con estos campos y ningún otro.
+Windows PowerShell 5.1 añade BOM con `Set-Content -Encoding UTF8` y escribe UTF-16 con `>`: en los dos casos
+el runner la rechaza. Con PowerShell 5.1 sirve
+`[IO.File]::WriteAllText($ruta, $texto, [Text.UTF8Encoding]::new($false))`.
+
+```json
+{
+  "schema": "elsa-o1-real-run-authorization/1",
+  "block_id": "<id de la especificación>",
+  "repository": "VallejoOsorio2026/Elsa-ai",
+  "base_sha": "<SHA completo de main, igual a origin/main>",
+  "spec_sha256": "<SHA-256 del archivo de la especificación en la bandeja>",
+  "branch": "<rama de la especificación>",
+  "allowed_paths": ["<las rutas de la especificación, en su orden>"],
+  "change": "add",
+  "profile": "docs",
+  "executor": "claude",
+  "console": false
+}
+```
+
+- Si `main` avanza, o la especificación cambia, la autorización ya no vale: hace falta otra.
+- Se gasta al empezar, aunque el run se detenga después, y ese `id` no admite otra.
+- Solo autoriza archivos nuevos de documentación. No autoriza push, merge ni despliegue: el runner no publica
+  nada.
+- `origin`, en lectura y en envío, debe ser exactamente `https://github.com/VallejoOsorio2026/Elsa-ai.git`.
+- El run deja 3 commits locales en la rama: la especificación, el contenido y la evidencia. Solo el de contenido
+  lleva los archivos autorizados.
+- **Si un run se detiene con `repo_invariant_broken` y detalle `runner_folders`**, algo escribió en la bandeja
+  o en las autorizaciones durante la ejecución. El runner lo detecta, pero no lo borra. Antes de cualquier
+  otro run, revise a mano `inbox\`, `authorizations\` y `state\authorizations-used\`, y retire lo que no haya
+  escrito Juan o el operador.
 
 **Si Claude Code se actualiza,** el runner se detendrá. Hay que repetir las pruebas reales con la versión nueva y
 registrarla, por decisión explícita.

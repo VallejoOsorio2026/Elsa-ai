@@ -166,10 +166,16 @@ def write_out_of_scope() -> None:
     Path("docs/fuera.md").write_text("fuera\n", encoding="utf-8")
 
 
+def plant_runner_file() -> None:
+    """Fuera de la copia, en las carpetas del runner: por ejemplo, otra autorización."""
+    Path(os.environ["FAKE_CLAUDE_PLANT"]).write_text("{}", encoding="utf-8")
+
+
 DAMAGE_FIRST = {
     "hook_then_": plant_hook,
     "scope_then_": write_out_of_scope,
     "push_then_": lambda: trace("git push origin main"),
+    "plant_then_": plant_runner_file,
 }
 
 
