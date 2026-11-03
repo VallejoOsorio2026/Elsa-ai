@@ -1,6 +1,8 @@
 # ADR 0037 — Límites del ejecutor Claude real
 
-- Estado: **propuesto**
+- Estado: **aceptado** (2026-11-03, en el cierre de O1.3, tras el run real `O1.3.R1` del PR #65). Queda
+  aceptado cuando Juan haga el merge de ese cierre:
+  [`o1-3-claude-real-controlado-cierre.md`](../o1-3-claude-real-controlado-cierre.md)
 - Fecha de la decisión: **2026-11-01**; actualizado el **2026-11-02** en O1.3.5 y en O1.3.R1.0
 - Bloque: **O1**, incrementos **O1.3.2**, **O1.3.5** y **O1.3.R1.0**
 - **Decide**: con qué condiciones el runner puede lanzar Claude Code real, y qué no garantiza. Desde
@@ -227,12 +229,12 @@ inyectar `ClaudeExecutor` por código. La autorización es un segundo control, n
 | `.credentials.json` accesible al proceso | **Mitigado.** Claude Code lo necesita; el modelo tiene confinamiento |
 | Hijo y nieto de larga duración lanzados por Claude mediante una consola | **NO APLICABLE POR DISEÑO.** Claude real no recibe consola (§4; O1.3.4) |
 | Procesos internos propios de Claude Code, como `git`, `reg.exe`, `where.exe` o `conhost.exe` | **Mitigado.** Los terminan el Job Object, el timeout, Ctrl+C y la muerte del runner, con 0 vivos (medido en O1.3.2). **No es aislamiento de Windows** |
-| Configuración administrada remota | **Detectado**, no prevenido: solo por su caché local, antes y después de lanzar. Puede traer hooks, que se ejecutan aunque Claude no tenga consola. **Antes de `O1.3.R1`**, confirmar que la cuenta no pertenece a una organización con configuración remota |
+| Configuración administrada remota | **Detectado**, no prevenido: solo por su caché local, antes y después de lanzar. Puede traer hooks, que se ejecutan aunque Claude no tenga consola. **Antes de `O1.3.R1`**, confirmar que la cuenta no pertenece a una organización con configuración remota. Hecho para `O1.3.R1`: sin caché remota ni claves de política, y cuenta personal según Juan |
 | Comandos de solo lectura que Claude Code autoriza por su cuenta | **NO APLICABLE POR DISEÑO.** Solo ocurren con consola (medido en O1.3.4) |
 | Procesos creados a través de otros servicios de Windows | **No resuelto** |
 | Configuración global de Git | **No resuelto** |
 | Exclusiones por ruta de gitleaks | **Mitigado.** Solo `.md` en rutas exactas, sin las exclusiones por defecto; `.md` en `docs/` se escanea (medido en una ruta) |
-| Un hook alterado queda como línea base del siguiente `run` | **Mitigado.** El bloque que lo causó se detiene; el siguiente no lo sabe. Revisar antes de `O1.3.R1` |
+| Un hook alterado queda como línea base del siguiente `run` | **Mitigado.** El bloque que lo causó se detiene; el siguiente no lo sabe. Revisado en el cierre de O1.3: `hooks/` del clon principal igual a su foto previa a `O1.3.R1.0` y `O1.3.R1` |
 | Seis variantes de `Glob` y `Grep` quedaron INCONCLUSO en O1.3.3 | **Sin explicar.** Sin datos expuestos, pero sin rechazo ni mecanismo conocido |
 | `--safe-mode` frente a configuración de usuario distinta | **Sin medir.** Por eso se exige que sea la ya medida, y se niega la de proyecto y la administrada (§4) |
 | Valores del primer evento que dependan de la cuenta, como `fast_mode_state` | **Inferencia.** Un cambio ajeno al proyecto detendría el bloque, sin daño; habría que volver a medir |
