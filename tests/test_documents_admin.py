@@ -362,7 +362,7 @@ async def test_status_reports_absent_and_present_codes(
 # ---------------------------------------------------------------------
 
 
-async def _load_r1_corpus(h: Harness) -> None:
+async def _load_r1_corpus(h: Harness, *, publish: bool = True) -> None:
     """La secuencia de `docs/r1-b-operacion-ingesta.md`, contra estos almacenes."""
     manifest = json.loads((CORPUS / "manifest.json").read_text(encoding="utf-8"))
     for code, name in ((PRESS, "Prensa de ejemplo PR-100"), (PUMP, "Bomba de ejemplo BO-200")):
@@ -402,13 +402,25 @@ async def _load_r1_corpus(h: Harness) -> None:
     for document in await h.stores.documents.list_documents(domain=DOMAIN):
         for version in await h.stores.documents.list_versions(document.id):
             assert version.state is DocumentVersionState.PENDING_VALIDATION
-    # G-P: solo aprobar y publicar la v1 de cada documento.
-    for code in ("prensa-manual", "prensa-nota-en", "bomba-manual"):
-        document = await h.document(code)
-        versions = await h.stores.documents.list_versions(document.id)
-        first = next(v for v in versions if v.version_number == 1)
-        assert await h.cli(["approve", "--version", first.id, "--actor", ACTOR]) == EXIT_OK
-        assert await h.cli(["publish", "--version", first.id, "--actor", ACTOR]) == EXIT_OK
+    if publish:
+        await _publish_r1(h)
+
+
+R1_DOCUMENTS = ("prensa-manual", "prensa-nota-en", "bomba-manual")
+
+
+async def _version(h: Harness, code: str, number: int) -> str:
+    document = await h.document(code)
+    versions = await h.stores.documents.list_versions(document.id)
+    return next(v.id for v in versions if v.version_number == number)
+
+
+async def _publish_r1(h: Harness) -> None:
+    """G-P: solo aprobar y publicar la v1 de cada documento."""
+    for code in R1_DOCUMENTS:
+        first = await _version(h, code, 1)
+        assert await h.cli(["approve", "--version", first, "--actor", ACTOR]) == EXIT_OK
+        assert await h.cli(["publish", "--version", first, "--actor", ACTOR]) == EXIT_OK
 
 
 @dataclass(frozen=True)
@@ -491,6 +503,76 @@ async def test_evaluation_holds_on_the_real_chunks(harness: Harness) -> None:
         cited = _fold(" ".join(chunks[k].content for k in question["expected_citations"]))
         for anchor in question["evidence_anchors"]:
             assert _fold(anchor) in cited, f"{question['id']}: ancla {anchor!r} no está"
+
+
+# ---------------------------------------------------------------------
+# Ctrl+Z de G-P (ADR 0038)
+# ---------------------------------------------------------------------
+
+
+async def _visible(h: Harness, asset: str | None) -> set[tuple[str, int]]:
+    found = await h.stores.documents.list_published_chunks(
+        scopes=[Scope(DOMAIN, asset)], limit=1000
+    )
+    return {(p.document.code, p.version.version_number) for p in found}
+
+
+async def _ledger(h: Harness) -> dict[str, tuple[DocumentVersionState, list[str], int]]:
+    """Por versión: estado, historial y número de chunks."""
+    repo = h.stores.documents
+    ledger: dict[str, tuple[DocumentVersionState, list[str], int]] = {}
+    for document in await repo.list_documents(domain=DOMAIN):
+        for version in await repo.list_versions(document.id):
+            events = [e.event.value for e in await repo.list_version_events(version.id)]
+            chunks = len(await repo.list_chunks(version.id))
+            ledger[f"{document.code}@v{version.version_number}"] = (version.state, events, chunks)
+    return ledger
+
+
+async def test_r1_publication_has_a_tested_ctrl_z(harness: Harness) -> None:
+    """G-P y su reversión, con la misma CLI y el mismo corpus que TEST."""
+    await _load_r1_corpus(harness, publish=False)
+    assert await _visible(harness, None) == set()
+    before = await _ledger(harness)
+    assert sum(chunks for _, _, chunks in before.values()) == 42
+
+    await _publish_r1(harness)
+    assert await _visible(harness, PRESS) == {("prensa-manual", 1), ("prensa-nota-en", 1)}
+    assert await _visible(harness, PUMP) == {("bomba-manual", 1)}
+
+    # Ctrl+Z: una retirada por versión publicada, cada una con su motivo.
+    for code in R1_DOCUMENTS:
+        version = await _version(harness, code, 1)
+        withdraw = ["withdraw", "--version", version, "--actor", ACTOR, "--reason", "Ctrl+Z G-P"]
+        assert await harness.cli(withdraw) == EXIT_OK
+
+    assert await _visible(harness, None) == set()
+    after = await _ledger(harness)
+    assert after.keys() == before.keys()
+    for key, (state, events, chunks) in after.items():
+        assert chunks == before[key][2], key
+        assert events[: len(before[key][1])] == before[key][1], key
+        if key == "prensa-manual@v2":
+            assert (state, events) == (DocumentVersionState.PENDING_VALIDATION, ["created"])
+        else:
+            assert state is DocumentVersionState.APPROVED, key
+            assert events == ["created", "approved", "published", "withdrawn"], key
+
+    # Las negativas no escriben nada: retirada repetida, la v2 nunca publicada,
+    # motivo en blanco y motivo ausente.
+    press_v1 = await _version(harness, "prensa-manual", 1)
+    press_v2 = await _version(harness, "prensa-manual", 2)
+    for version, reason in ((press_v1, "otra vez"), (press_v2, "nunca"), (press_v1, "  ")):
+        argv = ["withdraw", "--version", version, "--actor", ACTOR, "--reason", reason]
+        assert await harness.cli(argv) == EXIT_FAILED
+    with pytest.raises(SystemExit):
+        await harness.cli(["withdraw", "--version", press_v1, "--actor", ACTOR])
+    assert await _ledger(harness) == after
+
+    # Y la misma versión vuelve a publicarse, solo en su alcance.
+    assert await harness.cli(["publish", "--version", press_v1, "--actor", ACTOR]) == EXIT_OK
+    assert await _visible(harness, PRESS) == {("prensa-manual", 1)}
+    assert await _visible(harness, PUMP) == set()
 
 
 def test_evaluation_file_shape() -> None:

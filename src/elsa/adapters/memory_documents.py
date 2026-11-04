@@ -16,6 +16,7 @@ import asyncio
 import uuid
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
 
 from elsa.core.authorization import Scope, covers
@@ -23,6 +24,7 @@ from elsa.documents.persistence import (
     content_records,
     require_open_run,
     require_publishable,
+    require_withdrawable,
     validate_retry,
     validate_source,
     validate_transition,
@@ -416,6 +418,25 @@ class InMemoryDocumentRepository:
             self._versions[version_id] = published
             self._record(version_id, VersionEvent.PUBLISHED, actor, None, request_id)
             return deepcopy(published)
+
+    async def withdraw_version(
+        self, *, version_id: str, actor: str, reason: str, request_id: str | None = None
+    ) -> DocumentVersionRecord:
+        async with self._lock:
+            version = self._versions.get(version_id)
+            if version is None:
+                raise VersionNotFoundError(version_id)
+            require_withdrawable(version.state, reason)
+            # `_replace` conserva los campos que recibe en None; aquí hay que vaciarlos.
+            withdrawn = replace(
+                version,
+                state=DocumentVersionState.APPROVED,
+                published_at=None,
+                published_by=None,
+            )
+            self._versions[version_id] = withdrawn
+            self._record(version_id, VersionEvent.WITHDRAWN, actor, reason, request_id)
+            return deepcopy(withdrawn)
 
     async def list_version_events(self, version_id: str) -> tuple[DocumentVersionEventRecord, ...]:
         return tuple(event for event in self._events if event.version_id == version_id)

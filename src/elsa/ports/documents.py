@@ -137,6 +137,8 @@ class VersionEvent(StrEnum):
     REJECTED = "rejected"
     PUBLISHED = "published"
     SUPERSEDED = "superseded"
+    # La versión deja de estar vigente sin que otra la reemplace (ADR 0038).
+    WITHDRAWN = "withdrawn"
 
 
 # ---------------------------------------------------------------------
@@ -507,6 +509,18 @@ class DocumentRepositoryPort(Protocol):
         Atómico: dos publicaciones simultáneas no pueden dejar dos versiones
         vigentes ni ninguna. Lanza :class:`NotPublishableError` si la versión
         no está aprobada.
+        """
+        ...
+
+    async def withdraw_version(
+        self, *, version_id: str, actor: str, reason: str, request_id: str | None = None
+    ) -> DocumentVersionRecord:
+        """Retira la publicación: la versión vuelve a ``approved`` (ADR 0038).
+
+        Atómico. No restaura ninguna versión reemplazada y no borra nada: el
+        evento ``published`` sigue en el historial y se añade ``withdrawn``.
+        Lanza :class:`NotPublishableError` si la versión no está publicada o
+        si el motivo está vacío.
         """
         ...
 

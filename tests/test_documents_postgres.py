@@ -412,3 +412,45 @@ async def test_a_closed_pool_is_reported_as_unavailable_not_as_an_asyncpg_error(
         )
 
     assert pool.calls == 2
+
+
+async def test_withdrawal_failure_rolls_back_entirely(
+    postgres: PostgresDocumentRepository,
+) -> None:
+    doc = await document(postgres)
+    version = await postgres.store_version(await version_input(postgres, doc), actor=ACTOR)
+    await service(postgres).approve(version_id=version.id, actor=ACTOR)
+    published = await service(postgres).publish(version_id=version.id, actor=ACTOR)
+    before = await counts()
+    history = await postgres.list_version_events(version.id)
+    # El evento falla después del `update` del estado: la transacción entera se revierte.
+    with pytest.raises(ValueError):
+        await postgres.withdraw_version(version_id=version.id, actor="invalid-uuid", reason="x")
+    assert await counts() == before
+    assert await postgres.get_published_version(doc.id) == published
+    assert await postgres.list_version_events(version.id) == history
+
+
+async def test_concurrent_withdrawals_retire_once_across_pools(
+    postgres: PostgresDocumentRepository,
+) -> None:
+    doc = await document(postgres)
+    version = await postgres.store_version(await version_input(postgres, doc), actor=ACTOR)
+    await service(postgres).approve(version_id=version.id, actor=ACTOR)
+    await service(postgres).publish(version_id=version.id, actor=ACTOR)
+    other = await PostgresDocumentRepository.connect(db.database_url() or "", min_size=2)
+    try:
+        results = await asyncio.gather(
+            *(
+                repo.withdraw_version(version_id=version.id, actor=OTHER, reason="duplicado")
+                for repo in (postgres, other, postgres, other)
+            ),
+            return_exceptions=True,
+        )
+    finally:
+        await other.close()
+    assert sum(isinstance(r, NotPublishableError) for r in results) == 3
+    events = [e.event for e in await postgres.list_version_events(version.id)]
+    assert events.count(VersionEvent.WITHDRAWN) == 1
+    stored = await postgres.get_version(version.id)
+    assert stored is not None and stored.state is DocumentVersionState.APPROVED

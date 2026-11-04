@@ -754,3 +754,113 @@ async def test_scope_coverage_matches_covers_exactly(
         expected = {doc_id for doc_id, scope in documents.items() if covers(granted, scope)}
         actual = {p.document.id for p in await repository.list_published_chunks(scopes=[granted])}
         assert actual == expected, granted
+
+
+# ---------------------------------------------------------------------
+# Retirada de una publicación (ADR 0038)
+# ---------------------------------------------------------------------
+
+
+async def test_withdrawal_hides_the_version_and_keeps_everything(
+    repository: DocumentRepositoryPort,
+) -> None:
+    doc = await document(repository)
+    svc = service(repository)
+    version = await repository.store_version(await version_input(repository, doc), actor=ACTOR)
+    await svc.approve(version_id=version.id, actor=ACTOR)
+    published = await svc.publish(version_id=version.id, actor=ACTOR)
+    chunks = await repository.list_chunks(version.id)
+    sections = await repository.list_sections(version.id)
+    before = await repository.list_version_events(version.id)
+    assert await repository.list_published_chunks(scopes=[doc.scope])
+
+    withdrawn = await svc.withdraw(
+        version_id=version.id, actor=OTHER, reason="publicada por error", request_id="ctrl-z"
+    )
+
+    assert withdrawn.state is DocumentVersionState.APPROVED
+    assert withdrawn.published_at is None and withdrawn.published_by is None
+    assert await repository.get_version(version.id) == withdrawn
+    assert await repository.get_published_version(doc.id) is None
+    assert await repository.list_published_chunks(scopes=[doc.scope]) == ()
+    assert await repository.list_chunks(version.id) == chunks
+    assert await repository.list_sections(version.id) == sections
+    history = await repository.list_version_events(version.id)
+    assert history[: len(before)] == before
+    (last,) = history[len(before) :]
+    assert (last.event, last.actor, last.reason, last.request_id) == (
+        VersionEvent.WITHDRAWN,
+        OTHER,
+        "publicada por error",
+        "ctrl-z",
+    )
+    published_event = next(e for e in history if e.event is VersionEvent.PUBLISHED)
+    assert published_event.actor == ACTOR and published.published_by == ACTOR
+
+    # Ctrl+Z del Ctrl+Z: la misma versión vuelve a publicarse.
+    again = await svc.publish(version_id=version.id, actor=ACTOR)
+    assert again.state is DocumentVersionState.PUBLISHED and again.published_by == ACTOR
+    assert {p.version.id for p in await repository.list_published_chunks(scopes=[doc.scope])} == {
+        version.id
+    }
+    assert [e.event for e in await repository.list_version_events(version.id)] == [
+        VersionEvent.CREATED,
+        VersionEvent.APPROVED,
+        VersionEvent.PUBLISHED,
+        VersionEvent.WITHDRAWN,
+        VersionEvent.PUBLISHED,
+    ]
+
+
+@pytest.mark.parametrize("reason", ["", "   "])
+async def test_withdrawal_refusals_change_nothing(
+    repository: DocumentRepositoryPort, reason: str
+) -> None:
+    doc = await document(repository)
+    svc = service(repository)
+    first = await repository.store_version(await version_input(repository, doc), actor=ACTOR)
+
+    async def refused(version_id: str, why: str = "motivo") -> None:
+        state = await repository.get_version(version_id)
+        events = await repository.list_version_events(version_id)
+        with pytest.raises(NotPublishableError):
+            await svc.withdraw(version_id=version_id, actor=ACTOR, reason=why)
+        assert await repository.get_version(version_id) == state
+        assert await repository.list_version_events(version_id) == events
+
+    await refused(first.id)  # pendiente: nunca se publicó
+    await svc.approve(version_id=first.id, actor=ACTOR)
+    await refused(first.id)  # aprobada, pero no publicada
+    await svc.publish(version_id=first.id, actor=ACTOR)
+    await refused(first.id, reason)  # sin motivo
+    await svc.withdraw(version_id=first.id, actor=ACTOR, reason="motivo")
+    await refused(first.id)  # retirada repetida
+    with pytest.raises(VersionNotFoundError):
+        await svc.withdraw(version_id=str(uuid4()), actor=ACTOR, reason="motivo")
+
+    # Una versión reemplazada sigue siendo histórica: no se retira.
+    await svc.publish(version_id=first.id, actor=ACTOR)
+    second = await repository.store_version(
+        await version_input(repository, doc, fx.MANUAL_V2), actor=ACTOR
+    )
+    await svc.approve(version_id=second.id, actor=ACTOR)
+    await svc.publish(version_id=second.id, actor=ACTOR)
+    await refused(first.id)
+
+
+async def test_withdrawal_touches_only_its_own_document(
+    repository: DocumentRepositoryPort,
+) -> None:
+    kept = await _published(repository, "manual-a", asset="asset-a")
+    target = await _published(repository, "manual-b", asset="asset-b")
+    kept_version = await repository.get_published_version(kept.id)
+    target_version = await repository.get_published_version(target.id)
+    assert kept_version is not None and target_version is not None
+    kept_history = await repository.list_version_events(kept_version.id)
+
+    await service(repository).withdraw(version_id=target_version.id, actor=ACTOR, reason="prueba")
+
+    assert await repository.get_published_version(kept.id) == kept_version
+    assert await repository.list_version_events(kept_version.id) == kept_history
+    visible = await repository.list_published_chunks(scopes=[Scope("mantenimiento", None)])
+    assert {p.document.code for p in visible} == {"manual-a"}

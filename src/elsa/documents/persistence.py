@@ -40,6 +40,13 @@ def require_publishable(state: DocumentVersionState) -> None:
         raise NotPublishableError("only an approved version can be published")
 
 
+def require_withdrawable(state: DocumentVersionState, reason: str | None) -> None:
+    if state is not DocumentVersionState.PUBLISHED:
+        raise NotPublishableError("only a published version can be withdrawn")
+    if reason is None or not reason.strip():
+        raise NotPublishableError("withdrawing a publication requires a nonblank reason")
+
+
 def require_open_run(run: DocumentIngestionRunRecord) -> None:
     if run.status not in (IngestionRunStatus.RECEIVED, IngestionRunStatus.PROCESSING):
         raise DocumentIntegrityError("a closed ingestion run cannot change its outcome")
