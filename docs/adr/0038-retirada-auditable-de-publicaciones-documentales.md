@@ -1,6 +1,7 @@
 # ADR 0038 — Retirada auditable de publicaciones documentales
 
-- Estado: **propuesto** (2026-11-03). Queda aceptado cuando Juan haga el merge del PR que lo introduce
+- Estado: **aceptado** (2026-11-08, con el merge del PR #69 en `4ede3b2`). Propuesto el 2026-11-03. La
+  migración se aplicó en TEST en G-M.1: [cierre de R1.B](../r1-b-ingesta-persistente-cierre.md)
 - Bloque: **R1.B**, previo a G-P
 - **Decide**: cómo se deshace una publicación documental —el «Ctrl+Z» de `publish`— sin borrar nada ni
   cambiar el significado de los estados que fija el [ADR 0012](0012-ciclo-de-vida-documental-propio.md)
