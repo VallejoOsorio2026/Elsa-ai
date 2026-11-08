@@ -304,6 +304,14 @@ class DocumentIngestionService:
             version_id=version_id, actor=actor, request_id=request_id
         )
 
+    async def withdraw(
+        self, *, version_id: str, actor: str, reason: str, request_id: str | None = None
+    ) -> DocumentVersionRecord:
+        """Retira la publicación sin borrar nada; vuelve a publicarse con ``publish``."""
+        return await self._repository.withdraw_version(
+            version_id=version_id, actor=actor, reason=reason, request_id=request_id
+        )
+
     # -----------------------------------------------------------------
     # Interno
     # -----------------------------------------------------------------

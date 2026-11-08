@@ -477,3 +477,39 @@ def test_no_approximate_index_and_no_dependency_on_rag_or_an_llm() -> None:
             elif isinstance(node, ast.ImportFrom) and node.module:
                 modules = [node.module]
             assert not any("llm" in m.lower() or "rag" in m.lower() for m in modules), name
+
+
+async def test_a_withdrawn_publication_leaves_every_channel_and_comes_back(
+    stack: tuple[PostgresDocumentRepository, PostgresVectorStore, PostgresLexicalSearch],
+) -> None:
+    """ADR 0038: retirar oculta por el mismo filtro de estado; nada se borra."""
+    documents, vectors, lexical = stack
+    await ready(stack)
+    doc = await documents.get_document(domain="mantenimiento", code="manual-a")
+    assert doc is not None
+    published = await documents.get_published_version(doc.id)
+    assert published is not None
+    (query_vector,) = await FakeEmbeddingsAdapter(dimension=DIMENSION).embed_queries(
+        ["lubricación del rodamiento SAP-4471"]
+    )
+
+    async def visible() -> dict[str, bool]:
+        exact = await lexical.search_exact(identifiers=["SAP-4471"], scopes=ONLY_A)
+        words = await lexical.search_lexical(query="rodamiento lubrica", scopes=ONLY_A)
+        semantic = await vectors.search(query_embedding=query_vector, scopes=ONLY_A, limit=50)
+        return {
+            "exact": any(p.version.id == published.id for p, _ in exact),
+            "lexical": any(p.version.id == published.id for p, _ in words),
+            "semantic": any(s.provenance.version.id == published.id for s in semantic),
+        }
+
+    assert await visible() == {"exact": True, "lexical": True, "semantic": True}
+    chunks = await documents.list_chunks(published.id)
+
+    await service(documents).withdraw(version_id=published.id, actor=ACTOR, reason="prueba")
+    assert await visible() == {"exact": False, "lexical": False, "semantic": False}
+    assert await documents.list_chunks(published.id) == chunks
+
+    # Volver a publicar reutiliza los mismos chunks y vectores: no se recalcula nada.
+    await service(documents).publish(version_id=published.id, actor=ACTOR)
+    assert await visible() == {"exact": True, "lexical": True, "semantic": True}

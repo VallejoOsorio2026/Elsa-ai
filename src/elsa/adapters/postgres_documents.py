@@ -22,6 +22,7 @@ from elsa.documents.persistence import (
     content_records,
     require_open_run,
     require_publishable,
+    require_withdrawable,
     validate_retry,
     validate_source,
     validate_transition,
@@ -548,6 +549,20 @@ class PostgresDocumentRepository:
                 _uuid(actor),
             )
             await self._event(conn, row["id"], VersionEvent.PUBLISHED, actor, None, request_id)
+            return _record(DocumentVersionRecord, updated)
+
+    async def withdraw_version(
+        self, *, version_id: str, actor: str, reason: str, request_id: str | None = None
+    ) -> DocumentVersionRecord:
+        async with self._transaction() as conn:
+            row = await self._locked_version(conn, version_id)
+            require_withdrawable(DocumentVersionState(row["state"]), reason)
+            updated = await conn.fetchrow(
+                "update elsa.document_versions set "
+                "state='approved',published_at=null,published_by=null where id=$1 returning *",
+                row["id"],
+            )
+            await self._event(conn, row["id"], VersionEvent.WITHDRAWN, actor, reason, request_id)
             return _record(DocumentVersionRecord, updated)
 
     @staticmethod

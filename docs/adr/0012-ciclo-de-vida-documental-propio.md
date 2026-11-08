@@ -2,6 +2,7 @@
 
 - Estado: aceptado
 - Bloque: 4.1
+- Ampliado por el [ADR 0038](0038-retirada-auditable-de-publicaciones-documentales.md): retirada auditable de una publicación
 
 ## Contexto
 

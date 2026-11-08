@@ -1,6 +1,6 @@
 """Herramienta de operación del conocimiento documental persistente.
 
-Siete comandos, para ejecutarse desde la máquina de operación —PC1, hoy—
+Ocho comandos, para ejecutarse desde la máquina de operación —PC1, hoy—
 contra la base que indique la configuración::
 
     status           activos, documentos y versiones por código (solo lectura)
@@ -10,6 +10,7 @@ contra la base que indique la configuración::
     approve          aprueba una versión
     reject           rechaza una versión, con motivo
     publish          publica una versión aprobada
+    withdraw         retira una publicación, con motivo: el Ctrl+Z de `publish`
 
 **Cada transición es un comando aparte.** `ingest` no aprueba, `approve` no
 publica, y no hay ningún atajo que haga dos cosas a la vez: cargar no publica
@@ -354,6 +355,17 @@ async def _publish(stores: Stores, config: ToolConfig, args: argparse.Namespace)
         version_id=args.version, actor=args.actor, request_id=args.request_id
     )
     print(f"publicada: {_version_line(version)}")
+    print("  para deshacerlo: `withdraw` con esta versión y un motivo")
+    return EXIT_OK
+
+
+async def _withdraw(stores: Stores, config: ToolConfig, args: argparse.Namespace) -> int:
+    service = _lifecycle(stores)
+    version = await service.withdraw(
+        version_id=args.version, actor=args.actor, reason=args.reason, request_id=args.request_id
+    )
+    print(f"publicación retirada: {_version_line(version)}")
+    print("  ya no se recupera; no se borró nada y se vuelve a publicar con `publish`")
     return EXIT_OK
 
 
@@ -402,6 +414,7 @@ _COMMANDS = {
     "approve": _Command(_approve, writes=True),
     "reject": _Command(_reject, writes=True),
     "publish": _Command(_publish, writes=True),
+    "withdraw": _Command(_withdraw, writes=True),
 }
 
 
@@ -456,6 +469,12 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument("--version", required=True, type=_uuid)
     publish.add_argument("--actor", required=True, type=_uuid)
     publish.add_argument("--request-id", default=None)
+
+    withdraw = sub.add_parser("withdraw", help="Retira una publicación, con motivo. No borra nada")
+    withdraw.add_argument("--version", required=True, type=_uuid)
+    withdraw.add_argument("--actor", required=True, type=_uuid)
+    withdraw.add_argument("--reason", required=True)
+    withdraw.add_argument("--request-id", default=None)
     return parser
 
 
