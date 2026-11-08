@@ -65,6 +65,8 @@ DOCUMENT_TABLES = {
     "embedding_models",
     "embedding_runs",
     "document_chunk_embeddings",
+    # R1.C.1 (ADR 0039)
+    "embedding_model_events",
 }
 
 ELSA_TABLES = AUTHORIZATION_TABLES | KNOWLEDGE_TABLES | DOCUMENT_TABLES

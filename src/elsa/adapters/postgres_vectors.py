@@ -9,7 +9,7 @@ razona que el índice no puede sostener por sí solo.
 
 import contextlib
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
 from typing import Any
 
 import asyncpg
@@ -25,12 +25,15 @@ from elsa.ports.documents import (
 from elsa.ports.knowledge import KnowledgeUnavailableError
 from elsa.ports.vectors import (
     ActiveModelError,
+    EmbeddingModelEvent,
+    EmbeddingModelEventRecord,
     EmbeddingModelRecord,
     EmbeddingModelSpec,
     EmbeddingRunRecord,
     EmbeddingRunStatus,
     ModelState,
     PendingEmbedding,
+    RunReconciliationError,
     ScoredChunk,
     VectorIntegrityError,
 )
@@ -39,6 +42,10 @@ _logger = logging.getLogger(__name__)
 
 # Espacio propio para el lock de activación, distinto del documental.
 _ACTIVATION_LOCK = 0x454C5356
+# Clase de los locks de vida de cada corrida: `(clase, hashtext(run_id))`. La
+# forma de dos claves no comparte espacio con la de una sola, así que nunca
+# choca con `_ACTIVATION_LOCK`.
+_RUN_LOCK_CLASS = 0x454C5352
 
 
 @contextlib.contextmanager
@@ -96,6 +103,23 @@ def _run(row: Any) -> EmbeddingRunRecord:
         failed=row["failed"],
         failure_kind=row["failure_kind"],
         failure_message=row["failure_message"],
+        request_id=row["request_id"],
+    )
+
+
+def _model_event(row: Any) -> EmbeddingModelEventRecord:
+    return EmbeddingModelEventRecord(
+        id=str(row["id"]),
+        seq=row["seq"],
+        event=EmbeddingModelEvent(row["event"]),
+        model_id=str(row["model_id"]),
+        actor=str(row["actor"]),
+        occurred_at=row["occurred_at"],
+        previous_model_id=(
+            None if row["previous_model_id"] is None else str(row["previous_model_id"])
+        ),
+        run_id=None if row["run_id"] is None else str(row["run_id"]),
+        reason=row["reason"],
         request_id=row["request_id"],
     )
 
@@ -238,11 +262,20 @@ class PostgresVectorStore:
             )
         return None if row is None else _model(row)
 
-    async def activate_model(self, *, model_id: str, actor: str) -> EmbeddingModelRecord:
-        """Una sola transacción cambia cuál es el modelo activo.
+    async def activate_model(
+        self,
+        *,
+        model_id: str,
+        actor: str,
+        reason: str | None = None,
+        request_id: str | None = None,
+    ) -> EmbeddingModelRecord:
+        """Una sola transacción cambia cuál es el modelo activo, y lo registra.
 
         El lock serializa dos activaciones concurrentes; el índice único
-        parcial es el respaldo que la base impone aunque el lock fallara.
+        parcial es el respaldo que la base impone aunque el lock fallara. El
+        evento se escribe en la misma transacción: si no puede escribirse, el
+        modelo activo no cambia.
         """
         async with self._transaction() as conn:
             await conn.execute("select pg_advisory_xact_lock($1)", _ACTIVATION_LOCK)
@@ -260,34 +293,134 @@ class PostgresVectorStore:
                 )
                 return _model(row)
             # Desactivar el anterior y activar el nuevo, en la misma
-            # transacción: en ningún instante visible hay dos activos ni
-            # ninguno. Los vectores del anterior **no se tocan**: volver atrás
-            # es activar otra vez, no regenerar (ADR 0013 §5).
-            await conn.execute(
+            # transacción: en ningún instante visible hay dos activos. Los
+            # vectores del anterior **no se tocan**: volver atrás es activar
+            # otra vez, no regenerar (ADR 0013 §5).
+            previous = await conn.fetchval(
                 "update elsa.embedding_models "
-                "set state='registered', activated_at=null where state='active'"
+                "set state='registered', activated_at=null where state='active' returning id"
             )
             row = await conn.fetchrow(
                 "update elsa.embedding_models set state='active', activated_at=now() "
                 f"where id=$1 returning {_MODEL_COLUMNS}",
                 model_id,
             )
+            await self._event(
+                conn,
+                EmbeddingModelEvent.ACTIVATED,
+                model_id=model_id,
+                actor=actor,
+                previous_model_id=previous,
+                reason=reason,
+                request_id=request_id,
+            )
         _logger.info("embedding model activated", extra={"model_id": model_id, "actor": actor})
         return _model(row)
 
-    async def retire_model(self, *, model_id: str, actor: str) -> EmbeddingModelRecord:
+    async def deactivate_model(
+        self, *, model_id: str, actor: str, reason: str, request_id: str | None = None
+    ) -> EmbeddingModelRecord:
+        if reason is None or not reason.strip():
+            raise ActiveModelError("deactivating a model requires a nonblank reason")
         async with self._transaction() as conn:
             await conn.execute("select pg_advisory_xact_lock($1)", _ACTIVATION_LOCK)
+            current = await conn.fetchrow(
+                "select state from elsa.embedding_models where id = $1 for update", model_id
+            )
+            if current is None:
+                raise ActiveModelError(f"unknown embedding model: {model_id}")
+            if current["state"] != ModelState.ACTIVE.value:
+                raise ActiveModelError(
+                    f"model {model_id} is not the active model: nothing to deactivate"
+                )
             row = await conn.fetchrow(
-                "update elsa.embedding_models "
-                "set state='retired', activated_at=null, retired_at=now() "
+                "update elsa.embedding_models set state='registered', activated_at=null "
                 f"where id=$1 returning {_MODEL_COLUMNS}",
                 model_id,
             )
-            if row is None:
+            await self._event(
+                conn,
+                EmbeddingModelEvent.DEACTIVATED,
+                model_id=model_id,
+                actor=actor,
+                reason=reason,
+                request_id=request_id,
+            )
+        _logger.info("embedding model deactivated", extra={"model_id": model_id, "actor": actor})
+        return _model(row)
+
+    async def retire_model(
+        self,
+        *,
+        model_id: str,
+        actor: str,
+        reason: str | None = None,
+        request_id: str | None = None,
+    ) -> EmbeddingModelRecord:
+        async with self._transaction() as conn:
+            await conn.execute("select pg_advisory_xact_lock($1)", _ACTIVATION_LOCK)
+            current = await conn.fetchrow(
+                "select state from elsa.embedding_models where id = $1 for update", model_id
+            )
+            if current is None:
                 raise ActiveModelError(f"unknown embedding model: {model_id}")
+            if current["state"] != ModelState.RETIRED.value:
+                await conn.execute(
+                    "update elsa.embedding_models "
+                    "set state='retired', activated_at=null, retired_at=now() where id=$1",
+                    model_id,
+                )
+                await self._event(
+                    conn,
+                    EmbeddingModelEvent.RETIRED,
+                    model_id=model_id,
+                    actor=actor,
+                    reason=reason,
+                    request_id=request_id,
+                )
+            row = await conn.fetchrow(
+                f"select {_MODEL_COLUMNS} from elsa.embedding_models where id = $1", model_id
+            )
         _logger.info("embedding model retired", extra={"model_id": model_id, "actor": actor})
         return _model(row)
+
+    async def list_model_events(
+        self, *, model_id: str | None = None, limit: int = 100
+    ) -> tuple[EmbeddingModelEventRecord, ...]:
+        with _database_errors():
+            rows = await self._pool.fetch(
+                "select * from elsa.embedding_model_events "
+                "where $1::uuid is null or model_id = $1 or previous_model_id = $1 "
+                "order by seq limit $2",
+                model_id,
+                limit,
+            )
+        return tuple(_model_event(row) for row in rows)
+
+    @staticmethod
+    async def _event(
+        conn: Any,
+        event: EmbeddingModelEvent,
+        *,
+        model_id: Any,
+        actor: str,
+        previous_model_id: Any = None,
+        run_id: Any = None,
+        reason: str | None = None,
+        request_id: str | None = None,
+    ) -> None:
+        await conn.execute(
+            "insert into elsa.embedding_model_events "
+            "(event, model_id, previous_model_id, run_id, actor, reason, request_id) "
+            "values ($1,$2,$3,$4,$5,$6,$7)",
+            event.value,
+            model_id,
+            previous_model_id,
+            run_id,
+            actor,
+            reason,
+            request_id,
+        )
 
     # --------------------------------------------------------------- corridas
 
@@ -349,12 +482,135 @@ class PostgresVectorStore:
                 raise VectorIntegrityError(f"run {run_id} is not running")
         return _run(row)
 
+    async def cancel_run(self, *, run_id: str, message: str) -> EmbeddingRunRecord:
+        async with self._transaction() as conn:
+            row = await conn.fetchrow(
+                "update elsa.embedding_runs set status='cancelled', finished_at=now(), "
+                "failure_message=$2 where id=$1 and status='running' returning *",
+                run_id,
+                message,
+            )
+            if row is None:
+                raise VectorIntegrityError(f"run {run_id} is not running")
+        return _run(row)
+
     async def get_run(self, run_id: str) -> EmbeddingRunRecord | None:
         with _database_errors():
             row = await self._pool.fetchrow(
                 "select * from elsa.embedding_runs where id = $1", run_id
             )
         return None if row is None else _run(row)
+
+    async def list_runs(
+        self, *, status: EmbeddingRunStatus | None = None, limit: int = 50
+    ) -> tuple[EmbeddingRunRecord, ...]:
+        with _database_errors():
+            rows = await self._pool.fetch(
+                "select * from elsa.embedding_runs where $1::text is null or status = $1 "
+                "order by started_at desc, id limit $2",
+                None if status is None else status.value,
+                limit,
+            )
+        return tuple(_run(row) for row in rows)
+
+    @contextlib.asynccontextmanager
+    async def run_guard(self, run_id: str) -> AsyncIterator[None]:
+        """Un lock de **sesión** sobre una conexión propia, mientras dura la corrida.
+
+        Un lock de sesión, no de transacción: cada lote es su propia
+        transacción y el lock tiene que sobrevivirlas. Si el proceso muere o
+        pierde la conexión, PostgreSQL lo suelta solo; nadie tiene que acordarse
+        de liberarlo para que la corrida pueda conciliarse.
+        """
+        with _database_errors():
+            conn = await self._pool.acquire()
+        try:
+            with _database_errors():
+                await conn.execute(
+                    "select pg_advisory_lock($1, hashtext($2::text))", _RUN_LOCK_CLASS, run_id
+                )
+            yield
+        finally:
+            try:
+                await conn.execute(
+                    "select pg_advisory_unlock($1, hashtext($2::text))", _RUN_LOCK_CLASS, run_id
+                )
+            except Exception as error:  # noqa: BLE001 - la conexión rota ya soltó el lock
+                _logger.warning(
+                    "run guard not released explicitly", extra={"error": type(error).__name__}
+                )
+            finally:
+                # Devolver la conexión al pool la reinicia (`pg_advisory_unlock_all`).
+                await self._pool.release(conn)
+
+    async def reconcile_run(
+        self,
+        *,
+        run_id: str,
+        actor: str,
+        reason: str,
+        idle_minutes: int,
+        request_id: str | None = None,
+    ) -> EmbeddingRunRecord:
+        if reason is None or not reason.strip():
+            raise RunReconciliationError("closing a run by hand requires a nonblank reason")
+        if idle_minutes < 1:
+            raise RunReconciliationError("idle_minutes must be a positive number of minutes")
+        async with self._transaction() as conn:
+            run = await conn.fetchrow(
+                "select id, model_id, status, started_at from elsa.embedding_runs "
+                "where id = $1 for update",
+                run_id,
+            )
+            if run is None:
+                raise RunReconciliationError(f"unknown embedding run: {run_id}")
+            if run["status"] != EmbeddingRunStatus.RUNNING.value:
+                raise RunReconciliationError(f"run {run_id} is {run['status']}, not running")
+            # La prueba de vida: si alguna sesión mantiene el `run_guard`, el
+            # proceso que genera sigue conectado. Tomarlo aquí, hasta el final
+            # de esta transacción, además impide que nadie lo tome mientras se
+            # cierra la corrida.
+            free = await conn.fetchval(
+                "select pg_try_advisory_xact_lock($1, hashtext($2::text))",
+                _RUN_LOCK_CLASS,
+                run_id,
+            )
+            if not free:
+                raise RunReconciliationError(
+                    f"run {run_id} is held by a live session: its process is still running"
+                )
+            # La última señal de vida de una corrida es su último vector
+            # escrito, o su inicio si no escribió ninguno: una corrida viva
+            # confirma un lote cada pocos segundos.
+            idle = await conn.fetchval(
+                "select now() - coalesce("
+                "  (select max(created_at) from elsa.document_chunk_embeddings where run_id = $1),"
+                "  $2::timestamptz) >= make_interval(mins => $3)",
+                run_id,
+                run["started_at"],
+                idle_minutes,
+            )
+            if not idle:
+                raise RunReconciliationError(
+                    f"run {run_id} showed activity within the last {idle_minutes} minutes: "
+                    "it may still be running"
+                )
+            row = await conn.fetchrow(
+                "update elsa.embedding_runs set status='cancelled', finished_at=now(), "
+                "failure_message=$2 where id=$1 returning *",
+                run_id,
+                f"reconciled by hand: {reason.strip()}",
+            )
+            await self._event(
+                conn,
+                EmbeddingModelEvent.RUN_RECONCILED,
+                model_id=run["model_id"],
+                actor=actor,
+                run_id=run_id,
+                reason=reason,
+                request_id=request_id,
+            )
+        return _run(row)
 
     # --------------------------------------------------------------- vectores
 

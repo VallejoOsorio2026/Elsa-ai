@@ -24,6 +24,17 @@ MIGRATION = (
 ROLLBACK = (
     Path(__file__).resolve().parent.parent / "supabase" / "rollback" / "20260913010000_rollback.sql"
 )
+# Las migraciones que dependen de esta se revierten antes, en orden inverso de
+# aplicación: el historial de ADR 0039 tiene claves foráneas a sus tablas.
+DEPENDENT_MIGRATION = (
+    Path(__file__).resolve().parent.parent
+    / "supabase"
+    / "migrations"
+    / "20261108010000_create_embedding_model_events.sql"
+)
+DEPENDENT_ROLLBACK = (
+    Path(__file__).resolve().parent.parent / "supabase" / "rollback" / "20261108010000_rollback.sql"
+)
 VECTOR_TABLES = ("embedding_models", "embedding_runs", "document_chunk_embeddings")
 
 
@@ -126,6 +137,7 @@ async def test_rollback_removes_the_vectors_and_keeps_the_documents(
         "  and tablename in ('documents', 'document_versions', 'document_chunks')"
     )
 
+    await connection.execute(DEPENDENT_ROLLBACK.read_text(encoding="utf-8"))
     await connection.execute(ROLLBACK.read_text())
     assert await tables(connection) == set()
     assert (
@@ -138,6 +150,9 @@ async def test_rollback_removes_the_vectors_and_keeps_the_documents(
 
     await connection.execute(MIGRATION.read_text())
     assert await tables(connection) == set(VECTOR_TABLES)
+    # Y la dependiente vuelve a aplicarse encima, en su orden.
+    await connection.execute(DEPENDENT_MIGRATION.read_text(encoding="utf-8"))
+    assert await connection.fetchval("select to_regclass('elsa.embedding_model_events')")
 
 
 async def test_the_migration_can_be_applied_twice(connection: asyncpg.Connection) -> None:

@@ -14,6 +14,7 @@ adaptador:
 """
 
 from collections.abc import Sequence
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -24,11 +25,15 @@ from elsa.ports.documents import ChunkProvenance
 
 __all__ = [
     "ActiveModelError",
+    "EmbeddingModelEvent",
+    "EmbeddingModelEventRecord",
     "EmbeddingModelRecord",
     "EmbeddingModelSpec",
     "EmbeddingRunRecord",
     "EmbeddingRunStatus",
+    "IneligibleVersionError",
     "ModelState",
+    "RunReconciliationError",
     "ScoredChunk",
     "VectorIntegrityError",
     "VectorStorePort",
@@ -48,12 +53,29 @@ class EmbeddingRunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class EmbeddingModelEvent(StrEnum):
+    """Transiciones registradas en el historial del modelo activo (ADR 0039)."""
+
+    ACTIVATED = "activated"
+    DEACTIVATED = "deactivated"
+    RETIRED = "retired"
+    RUN_RECONCILED = "run_reconciled"
+
+
 class VectorIntegrityError(ValueError):
     """El vector no encaja con el modelo, el chunk o su versión."""
 
 
 class ActiveModelError(Exception):
     """No se puede activar, o no hay un modelo activo con el que recuperar."""
+
+
+class IneligibleVersionError(ValueError):
+    """La versión documental no admite embeddings: solo `approved` o `published` (ADR 0013 §7)."""
+
+
+class RunReconciliationError(Exception):
+    """La corrida no puede cerrarse a mano: no está en marcha, o no lleva parada lo suficiente."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +133,20 @@ class EmbeddingRunRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class EmbeddingModelEventRecord:
+    id: str
+    seq: int
+    event: EmbeddingModelEvent
+    model_id: str
+    actor: str
+    occurred_at: datetime
+    previous_model_id: str | None = None
+    run_id: str | None = None
+    reason: str | None = None
+    request_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class PendingEmbedding:
     """Un vector listo para escribirse, con el hash del texto que lo produjo."""
 
@@ -152,15 +188,49 @@ class VectorStorePort(Protocol):
     async def get_active_model(self) -> EmbeddingModelRecord | None:
         """El único modelo que participa en la recuperación productiva."""
 
-    async def activate_model(self, *, model_id: str, actor: str) -> EmbeddingModelRecord:
-        """Cambia el modelo activo en **una sola transacción**.
+    async def activate_model(
+        self,
+        *,
+        model_id: str,
+        actor: str,
+        reason: str | None = None,
+        request_id: str | None = None,
+    ) -> EmbeddingModelRecord:
+        """Cambia el modelo activo en **una sola transacción**, con su evento.
 
         No borra los vectores del anterior: volver atrás es activar otra vez,
-        no regenerar nada (ADR 0013 §5).
+        no regenerar nada (ADR 0013 §5). Activar el que ya está activo no
+        escribe nada.
         """
 
-    async def retire_model(self, *, model_id: str, actor: str) -> EmbeddingModelRecord:
-        """Retirar es una decisión posterior y explícita, no un efecto de activar."""
+    async def deactivate_model(
+        self, *, model_id: str, actor: str, reason: str, request_id: str | None = None
+    ) -> EmbeddingModelRecord:
+        """El Ctrl+Z de `activate`: el modelo activo vuelve a `registered` (ADR 0039).
+
+        Deja **ningún modelo activo**, conserva sus vectores y permite volver a
+        activarlo. Exige el id del modelo que se cree activo y un motivo: si
+        ese modelo no es el activo, o no hay ninguno, se niega sin escribir.
+        """
+
+    async def retire_model(
+        self,
+        *,
+        model_id: str,
+        actor: str,
+        reason: str | None = None,
+        request_id: str | None = None,
+    ) -> EmbeddingModelRecord:
+        """Retirar es una decisión posterior, explícita e **irreversible**.
+
+        No es un Ctrl+Z: un modelo retirado no vuelve a activarse. Retirar uno
+        ya retirado no escribe nada.
+        """
+
+    async def list_model_events(
+        self, *, model_id: str | None = None, limit: int = 100
+    ) -> tuple[EmbeddingModelEventRecord, ...]:
+        """El historial del modelo activo, en orden de ocurrencia."""
 
     async def start_run(
         self,
@@ -180,7 +250,40 @@ class VectorStorePort(Protocol):
         self, *, run_id: str, failure_kind: str, failure_message: str
     ) -> EmbeddingRunRecord: ...
 
+    async def cancel_run(self, *, run_id: str, message: str) -> EmbeddingRunRecord:
+        """Cierra como `cancelled` una corrida interrumpida por el propio proceso."""
+
     async def get_run(self, run_id: str) -> EmbeddingRunRecord | None: ...
+
+    async def list_runs(
+        self, *, status: EmbeddingRunStatus | None = None, limit: int = 50
+    ) -> tuple[EmbeddingRunRecord, ...]: ...
+
+    def run_guard(self, run_id: str) -> AbstractAsyncContextManager[None]:
+        """La prueba de vida de una corrida, mientras dura.
+
+        Quien genera la mantiene abierta de principio a fin. Si su proceso o su
+        conexión mueren, la base la suelta sola: es lo que `reconcile_run`
+        consulta para saber que nadie sigue escribiendo.
+        """
+
+    async def reconcile_run(
+        self,
+        *,
+        run_id: str,
+        actor: str,
+        reason: str,
+        idle_minutes: int,
+        request_id: str | None = None,
+    ) -> EmbeddingRunRecord:
+        """Cierra a mano una corrida que quedó `running` porque su proceso murió.
+
+        Exige las dos condiciones: que **ninguna sesión** mantenga su
+        `run_guard` y que lleve al menos `idle_minutes` sin escribir ningún
+        vector. La antigüedad sola no prueba que el proceso terminó. La
+        corrida pasa a `cancelled` y el cierre queda en el historial, con
+        actor y motivo. Los vectores ya confirmados no se tocan.
+        """
 
     async def store_embeddings(
         self, *, run_id: str, embeddings: Sequence[PendingEmbedding]

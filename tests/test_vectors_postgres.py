@@ -5,10 +5,12 @@ aquí es la persistencia, la activación, la idempotencia y el filtrado de la
 recuperación, no la calidad de ningún modelo — eso ya se midió en 4.2.a.
 """
 
+import asyncio
 import hashlib
 import math
 from collections.abc import AsyncIterator
 from dataclasses import replace
+from uuid import uuid4
 
 import asyncpg
 import pytest
@@ -20,6 +22,7 @@ from elsa.ports.documents import DocumentVersionState
 from elsa.ports.knowledge import KnowledgeUnavailableError
 from elsa.ports.vectors import (
     ActiveModelError,
+    EmbeddingModelEvent,
     EmbeddingModelSpec,
     EmbeddingRunStatus,
     ModelState,
@@ -664,3 +667,207 @@ async def test_a_closed_pool_is_reported_as_unavailable(
 
     with pytest.raises(KnowledgeUnavailableError):
         await store.get_active_model()
+
+
+# ------------------------------------------- Ctrl+Z de la activación (ADR 0039)
+
+
+async def vector_count(model_id: str) -> int:
+    conn = await asyncpg.connect(db.database_url())
+    try:
+        return int(
+            await conn.fetchval(
+                "select count(*) from elsa.document_chunk_embeddings where model_id=$1", model_id
+            )
+        )
+    finally:
+        await conn.close()
+
+
+async def test_the_first_activation_can_be_undone_back_to_no_active_model(
+    store: PostgresVectorStore, documents: PostgresDocumentRepository
+) -> None:
+    """El Ctrl+Z de la primera activación: ningún modelo activo, nada borrado."""
+    bge_id, _ = await embed_all(store, documents, BGE)
+    vectors = await vector_count(bge_id)
+    assert vectors > 0 and await store.get_active_model() is None
+
+    activated = await store.activate_model(model_id=bge_id, actor=ACTOR, request_id="g-a")
+    assert activated.is_active and activated.activated_at is not None
+
+    back = await store.deactivate_model(
+        model_id=bge_id, actor=ACTOR, reason="Ctrl+Z de la primera activación"
+    )
+    assert back.state is ModelState.REGISTERED and back.activated_at is None
+    assert await store.get_active_model() is None
+    assert await vector_count(bge_id) == vectors
+    assert [m.id for m in await store.list_models()] == [bge_id]
+    with pytest.raises(ActiveModelError):
+        await store.search(
+            query_embedding=synthetic(1, 1024), scopes=[Scope("mantenimiento", None)]
+        )
+
+    # Y puede volver a activarse: desactivar no es retirar.
+    again = await store.activate_model(model_id=bge_id, actor=ACTOR)
+    assert again.is_active
+    events = await store.list_model_events()
+    assert [(e.event, e.model_id, e.previous_model_id) for e in events] == [
+        (EmbeddingModelEvent.ACTIVATED, bge_id, None),
+        (EmbeddingModelEvent.DEACTIVATED, bge_id, None),
+        (EmbeddingModelEvent.ACTIVATED, bge_id, None),
+    ]
+    assert events[0].request_id == "g-a" and events[0].actor == ACTOR
+    assert events[1].reason == "Ctrl+Z de la primera activación"
+
+
+async def test_switching_models_records_the_previous_one_and_deactivating_leaves_none(
+    store: PostgresVectorStore, documents: PostgresDocumentRepository
+) -> None:
+    bge_id, _ = await embed_all(store, documents, BGE)
+    gemma = await store.register_model(GEMMA, actor=ACTOR)
+    await store.activate_model(model_id=bge_id, actor=ACTOR)
+    await store.activate_model(model_id=gemma.id, actor=ACTOR)
+
+    switch = (await store.list_model_events())[-1]
+    assert (switch.event, switch.model_id, switch.previous_model_id) == (
+        EmbeddingModelEvent.ACTIVATED,
+        gemma.id,
+        bge_id,
+    )
+    # Desactivar no vuelve al anterior: deja ninguno. Volver al anterior es
+    # activarlo explícitamente.
+    await store.deactivate_model(model_id=gemma.id, actor=ACTOR, reason="prueba")
+    assert await store.get_active_model() is None
+    bge = await store.get_model(bge_id)
+    assert bge is not None and bge.state is ModelState.REGISTERED
+    assert await vector_count(bge_id) > 0
+
+
+async def test_inconsistent_deactivations_are_refused_without_writing(
+    store: PostgresVectorStore, documents: PostgresDocumentRepository
+) -> None:
+    bge_id, _ = await embed_all(store, documents, BGE)
+    gemma = await store.register_model(GEMMA, actor=ACTOR)
+
+    # Sin ningún modelo activo no hay nada que deshacer.
+    with pytest.raises(ActiveModelError):
+        await store.deactivate_model(model_id=bge_id, actor=ACTOR, reason="nada activo")
+    assert await store.list_model_events() == ()
+
+    await store.activate_model(model_id=bge_id, actor=ACTOR)
+    before = await store.list_model_events()
+    # Un modelo que no es el activo, un modelo inexistente o un motivo vacío.
+    for model_id, reason in ((gemma.id, "no es el activo"), (str(uuid4()), "no existe")):
+        with pytest.raises(ActiveModelError):
+            await store.deactivate_model(model_id=model_id, actor=ACTOR, reason=reason)
+    for reason in ("", "   "):
+        with pytest.raises(ActiveModelError):
+            await store.deactivate_model(model_id=bge_id, actor=ACTOR, reason=reason)
+    active = await store.get_active_model()
+    assert active is not None and active.id == bge_id
+    assert await store.list_model_events() == before
+
+    # Activar un modelo inexistente también se niega.
+    with pytest.raises(ActiveModelError):
+        await store.activate_model(model_id=str(uuid4()), actor=ACTOR)
+    assert await store.list_model_events() == before
+
+
+async def test_a_retired_model_is_recorded_once_and_cannot_come_back(
+    store: PostgresVectorStore, documents: PostgresDocumentRepository
+) -> None:
+    bge_id, _ = await embed_all(store, documents, BGE)
+    await store.activate_model(model_id=bge_id, actor=ACTOR)
+    await store.retire_model(model_id=bge_id, actor=ACTOR, reason="fin de vida")
+    await store.retire_model(model_id=bge_id, actor=ACTOR)  # ya retirado: no escribe
+
+    assert await store.get_active_model() is None
+    assert [e.event for e in await store.list_model_events()] == [
+        EmbeddingModelEvent.ACTIVATED,
+        EmbeddingModelEvent.RETIRED,
+    ]
+    for operation in (store.activate_model, store.deactivate_model):
+        with pytest.raises(ActiveModelError):
+            await operation(model_id=bge_id, actor=ACTOR, reason="volver")
+    assert await vector_count(bge_id) > 0
+
+
+async def test_a_failed_audit_write_leaves_the_active_model_unchanged(
+    store: PostgresVectorStore, documents: PostgresDocumentRepository
+) -> None:
+    """El evento va en la misma transacción: si no se escribe, nada cambia."""
+    bge_id, _ = await embed_all(store, documents, BGE)
+    # Un actor que no es UUID hace fallar el INSERT del evento, después del UPDATE.
+    with pytest.raises(KnowledgeUnavailableError):
+        await store.activate_model(model_id=bge_id, actor="not-a-uuid")
+    assert await store.get_active_model() is None
+    assert await store.list_model_events() == ()
+
+    await store.activate_model(model_id=bge_id, actor=ACTOR)
+    with pytest.raises(KnowledgeUnavailableError):
+        await store.deactivate_model(model_id=bge_id, actor="not-a-uuid", reason="motivo")
+    active = await store.get_active_model()
+    assert active is not None and active.id == bge_id
+    assert len(await store.list_model_events()) == 1
+
+
+async def test_concurrent_activations_leave_one_model_active_and_a_coherent_history(
+    store: PostgresVectorStore, documents: PostgresDocumentRepository
+) -> None:
+    bge_id, _ = await embed_all(store, documents, BGE)
+    gemma = await store.register_model(GEMMA, actor=ACTOR)
+    other = await PostgresVectorStore.connect(db.database_url() or "", min_size=2)
+    try:
+        await asyncio.gather(
+            store.activate_model(model_id=bge_id, actor=ACTOR),
+            other.activate_model(model_id=gemma.id, actor=ACTOR),
+        )
+    finally:
+        await other.close()
+
+    active = await store.get_active_model()
+    assert active is not None and active.id in {bge_id, gemma.id}
+    first, second = await store.list_model_events()
+    assert first.previous_model_id is None
+    assert second.previous_model_id == first.model_id
+    assert second.model_id == active.id
+
+
+async def test_concurrent_deactivations_undo_the_activation_exactly_once(
+    store: PostgresVectorStore, documents: PostgresDocumentRepository
+) -> None:
+    bge_id, _ = await embed_all(store, documents, BGE)
+    await store.activate_model(model_id=bge_id, actor=ACTOR)
+    other = await PostgresVectorStore.connect(db.database_url() or "", min_size=2)
+    try:
+        results = await asyncio.gather(
+            *(
+                repo.deactivate_model(model_id=bge_id, actor=ACTOR, reason="duplicado")
+                for repo in (store, other, store, other)
+            ),
+            return_exceptions=True,
+        )
+    finally:
+        await other.close()
+    assert sum(isinstance(r, ActiveModelError) for r in results) == 3
+    assert await store.get_active_model() is None
+    assert [e.event for e in await store.list_model_events()].count(
+        EmbeddingModelEvent.DEACTIVATED
+    ) == 1
+
+
+async def test_the_activation_history_cannot_be_rewritten(
+    store: PostgresVectorStore, documents: PostgresDocumentRepository
+) -> None:
+    bge_id, _ = await embed_all(store, documents, BGE)
+    await store.activate_model(model_id=bge_id, actor=ACTOR)
+    await store.deactivate_model(model_id=bge_id, actor=ACTOR, reason="prueba")
+    conn = await asyncpg.connect(db.database_url())
+    try:
+        with pytest.raises(asyncpg.PostgresError):
+            await conn.execute("update elsa.embedding_model_events set reason = 'otro'")
+        with pytest.raises(asyncpg.PostgresError):
+            await conn.execute("delete from elsa.embedding_model_events")
+        assert await conn.fetchval("select count(*) from elsa.embedding_model_events") == 2
+    finally:
+        await conn.close()

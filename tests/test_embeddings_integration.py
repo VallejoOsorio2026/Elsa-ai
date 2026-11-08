@@ -5,7 +5,9 @@ el cableado —composición, idempotencia, corridas, activación y filtrado—, 
 calidad de ningún modelo, que ya se midió en 4.2.a y no se vuelve a medir.
 """
 
+import asyncio
 from collections.abc import AsyncIterator, Sequence
+from uuid import uuid4
 
 import asyncpg
 import pytest
@@ -24,7 +26,18 @@ from elsa.ports.embeddings import (
     EmbeddingModelDescriptor,
     ModelUnavailableError,
 )
-from elsa.ports.vectors import EmbeddingModelSpec, EmbeddingRunStatus, ModelState
+from elsa.ports.knowledge import KnowledgeUnavailableError
+from elsa.ports.vectors import (
+    EmbeddingModelEvent,
+    EmbeddingModelSpec,
+    EmbeddingRunRecord,
+    EmbeddingRunStatus,
+    IneligibleVersionError,
+    ModelState,
+    PendingEmbedding,
+    RunReconciliationError,
+    VectorIntegrityError,
+)
 from elsa.services.embedding_generation import EmbeddingGenerationService
 from elsa.services.semantic_retrieval import SemanticRetrievalService
 from tests import db
@@ -531,3 +544,292 @@ def test_the_embedding_runtime_is_an_optional_extra_not_a_base_dependency() -> N
     # copia del requisito: dos listas con el mismo paquete acaban divergiendo,
     # y entonces el banco mediría con una versión y producción con otra.
     assert extras["bench"] == ["elsa[embeddings]"]
+
+
+# ------------------- elegibilidad, interrupciones y conciliación (ADR 0039)
+
+
+async def counts() -> tuple[int, int]:
+    """(corridas, vectores): lo que una negativa no debe haber escrito."""
+    conn = await asyncpg.connect(db.database_url())
+    try:
+        runs = await conn.fetchval("select count(*) from elsa.embedding_runs")
+        vectors = await conn.fetchval("select count(*) from elsa.document_chunk_embeddings")
+    finally:
+        await conn.close()
+    return int(runs), int(vectors)
+
+
+async def age_run(run_id: str, minutes: int) -> None:
+    """Envejece una corrida y sus vectores, como si llevara `minutes` parada."""
+    conn = await asyncpg.connect(db.database_url())
+    try:
+        await conn.execute(
+            "update elsa.embedding_runs set started_at = now() - make_interval(mins => $2) "
+            "where id = $1",
+            run_id,
+            minutes,
+        )
+        await conn.execute(
+            "update elsa.document_chunk_embeddings "
+            "set created_at = now() - make_interval(mins => $2) where run_id = $1",
+            run_id,
+            minutes,
+        )
+    finally:
+        await conn.close()
+
+
+async def ingested(repo: PostgresDocumentRepository, code: str, *, asset: str = "asset-a") -> str:
+    doc = await document(repo, code, asset=asset)
+    version = await repo.store_version(
+        await version_input(repo, doc, fx.MANUAL_V1 + f"\nDocumento {code}"), actor=ACTOR
+    )
+    return version.id
+
+
+async def test_approved_and_published_versions_are_embedded_and_only_published_retrieved(
+    stack: tuple[PostgresDocumentRepository, PostgresVectorStore],
+) -> None:
+    """ADR 0013 §7: embeber una `approved` está permitido; recuperarla, no."""
+    documents, vectors = stack
+    adapter = FakeEmbeddingsAdapter(dimension=DIMENSION)
+    model = await vectors.register_model(spec_of(adapter), actor=ACTOR)
+    approved = await ingested(documents, "manual-aprobado")
+    await service(documents).approve(version_id=approved, actor=ACTOR)
+    published = await publish(documents, "manual-publicado", asset="asset-b")
+
+    for version_id in (approved, published):
+        outcome = await generation(documents, vectors, adapter).generate_for_version(
+            model_id=model.id, version_id=version_id, actor=ACTOR
+        )
+        assert outcome.run.status is EmbeddingRunStatus.COMPLETED
+        assert outcome.generated == outcome.considered > 0
+    # Generar no cambia el estado de ninguna versión documental.
+    for version_id, state in (
+        (approved, DocumentVersionState.APPROVED),
+        (published, DocumentVersionState.PUBLISHED),
+    ):
+        version = await documents.get_version(version_id)
+        assert version is not None and version.state is state
+
+    await vectors.activate_model(model_id=model.id, actor=ACTOR)
+    found = await SemanticRetrievalService(vectors=vectors, embeddings=adapter).search(
+        question="par de apriete", scopes=[Scope("mantenimiento", None)], limit=50
+    )
+    assert found and {hit.provenance.version.id for hit in found} == {published}
+
+
+async def test_ineligible_versions_are_refused_before_any_run_is_opened(
+    stack: tuple[PostgresDocumentRepository, PostgresVectorStore],
+) -> None:
+    documents, vectors = stack
+    adapter = FakeEmbeddingsAdapter(dimension=DIMENSION)
+    model = await vectors.register_model(spec_of(adapter), actor=ACTOR)
+    pending = await ingested(documents, "manual-pendiente")
+    rejected = await ingested(documents, "manual-rechazado", asset="asset-b")
+    await service(documents).reject(version_id=rejected, actor=ACTOR, reason="prueba")
+    superseded = await publish(documents, "manual-reemplazado")
+    doc = await documents.get_document(domain="mantenimiento", code="manual-reemplazado")
+    assert doc is not None
+    newer = await documents.store_version(
+        await version_input(documents, doc, fx.MANUAL_V2), actor=ACTOR
+    )
+    await service(documents).approve(version_id=newer.id, actor=ACTOR)
+    await service(documents).publish(version_id=newer.id, actor=ACTOR)
+    before = await counts()
+
+    for version_id in (pending, rejected, superseded, str(uuid4())):
+        with pytest.raises(IneligibleVersionError):
+            await generation(documents, vectors, adapter).generate_for_version(
+                model_id=model.id, version_id=version_id, actor=ACTOR
+            )
+    assert await counts() == before
+    pending_version = await documents.get_version(pending)
+    assert pending_version is not None
+    assert pending_version.state is DocumentVersionState.PENDING_VALIDATION
+
+
+class Interrupts(FakeEmbeddingsAdapter):
+    """Embebe `allowed` lotes y después lanza `error`, como un Ctrl+C a mitad."""
+
+    def __init__(self, error: BaseException, *, allowed: int = 1, **kwargs: object) -> None:
+        super().__init__(dimension=DIMENSION, **kwargs)  # type: ignore[arg-type]
+        self.error = error
+        self.allowed = allowed
+        self.calls = 0
+
+    async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        self.calls += 1
+        if self.calls > self.allowed:
+            raise self.error
+        return await super().embed_documents(texts)
+
+
+async def run_rows() -> list[asyncpg.Record]:
+    conn = await asyncpg.connect(db.database_url())
+    try:
+        return list(await conn.fetch("select * from elsa.embedding_runs order by started_at"))
+    finally:
+        await conn.close()
+
+
+async def test_an_interruption_cancels_the_run_and_keeps_the_confirmed_batches(
+    stack: tuple[PostgresDocumentRepository, PostgresVectorStore],
+) -> None:
+    """Ctrl+C llega a la corrida como `CancelledError` (asyncio.run, Python 3.11+)."""
+    documents, vectors = stack
+    adapter = Interrupts(asyncio.CancelledError())
+    model = await vectors.register_model(spec_of(adapter), actor=ACTOR)
+    version_id = await publish(documents, "manual-a")
+
+    with pytest.raises(asyncio.CancelledError):
+        await generation(documents, vectors, adapter, batch_size=1).generate_for_version(
+            model_id=model.id, version_id=version_id, actor=ACTOR
+        )
+    (run,) = await run_rows()
+    assert run["status"] == EmbeddingRunStatus.CANCELLED.value
+    assert run["failure_kind"] is None and "CancelledError" in run["failure_message"]
+    assert (await counts())[1] == 1  # el lote confirmado sigue ahí
+
+    # Repetir reutiliza lo confirmado y completa el resto: idempotencia.
+    outcome = await generation(
+        documents, vectors, FakeEmbeddingsAdapter(dimension=DIMENSION), batch_size=1
+    ).generate_for_version(model_id=model.id, version_id=version_id, actor=ACTOR)
+    assert outcome.run.status is EmbeddingRunStatus.COMPLETED
+    assert outcome.reused == 1 and outcome.generated == outcome.considered - 1
+    assert (await counts())[1] == outcome.considered
+
+
+async def test_cancelling_the_task_closes_the_run_as_cancelled(
+    stack: tuple[PostgresDocumentRepository, PostgresVectorStore],
+) -> None:
+    """Cancelación asíncrona real, desde fuera de la tarea."""
+    documents, vectors = stack
+    started = asyncio.Event()
+
+    class Hangs(FakeEmbeddingsAdapter):
+        async def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+            started.set()
+            await asyncio.sleep(3600)
+            return []
+
+    adapter = Hangs(dimension=DIMENSION)
+    model = await vectors.register_model(spec_of(adapter), actor=ACTOR)
+    version_id = await publish(documents, "manual-a")
+    task = asyncio.create_task(
+        generation(documents, vectors, adapter).generate_for_version(
+            model_id=model.id, version_id=version_id, actor=ACTOR
+        )
+    )
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    (run,) = await run_rows()
+    assert run["status"] == EmbeddingRunStatus.CANCELLED.value
+
+
+async def test_a_failure_to_record_the_cancellation_keeps_the_original_error(
+    stack: tuple[PostgresDocumentRepository, PostgresVectorStore],
+) -> None:
+    """Si la base cae, la corrida queda `running` y el error que se ve es el original."""
+    documents, vectors = stack
+
+    class DownStore(PostgresVectorStore):
+        async def cancel_run(self, *, run_id: str, message: str) -> EmbeddingRunRecord:
+            raise KnowledgeUnavailableError("the ELSA vector store is unavailable")
+
+    down = DownStore(vectors._pool)  # misma base, solo falla el cierre
+    adapter = Interrupts(asyncio.CancelledError())
+    model = await vectors.register_model(spec_of(adapter), actor=ACTOR)
+    version_id = await publish(documents, "manual-a")
+
+    with pytest.raises(asyncio.CancelledError):
+        await generation(documents, down, adapter, batch_size=1).generate_for_version(
+            model_id=model.id, version_id=version_id, actor=ACTOR
+        )
+    (run,) = await run_rows()
+    assert run["status"] == EmbeddingRunStatus.RUNNING.value
+
+
+async def test_a_live_run_is_never_reconciled_and_an_abandoned_one_is(
+    stack: tuple[PostgresDocumentRepository, PostgresVectorStore],
+) -> None:
+    """La antigüedad sola no basta: el `run_guard` de una sesión viva lo impide."""
+    documents, vectors = stack
+    adapter = FakeEmbeddingsAdapter(dimension=DIMENSION)
+    model = await vectors.register_model(spec_of(adapter), actor=ACTOR)
+    run = await vectors.start_run(model_id=model.id, started_by=ACTOR)
+    await age_run(run.id, minutes=120)
+
+    other = await PostgresVectorStore.connect(db.database_url() or "", min_size=1)
+    try:
+        # Otra sesión mantiene la prueba de vida: el proceso sigue conectado.
+        async with other.run_guard(run.id):
+            with pytest.raises(RunReconciliationError, match="live session"):
+                await vectors.reconcile_run(
+                    run_id=run.id, actor=ACTOR, reason="parece colgada", idle_minutes=30
+                )
+    finally:
+        await other.close()
+    still = await vectors.get_run(run.id)
+    assert still is not None and still.status is EmbeddingRunStatus.RUNNING
+
+    # Sin sesión viva y parada el tiempo exigido: se cierra, con su evento.
+    closed = await vectors.reconcile_run(
+        run_id=run.id, actor=ACTOR, reason="proceso muerto tras corte eléctrico", idle_minutes=30
+    )
+    assert closed.status is EmbeddingRunStatus.CANCELLED
+    (event,) = await vectors.list_model_events()
+    assert (event.event, event.run_id, event.model_id) == (
+        EmbeddingModelEvent.RUN_RECONCILED,
+        run.id,
+        model.id,
+    )
+    assert event.reason == "proceso muerto tras corte eléctrico"
+
+    # Cerrada, ya no admite vectores: un proceso zombi no puede seguir escribiendo.
+    with pytest.raises(VectorIntegrityError):
+        await vectors.store_embeddings(run_id=run.id, embeddings=[_pending_for(run.id)])
+
+
+def _pending_for(run_id: str) -> PendingEmbedding:
+    return PendingEmbedding(
+        chunk_id=str(uuid4()),
+        version_id=str(uuid4()),
+        embedding=[0.0] * DIMENSION,
+        embedded_sha256="a" * 64,
+        content_sha256="b" * 64,
+    )
+
+
+async def test_reconciliation_refuses_recent_or_closed_runs_and_blank_reasons(
+    stack: tuple[PostgresDocumentRepository, PostgresVectorStore],
+) -> None:
+    documents, vectors = stack
+    adapter = FakeEmbeddingsAdapter(dimension=DIMENSION)
+    model = await vectors.register_model(spec_of(adapter), actor=ACTOR)
+    recent = await vectors.start_run(model_id=model.id, started_by=ACTOR)
+    with pytest.raises(RunReconciliationError, match="activity"):
+        await vectors.reconcile_run(
+            run_id=recent.id, actor=ACTOR, reason="demasiado pronto", idle_minutes=30
+        )
+    await age_run(recent.id, minutes=120)
+    for reason in ("", "  "):
+        with pytest.raises(RunReconciliationError):
+            await vectors.reconcile_run(
+                run_id=recent.id, actor=ACTOR, reason=reason, idle_minutes=30
+            )
+    finished = await vectors.start_run(model_id=model.id, started_by=ACTOR)
+    await vectors.finish_run(run_id=finished.id, generated=0, reused=0)
+    with pytest.raises(RunReconciliationError, match="not running"):
+        await vectors.reconcile_run(
+            run_id=finished.id, actor=ACTOR, reason="ya cerrada", idle_minutes=30
+        )
+    with pytest.raises(RunReconciliationError):
+        await vectors.reconcile_run(
+            run_id=str(uuid4()), actor=ACTOR, reason="no existe", idle_minutes=30
+        )
+    assert await vectors.list_model_events() == ()
+    assert (await vectors.get_run(recent.id)).status is EmbeddingRunStatus.RUNNING  # type: ignore[union-attr]
