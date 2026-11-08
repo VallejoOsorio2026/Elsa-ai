@@ -410,12 +410,15 @@ async def test_only_the_active_model_answers_and_unpublished_versions_never_do(
     documents, vectors = stack
     retrieval, adapter = await ready(stack)
 
-    # Una segunda versión, embebida pero sin publicar, no puede aparecer.
+    # Una segunda versión, embebida pero sin publicar, no puede aparecer. Sin
+    # publicar y embebible solo hay una: `approved` (ADR 0013 §7); una
+    # pendiente ya no llega a embeberse.
     doc = await documents.get_document(domain="mantenimiento", code="manual-a")
     assert doc is not None
     draft = await documents.store_version(
         await version_input(documents, doc, fx.MANUAL_V2), actor=ACTOR
     )
+    await service(documents).approve(version_id=draft.id, actor=ACTOR)
     model = await vectors.get_active_model()
     assert model is not None
     await generation(documents, vectors, adapter).generate_for_version(
