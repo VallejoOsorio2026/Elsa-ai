@@ -458,8 +458,13 @@ Nada que registrar.
 
 - las decisiones y autorizaciones de §5;
 - la verificación de Render (§8.1);
-- la apertura y el merge de los PR #68 y #69 en GitHub, porque la sesión no tenía `gh`;
+- la apertura del PR #68 en GitHub, porque la sesión no tenía `gh`;
+- el merge de los PR #68 y #69;
 - la comunicación del UUID del operador.
+
+**ChatGPT**, durante la auditoría:
+
+- la apertura del PR #69 mediante la conexión de GitHub.
 
 **Las sesiones de Claude Code, en PC1:**
 
@@ -493,7 +498,7 @@ Nada que registrar.
 | La suite completa local de PR #69 dio 2 fallos (`tests/test_bench_harness.py`) | Vienen de `main`: el test y `src/elsa/bench/` son idénticos. En Windows no existe el módulo POSIX `resource` |
 | mypy da 3 errores en `src/elsa/bench/runner.py` en Windows | El archivo es idéntico al de `main`; con `--platform linux` no hay errores |
 | El log de CI solo se lee con sesión de GitHub | No se inició sesión. La ejecución de PostgreSQL en CI queda como inferencia (§6) |
-| No había `gh` en PC1 | Los PR los abrió Juan con el enlace de comparación |
+| No había `gh` en PC1 | El PR #69 se abrió desde ChatGPT mediante la conexión GitHub; no se instaló gh en PC1 |
 | Un reemplazo hecho con PowerShell 5.1 estropeó las tildes de los comentarios de `gm_cli.py` | Detectado antes de ejecutarlo; el archivo se reescribió en UTF-8. Sin efecto en TEST |
 | `withdraw --help` devolvió exit `-1` | Lo causó un `Select-Object -First` que cortó la salida; repetido sin cortar, exit 0 |
 | El documento de instrucciones de G-P llegó cortado | STOP después de las fases de lectura; Juan reenvió el resto |
@@ -534,7 +539,7 @@ El commit de este cierre está en el PR de §17.
 |---|---|---|---|
 | [#68](https://github.com/VallejoOsorio2026/Elsa-ai/pull/68) | feat(documents): add a persistent document operations CLI for R1.B | Fusionado el 2026-11-03 | `success` |
 | [#69](https://github.com/VallejoOsorio2026/Elsa-ai/pull/69) | R1.B — Retirada auditable de publicaciones documentales (Ctrl+Z) | Fusionado el 2026-11-08 | `success`, también después del merge |
-| Este cierre | docs(r1): close R1.B | Pendiente de CI, revisión y merge | — |
+| [#70](https://github.com/VallejoOsorio2026/Elsa-ai/pull/70) | docs(r1): close R1.B with the persistent ingestion evidence | Abierto, pendiente de revisión y merge | `success` en `05aff67` (run `42490166430`) |
 
 ## 18. Migraciones
 
